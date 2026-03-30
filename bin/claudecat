@@ -19,7 +19,15 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Resolve real script location, following symlinks (macOS readlink lacks -f)
+_source="$0"
+while [ -L "${_source}" ]; do
+  _dir="$(cd -P "$(dirname "${_source}")" && pwd)"
+  _source="$(readlink "${_source}")"
+  [[ "${_source}" != /* ]] && _source="${_dir}/${_source}"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "${_source}")" && pwd)"
+unset _source _dir
 HELPERS_DIR="$(cd "${SCRIPT_DIR}/../libexec/claudecat" && pwd)"
 
 usage() {
