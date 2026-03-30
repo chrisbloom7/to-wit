@@ -6,9 +6,8 @@ Claude Code conversations are analyzed, filtered for substance, and stored in a 
 
 ## Requirements
 
-- macOS
 - [Claude Code](https://www.anthropic.com/claude-code) (`brew install claude-code`)
-- Python 3 (pre-installed on macOS, or `brew install python`)
+- Python 3 (`brew install python`)
 
 ## Installation
 
