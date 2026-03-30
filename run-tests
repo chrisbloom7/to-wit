@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BATS_BIN="${BATS_BIN:-/opt/homebrew/bin/bats}"
+RUBY_BIN="${RUBY_BIN:-$(command -v ruby 2>/dev/null || echo '')}"
+PYTHON_BIN="${PYTHON_BIN:-$(command -v python3 2>/dev/null || echo '')}"
+
+# ---------------------------------------------------------------------------
+# Prerequisite checks
+# ---------------------------------------------------------------------------
+if ! command -v bats &>/dev/null && [[ ! -x "${BATS_BIN}" ]]; then
+  echo "Error: bats is not installed or not found." >&2
+  echo "" >&2
+  echo "Install it with:" >&2
+  echo "  brew install bats-core" >&2
+  exit 1
+fi
+
+BATS="$(command -v bats 2>/dev/null || echo "${BATS_BIN}")"
+
+if [[ -z "${RUBY_BIN}" ]]; then
+  echo "Warning: ruby not found — skipping Ruby specs." >&2
+fi
+
+if [[ -z "${PYTHON_BIN}" ]]; then
+  echo "Warning: python3 not found — skipping Python tests." >&2
+fi
+
+# ---------------------------------------------------------------------------
+# Separate path args from flags, and detect Ruby spec files
+# ---------------------------------------------------------------------------
+bats_args=()
+ruby_files=()
+python_files=()
+filter_pattern=""
+has_path_arg=false
+
+i=0
+args=("$@")
+while [[ $i -lt ${#args[@]} ]]; do
+  arg="${args[$i]}"
+  case "${arg}" in
+    --filter)
+      i=$((i + 1))
+      filter_pattern="${args[$i]:-}"
+      bats_args+=("--filter" "${filter_pattern}")
+      ;;
+    --filter=*)
+      filter_pattern="${arg#*=}"
+      bats_args+=("${arg}")
+      ;;
+    --*)
+      bats_args+=("${arg}")
+      ;;
+    *)
+      has_path_arg=true
+      if [[ "${arg}" == *_spec.rb ]]; then
+        ruby_files+=("${arg}")
+      elif [[ "${arg}" == *_test.py ]]; then
+        python_files+=("${arg}")
+      else
+        bats_args+=("${arg}")
+      fi
+      ;;
+  esac
+  i=$((i + 1))
+done
+
+# ---------------------------------------------------------------------------
+# Run BATS tests
+# ---------------------------------------------------------------------------
+bats_exit=0
+
+if [[ "${has_path_arg}" == false ]]; then
+  "${BATS}" --recursive tests/ "${bats_args[@]}" || bats_exit=$?
+elif [[ ${#bats_args[@]} -gt 0 ]]; then
+  "${BATS}" "${bats_args[@]}" || bats_exit=$?
+fi
+
+# ---------------------------------------------------------------------------
+# Run Ruby specs
+# ---------------------------------------------------------------------------
+ruby_exit=0
+
+if [[ -n "${RUBY_BIN}" ]]; then
+  if [[ ${#ruby_files[@]} -gt 0 ]]; then
+    # Explicit spec files passed on command line
+    for spec in "${ruby_files[@]}"; do
+      if [[ -n "${filter_pattern}" ]]; then
+        "${RUBY_BIN}" "${spec}" --name "/${filter_pattern}/" || ruby_exit=$?
+      else
+        "${RUBY_BIN}" "${spec}" || ruby_exit=$?
+      fi
+    done
+  elif [[ "${has_path_arg}" == false ]]; then
+    # Discovery mode: run all *_spec.rb under tests/
+    while IFS= read -r -d '' spec; do
+      if [[ -n "${filter_pattern}" ]]; then
+        "${RUBY_BIN}" "${spec}" --name "/${filter_pattern}/" || ruby_exit=$?
+      else
+        "${RUBY_BIN}" "${spec}" || ruby_exit=$?
+      fi
+    done < <(find tests/ -name '*_spec.rb' -print0 | sort -z)
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Run Python tests
+# ---------------------------------------------------------------------------
+python_exit=0
+
+if [[ -n "${PYTHON_BIN}" ]]; then
+  if [[ ${#python_files[@]} -gt 0 ]]; then
+    # Explicit test files passed on command line
+    for spec in "${python_files[@]}"; do
+      if [[ -n "${filter_pattern}" ]]; then
+        "${PYTHON_BIN}" -m unittest "${spec}" -- -k "${filter_pattern}" || python_exit=$?
+      else
+        "${PYTHON_BIN}" -m unittest "${spec}" || python_exit=$?
+      fi
+    done
+  elif [[ "${has_path_arg}" == false ]]; then
+    # Discovery mode: run all *_test.py under tests/
+    while IFS= read -r -d '' spec; do
+      if [[ -n "${filter_pattern}" ]]; then
+        "${PYTHON_BIN}" -m unittest "${spec}" -- -k "${filter_pattern}" || python_exit=$?
+      else
+        "${PYTHON_BIN}" -m unittest "${spec}" || python_exit=$?
+      fi
+    done < <(find tests/ -name '*_test.py' -print0 | sort -z)
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Exit with combined status
+# ---------------------------------------------------------------------------
+[[ ${bats_exit} -eq 0 && ${ruby_exit} -eq 0 && ${python_exit} -eq 0 ]]

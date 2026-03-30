@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# claudecat — Claude Code conversation catalog
+#
+# Usage:
+#   claudecat <subcommand> [options]
+#
+# Subcommands:
+#   setup [--full | --hook]       Initialize database (--full also installs hook and runs backfill; --hook also installs hook)
+#   search <terms...> [--or] [--csv] [--folder <path>]
+#   list [--csv] [--folder <path>] [--topic <name>]
+#   export <session-id> [--format md|json] [--summarize]
+#   export --topic <name> [--format md|json] [--summarize]
+#   backfill [--dry-run] [--force] [--folder <path>]
+#   install-hook                  Add claudecat stop hook to ~/.claude/settings.local.json
+#   uninstall-hook                Remove claudecat stop hook from ~/.claude/settings.local.json
+#   teardown [--yes]              Remove hook and delete database
+#   stats
+#   help
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HELPERS_DIR="$(cd "${SCRIPT_DIR}/../libexec/claudecat" && pwd)"
+
+usage() {
+  awk '/^[^#]/ { exit } /^#!/ { next } { sub(/^# ?/, ""); print }' "$0"
+}
+
+subcommand="${1:-}"
+
+case "${subcommand}" in
+  setup)
+    shift
+    _full=false
+    _hook=false
+    _setup_args=()
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --full) _full=true; shift ;;
+        --hook) _hook=true; shift ;;
+        *) _setup_args+=("$1"); shift ;;
+      esac
+    done
+    python3 "${HELPERS_DIR}/claudecat_setup.py" "${_setup_args[@]+"${_setup_args[@]}"}" || exit $?
+    if [[ "${_full}" == true || "${_hook}" == true ]]; then
+      python3 "${HELPERS_DIR}/claudecat_install_hook.py" || exit $?
+    fi
+    if [[ "${_full}" == true ]]; then
+      python3 "${HELPERS_DIR}/claudecat_backfill.py" || exit $?
+    fi
+    ;;
+  search)
+    shift
+    python3 "${HELPERS_DIR}/claudecat_search.py" "$@" || exit $?
+    ;;
+  list)
+    shift
+    python3 "${HELPERS_DIR}/claudecat_list.py" "$@" || exit $?
+    ;;
+  export)
+    shift
+    python3 "${HELPERS_DIR}/claudecat_export.py" "$@" || exit $?
+    ;;
+  backfill)
+    shift
+    python3 "${HELPERS_DIR}/claudecat_backfill.py" "$@" || exit $?
+    ;;
+  install-hook)
+    shift
+    python3 "${HELPERS_DIR}/claudecat_install_hook.py" "$@" || exit $?
+    ;;
+  uninstall-hook)
+    shift
+    python3 "${HELPERS_DIR}/claudecat_uninstall_hook.py" "$@" || exit $?
+    ;;
+  teardown)
+    shift
+    python3 "${HELPERS_DIR}/claudecat_teardown.py" "$@" || exit $?
+    ;;
+  stats)
+    shift
+    python3 "${HELPERS_DIR}/claudecat_stats.py" "$@" || exit $?
+    ;;
+  help|--help|-h)
+    usage
+    ;;
+  "")
+    echo "Error: no subcommand given." >&2
+    echo >&2
+    usage >&2
+    exit 1
+    ;;
+  *)
+    echo "Error: unknown subcommand '${subcommand}'." >&2
+    echo >&2
+    usage >&2
+    exit 1
+    ;;
+esac
