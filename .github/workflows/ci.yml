@@ -8,14 +8,25 @@ on:
 
 jobs:
   test:
-    name: Tests
-    runs-on: macos-latest
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
-      - name: Install bats-core
+      - name: Install bats-core (macOS)
+        if: runner.os == 'macOS'
         run: brew install bats-core
+
+      - name: Install bats-core (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          git clone https://github.com/bats-core/bats-core.git /tmp/bats-core
+          sudo /tmp/bats-core/install.sh /usr/local
 
       - name: Run tests
         run: ./run-tests
