@@ -16,6 +16,8 @@
 #   install-hook                  Add claudecat stop hook to ~/.claude/settings.json
 #   uninstall-hook                Remove claudecat stop hook from ~/.claude/settings.json
 #   teardown [--yes]              Remove hook and delete database
+#   implode [--yes] [--install-dir <dir>]
+#                                 Full uninstall: remove hook, database, and binary symlink
 #   stats
 #   help
 
@@ -94,6 +96,10 @@ case "${subcommand}" in
   teardown)
     shift
     python3 "${HELPERS_DIR}/claudecat_teardown.py" "$@" || exit $?
+    ;;
+  implode)
+    shift
+    python3 "${HELPERS_DIR}/claudecat_implode.py" "$@" || exit $?
     ;;
   stats)
     shift

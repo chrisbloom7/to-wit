@@ -176,6 +176,73 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
+# implode subcommand
+# ---------------------------------------------------------------------------
+
+@test "claudecat: implode --yes removes hook and database when both exist" {
+  local settings_file="${TEST_TMPDIR}/settings.local.json"
+  local install_dir="${TEST_TMPDIR}/bin"
+  mkdir -p "${install_dir}"
+  "${CLAUDECAT}" setup
+  env CLAUDECAT_SETTINGS_PATH="${settings_file}" "${CLAUDECAT}" install-hook
+  [ -f "${CLAUDECAT_DB_PATH}" ]
+  [ -f "${settings_file}" ]
+  run env CLAUDECAT_SETTINGS_PATH="${settings_file}" \
+    "${CLAUDECAT}" implode --yes --install-dir "${install_dir}"
+  [ "${status}" -eq 0 ]
+  [ ! -f "${CLAUDECAT_DB_PATH}" ] || {
+    echo "Expected DB to be removed after implode"; return 1
+  }
+}
+
+@test "claudecat: implode --yes removes binary symlink" {
+  local install_dir="${TEST_TMPDIR}/bin"
+  mkdir -p "${install_dir}"
+  local fake_target="${TEST_TMPDIR}/fake_claudecat"
+  touch "${fake_target}"
+  ln -s "${fake_target}" "${install_dir}/claudecat"
+  [ -L "${install_dir}/claudecat" ]
+  run env CLAUDECAT_SETTINGS_PATH="${TEST_TMPDIR}/settings.local.json" \
+    "${CLAUDECAT}" implode --yes --install-dir "${install_dir}"
+  [ "${status}" -eq 0 ]
+  [ ! -L "${install_dir}/claudecat" ] || {
+    echo "Expected symlink to be removed after implode"; return 1
+  }
+}
+
+@test "claudecat: implode --yes prints data directory path" {
+  local install_dir="${TEST_TMPDIR}/bin"
+  mkdir -p "${install_dir}"
+  "${CLAUDECAT}" setup
+  run "${CLAUDECAT}" implode --yes --install-dir "${install_dir}"
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"$(dirname "${CLAUDECAT_DB_PATH}")"* ]] || {
+    echo "Expected data directory in output, got: ${output}"; return 1
+  }
+}
+
+@test "claudecat: implode warns when binary is not a symlink" {
+  local install_dir="${TEST_TMPDIR}/bin"
+  mkdir -p "${install_dir}"
+  echo "#!/bin/bash" > "${install_dir}/claudecat"
+  run "${CLAUDECAT}" implode --yes --install-dir "${install_dir}"
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"not a symlink"* ]] || {
+    echo "Expected 'not a symlink' warning, got: ${output}"; return 1
+  }
+  [ -f "${install_dir}/claudecat" ] || {
+    echo "Expected regular file to remain (not removed)"; return 1
+  }
+}
+
+@test "claudecat: implode exits 0 when nothing to remove" {
+  local install_dir="${TEST_TMPDIR}/bin"
+  mkdir -p "${install_dir}"
+  run "${CLAUDECAT}" implode --yes --install-dir "${install_dir}"
+  [ "${status}" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
 # setup --hook subcommand
 # ---------------------------------------------------------------------------
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `implode` subcommand: full uninstall in one command — removes stop hook, database, and binary symlink, then prints the data directory path (with any remaining files) so nothing is left behind unexpectedly
+- `uninstall` script now delegates to `claudecat implode` instead of duplicating the teardown + symlink removal logic
+
 ## [0.1.1] - 2026-03-31
 
 ### Changed

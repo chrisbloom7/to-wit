@@ -9,25 +9,13 @@
 set -euo pipefail
 
 INSTALL_DIR="${1:-/usr/local/bin}"
-BINARY="${INSTALL_DIR}/claudecat"
 
-# Run teardown first (removes hook and database, handles its own confirmation)
 if command -v claudecat &>/dev/null; then
-  claudecat teardown
+  claudecat implode --install-dir "${INSTALL_DIR}"
 else
-  echo "Warning: claudecat not found in PATH — skipping hook and database teardown." >&2
-  echo "You may need to remove ~/.claudecat/ and the stop hook from ~/.claude/settings.json manually." >&2
+  echo "Warning: claudecat not found in PATH — cannot run implode." >&2
+  echo "You may need to manually remove:" >&2
+  echo "  • The claudecat binary symlink from ${INSTALL_DIR}/" >&2
+  echo "  • The stop hook from ~/.claude/settings.json" >&2
+  echo "  • The data directory at ~/.claudecat/" >&2
 fi
-
-# Remove the binary symlink
-if [[ -L "${BINARY}" ]]; then
-  rm "${BINARY}"
-  echo "Removed: ${BINARY}"
-elif [[ -e "${BINARY}" ]]; then
-  echo "Warning: '${BINARY}' exists but is not a symlink — not removing." >&2
-  echo "Remove it manually if needed." >&2
-else
-  echo "Nothing to remove at ${BINARY}."
-fi
-
-echo "Uninstall complete."
