@@ -8,6 +8,7 @@
 #   setup [--full | --hook]       Initialize database (--full also installs hook and runs backfill; --hook also installs hook)
 #   search <terms...> [--or] [--csv] [--folder <path>]
 #   list [--csv] [--folder <path>] [--topic <name>]
+#   open <session-id>             Resume a session in its original working directory
 #   export <session-id> [--format md|json] [--summarize]
 #   export --topic <name> [--format md|json] [--summarize]
 #   backfill [--dry-run] [--force] [--folder <path>]
@@ -64,6 +65,10 @@ case "${subcommand}" in
   list)
     shift
     python3 "${HELPERS_DIR}/claudecat_list.py" "$@" || exit $?
+    ;;
+  open)
+    shift
+    python3 "${HELPERS_DIR}/claudecat_open.py" "$@" || exit $?
     ;;
   export)
     shift
