@@ -165,11 +165,25 @@ def analyze_with_claude(transcript: str) -> dict:
     """
     prompt = _ANALYSIS_PROMPT_TEMPLATE.format(transcript=transcript)
 
+    # Pass an explicit allowlist rather than the full environment to avoid
+    # leaking unrelated credentials (AWS keys, DB passwords, etc.) to the
+    # claude subprocess. Prefix-based allowlist covers Claude/Anthropic vars
+    # and the shell basics the CLI needs to locate binaries and config.
+    _PASS_THROUGH_PREFIXES = (
+        'HOME', 'PATH', 'USER', 'TMPDIR', 'TERM', 'LANG', 'LC_',
+        'CLAUDE_', 'ANTHROPIC_',
+    )
+    safe_env = {
+        k: v for k, v in os.environ.items()
+        if any(k.startswith(p) for p in _PASS_THROUGH_PREFIXES)
+    }
+    safe_env['CLAUDECAT_INDEXING'] = '1'
+
     try:
         result = subprocess.run(
             ['claude', '-p', prompt, '--output-format', 'text'],
             capture_output=True, text=True, timeout=60,
-            env={**os.environ, 'CLAUDECAT_INDEXING': '1'}
+            env=safe_env,
         )
     except subprocess.TimeoutExpired:
         return {'skip': True}
@@ -183,7 +197,7 @@ def analyze_with_claude(transcript: str) -> dict:
     try:
         data = json.loads(output)
     except json.JSONDecodeError:
-        match = re.search(r'\{.*\}', output, re.DOTALL)
+        match = re.search(r'\{.*?\}', output, re.DOTALL)
         if not match:
             return {'skip': True}
         try:

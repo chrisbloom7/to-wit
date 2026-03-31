@@ -12,7 +12,7 @@ import sqlite3
 
 DB_PATH = os.environ.get(
     'CLAUDECAT_DB_PATH',
-    os.path.expanduser('~/.claude/catalog/catalog.db')
+    os.path.expanduser('~/.claudecat/catalog.db')
 )
 
 SCHEMA = """
@@ -196,6 +196,10 @@ class Database:
                 # For topic matching, use a stemmed pattern (drop last char) so that
                 # e.g. "estimate" matches "project-estimation" via "%estimat%"
                 topic_like = f'%{term[:-1]}%' if len(term) >= 5 else like
+                # Security: conditions must contain ONLY hardcoded parameterized SQL
+                # clauses. All user-supplied values must be bound through the params
+                # list using '?' placeholders. Never append user-controlled strings to
+                # conditions directly — that would introduce SQL injection.
                 conditions = ['t.name LIKE ?']
                 params = [topic_like]
                 if include_summary:
@@ -204,6 +208,8 @@ class Database:
                 if include_title:
                     conditions.append('c.title LIKE ?')
                     params.append(like)
+                assert all(isinstance(c, str) and '?' in c for c in conditions), \
+                    "conditions must be hardcoded parameterized clauses only"
                 where = ' OR '.join(conditions)
                 rows = conn.execute(
                     f"""

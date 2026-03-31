@@ -6,6 +6,18 @@ A searchable catalog of your [Claude Code](https://claude.ai/code) conversations
 
 Claude Code conversations are analyzed, filtered for substance, and stored in a local SQLite database. A CLI lets you search, list, and export conversations. A stop hook keeps the catalog up to date automatically after each session.
 
+```shell
+claudecat search hook
+/Users/chrisbloom7
+  ID                                    Title                        Topics    Date
+  ------------------------------------  ---------------------------  --------  ----------
+  350fa22f-10b7-48ff-ac9d-bd9f1081c23b  Debugging non-firing Stop …  hooks     2026-03-31
+
+claudecat open 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
+# => cd /Users/chrisbloom7 & claude --resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
+  ```
+
+
 ## Requirements
 
 - [Claude Code](https://www.anthropic.com/claude-code) (`brew install claude-code`)
@@ -73,7 +85,7 @@ Subcommands:
 
 ## How it works
 
-**Indexing:** Each conversation is parsed from Claude Code's JSONL transcript files (`~/.claude/projects/`). Short or purely operational sessions are filtered out. Substantive conversations are analyzed by Claude, which extracts a title, summary, and topic tags. Results are stored in `~/.claude/catalog/catalog.db` (SQLite, WAL mode).
+**Indexing:** Each conversation is parsed from Claude Code's JSONL transcript files (`~/.claude/projects/`). Short or purely operational sessions are filtered out. Substantive conversations are analyzed by Claude, which extracts a title, summary, and topic tags. Results are stored in `~/.claudecat/catalog.db` (SQLite, WAL mode).
 
 **What gets indexed:** Deep explorations, research, TIL moments, technical discoveries, documentation writing, theoretical discussions, estimation with depth. Quick one-shots, command execution sessions, and subagent traces are skipped.
 

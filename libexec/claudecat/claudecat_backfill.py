@@ -44,7 +44,7 @@ def main():
     pattern = os.path.join(search_root, '**', '*.jsonl')
     jsonl_files = [
         p for p in glob.glob(pattern, recursive=True)
-        if '/subagents/' not in p
+        if '/subagents/' not in p and not os.path.islink(p)
     ]
     jsonl_files.sort(key=lambda p: os.path.getmtime(p))
 

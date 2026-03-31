@@ -13,7 +13,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
 DB_PATH = os.environ.get('CLAUDECAT_DB_PATH',
-                          os.path.expanduser('~/.claude/catalog/catalog.db'))
+                          os.path.expanduser('~/.claudecat/catalog.db'))
 
 
 def main():
@@ -32,7 +32,7 @@ def main():
     # Describe what will be removed
     print("The following will be removed:")
     if hook_installed:
-        print("  • claudecat stop hook from ~/.claude/settings.local.json")
+        print("  • claudecat stop hook from ~/.claude/settings.json")
     if db_exists:
         print(f"  • Database at {DB_PATH}")
 

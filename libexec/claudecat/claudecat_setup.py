@@ -16,7 +16,7 @@ from claudecat_db import Database, DB_PATH
 def main():
     db_path = os.environ.get(
         'CLAUDECAT_DB_PATH',
-        os.path.expanduser('~/.claude/catalog/catalog.db')
+        os.path.expanduser('~/.claudecat/catalog.db')
     )
 
     if os.path.isfile(db_path):
@@ -24,10 +24,13 @@ def main():
         sys.exit(0)
 
     parent = os.path.dirname(db_path)
-    os.makedirs(parent, exist_ok=True)
-
-    db = Database(db_path)
-    db.create_schema()
+    old_umask = os.umask(0o077)
+    try:
+        os.makedirs(parent, exist_ok=True)
+        db = Database(db_path)
+        db.create_schema()
+    finally:
+        os.umask(old_umask)
     print(f"Database initialized at {db_path}")
 
 

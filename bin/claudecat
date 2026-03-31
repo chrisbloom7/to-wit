@@ -13,8 +13,8 @@
 #   export <session-id> [--format md|json] [--summarize]
 #   export --topic <name> [--format md|json] [--summarize]
 #   backfill [--dry-run] [--force] [--folder <path>]
-#   install-hook                  Add claudecat stop hook to ~/.claude/settings.local.json
-#   uninstall-hook                Remove claudecat stop hook from ~/.claude/settings.local.json
+#   install-hook                  Add claudecat stop hook to ~/.claude/settings.json
+#   uninstall-hook                Remove claudecat stop hook from ~/.claude/settings.json
 #   teardown [--yes]              Remove hook and delete database
 #   stats
 #   help

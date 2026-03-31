@@ -10,10 +10,26 @@ import os
 import sys
 import tempfile
 
-SETTINGS_PATH = os.environ.get(
-    'CLAUDECAT_SETTINGS_PATH',
-    os.path.expanduser('~/.claude/settings.local.json')
-)
+
+def _resolve_settings_path():
+    """Return a validated settings path from env override or default."""
+    raw = os.environ.get(
+        'CLAUDECAT_SETTINGS_PATH',
+        os.path.expanduser('~/.claude/settings.json')
+    )
+    resolved = os.path.realpath(os.path.expanduser(raw))
+    home_claude = os.path.realpath(os.path.expanduser('~/.claude'))
+    tmp = os.path.realpath(tempfile.gettempdir())
+    if resolved.startswith(home_claude + os.sep) or resolved.startswith(tmp + os.sep):
+        return resolved
+    print(
+        "Warning: CLAUDECAT_SETTINGS_PATH is outside expected directories, using default.",
+        file=sys.stderr
+    )
+    return os.path.expanduser('~/.claude/settings.json')
+
+
+SETTINGS_PATH = _resolve_settings_path()
 HOOK_MARKER = 'claudecat_hook.py'  # substring used to identify our hook
 
 

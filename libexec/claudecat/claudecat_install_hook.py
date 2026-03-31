@@ -10,10 +10,26 @@ import os
 import sys
 import tempfile
 
-SETTINGS_PATH = os.environ.get(
-    'CLAUDECAT_SETTINGS_PATH',
-    os.path.expanduser('~/.claude/settings.local.json')
-)
+
+def _resolve_settings_path():
+    """Return a validated settings path from env override or default."""
+    raw = os.environ.get(
+        'CLAUDECAT_SETTINGS_PATH',
+        os.path.expanduser('~/.claude/settings.json')
+    )
+    resolved = os.path.realpath(os.path.expanduser(raw))
+    home_claude = os.path.realpath(os.path.expanduser('~/.claude'))
+    tmp = os.path.realpath(tempfile.gettempdir())
+    if resolved.startswith(home_claude + os.sep) or resolved.startswith(tmp + os.sep):
+        return resolved
+    print(
+        "Warning: CLAUDECAT_SETTINGS_PATH is outside expected directories, using default.",
+        file=sys.stderr
+    )
+    return os.path.expanduser('~/.claude/settings.json')
+
+
+SETTINGS_PATH = _resolve_settings_path()
 # Hook script lives alongside this file
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HOOK_SCRIPT = os.path.join(SCRIPT_DIR, 'claudecat_hook.py')
@@ -61,10 +77,19 @@ def main():
 
     hooks = settings.setdefault('hooks', {})
     stop_hooks = hooks.setdefault('Stop', [])
-    stop_hooks.append({
-        "matcher": "",
-        "hooks": [{"type": "command", "command": HOOK_COMMAND}]
-    })
+    new_hook = {"type": "command", "command": HOOK_COMMAND}
+
+    # Merge into an existing empty-matcher entry rather than appending a new one,
+    # so that all global Stop hooks share a single entry in the settings file.
+    merged = False
+    for entry in stop_hooks:
+        if entry.get('matcher', '') == '':
+            entry.setdefault('hooks', []).append(new_hook)
+            merged = True
+            break
+
+    if not merged:
+        stop_hooks.append({"matcher": "", "hooks": [new_hook]})
 
     _save_settings(settings)
     print(f"claudecat stop hook installed.")

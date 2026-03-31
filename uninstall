@@ -16,7 +16,7 @@ if command -v claudecat &>/dev/null; then
   claudecat teardown
 else
   echo "Warning: claudecat not found in PATH — skipping hook and database teardown." >&2
-  echo "You may need to remove ~/.claude/catalog/ and the stop hook from ~/.claude/settings.local.json manually." >&2
+  echo "You may need to remove ~/.claudecat/ and the stop hook from ~/.claude/settings.json manually." >&2
 fi
 
 # Remove the binary symlink

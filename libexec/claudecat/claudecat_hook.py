@@ -11,6 +11,7 @@ Always exits 0 to avoid interrupting Claude Code.
 import sys
 import os
 import json
+import re
 
 # Guard against recursive calls triggered by claudecat's own Claude invocations
 if os.environ.get('CLAUDECAT_INDEXING'):
@@ -18,6 +19,36 @@ if os.environ.get('CLAUDECAT_INDEXING'):
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from claudecat_index import index_conversation
+
+_EXPECTED_ROOT = os.path.realpath(os.path.expanduser('~/.claude/projects'))
+_SESSION_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{8,}$')
+
+
+def _validate_jsonl_path(path):
+    """Return realpath if it's under ~/.claude/projects/, else None."""
+    resolved = os.path.realpath(path)
+    if resolved.startswith(_EXPECTED_ROOT + os.sep):
+        return resolved
+    return None
+
+
+def _get_error_logger():
+    """Return a rotating logger that writes to ~/.claudecat/errors.log."""
+    import logging
+    import logging.handlers
+    log_dir = os.path.expanduser('~/.claudecat')
+    os.makedirs(log_dir, exist_ok=True)
+    logger = logging.getLogger('claudecat.hook')
+    if not logger.handlers:
+        handler = logging.handlers.RotatingFileHandler(
+            os.path.join(log_dir, 'errors.log'),
+            maxBytes=100_000,
+            backupCount=2,
+        )
+        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+        logger.addHandler(handler)
+        logger.setLevel(logging.ERROR)
+    return logger
 
 
 def main():
@@ -32,12 +63,19 @@ def main():
         cwd = data.get('cwd', '')
 
         if transcript_path and os.path.exists(transcript_path):
-            jsonl_path = transcript_path
+            jsonl_path = _validate_jsonl_path(transcript_path)
+            if jsonl_path is None:
+                sys.exit(0)
         elif session_id and cwd:
+            # Validate session_id format before using it in path construction
+            if not _SESSION_ID_RE.match(session_id):
+                sys.exit(0)
             # Derive path from cwd encoding
             encoded = cwd.replace('/', '-').lstrip('-')
             folder = os.path.expanduser(f'~/.claude/projects/-{encoded}')
-            jsonl_path = os.path.join(folder, f'{session_id}.jsonl')
+            jsonl_path = _validate_jsonl_path(os.path.join(folder, f'{session_id}.jsonl'))
+            if jsonl_path is None:
+                sys.exit(0)
         else:
             sys.exit(0)
 
@@ -52,7 +90,10 @@ def main():
         if result == 'indexed':
             print(f"claudecat: indexed session {session_id[:8]}...", file=sys.stderr)
     except Exception:
-        pass  # Never interrupt Claude Code
+        try:
+            _get_error_logger().exception("claudecat hook error")
+        except Exception:
+            pass  # Never interrupt Claude Code
 
     sys.exit(0)
 
