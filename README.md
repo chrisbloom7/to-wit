@@ -21,7 +21,8 @@ claudecat open 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
 ## Requirements
 
 - [Claude Code](https://www.anthropic.com/claude-code) (`brew install claude-code`)
-- Python 3 (`brew install python`)
+- Python 3.10+ (`brew install python`)
+  _(3.6+ works technically; 3.10 is the oldest actively maintained release)_
 
 ## Installation
 
