@@ -20,14 +20,15 @@ PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
 
 CREATE TABLE IF NOT EXISTS conversations (
-  id           TEXT PRIMARY KEY,
-  folder       TEXT NOT NULL,
-  cwd          TEXT,
-  started_at   TEXT,
-  last_active  TEXT,
-  title        TEXT,
-  summary      TEXT,
-  indexed_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  id            TEXT PRIMARY KEY,
+  folder        TEXT NOT NULL,
+  cwd           TEXT,
+  started_at    TEXT,
+  last_active   TEXT,
+  title         TEXT,
+  summary       TEXT,
+  message_count INTEGER,
+  indexed_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS topics (
@@ -88,6 +89,15 @@ class Database:
         """Execute the full schema DDL (safe to run on a fresh DB)."""
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+        self._run_migrations()
+
+    def _run_migrations(self):
+        """Apply incremental schema changes for existing databases."""
+        with self.connect() as conn:
+            try:
+                conn.execute("ALTER TABLE conversations ADD COLUMN message_count INTEGER")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
 
     def upsert_conversation(self, data: dict):
         """
@@ -103,27 +113,30 @@ class Database:
             conn.execute(
                 """
                 INSERT INTO conversations
-                    (id, folder, cwd, started_at, last_active, title, summary, indexed_at)
+                    (id, folder, cwd, started_at, last_active, title, summary,
+                     message_count, indexed_at)
                 VALUES
                     (:id, :folder, :cwd, :started_at, :last_active, :title, :summary,
-                     datetime('now'))
+                     :message_count, datetime('now'))
                 ON CONFLICT(id) DO UPDATE SET
-                    folder      = excluded.folder,
-                    cwd         = excluded.cwd,
-                    started_at  = excluded.started_at,
-                    last_active = excluded.last_active,
-                    title       = excluded.title,
-                    summary     = excluded.summary,
-                    indexed_at  = excluded.indexed_at
+                    folder        = excluded.folder,
+                    cwd           = excluded.cwd,
+                    started_at    = excluded.started_at,
+                    last_active   = excluded.last_active,
+                    title         = excluded.title,
+                    summary       = excluded.summary,
+                    message_count = excluded.message_count,
+                    indexed_at    = excluded.indexed_at
                 """,
                 {
-                    'id':          data.get('id'),
-                    'folder':      data.get('folder'),
-                    'cwd':         data.get('cwd'),
-                    'started_at':  data.get('started_at'),
-                    'last_active': data.get('last_active'),
-                    'title':       data.get('title'),
-                    'summary':     data.get('summary'),
+                    'id':            data.get('id'),
+                    'folder':        data.get('folder'),
+                    'cwd':           data.get('cwd'),
+                    'started_at':    data.get('started_at'),
+                    'last_active':   data.get('last_active'),
+                    'title':         data.get('title'),
+                    'summary':       data.get('summary'),
+                    'message_count': data.get('message_count'),
                 }
             )
 
@@ -323,6 +336,49 @@ class Database:
         self.validate()
         with self.connect() as conn:
             conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+
+    def get_for_reindex(self, conv_id: str):
+        """
+        Return indexing metadata for an existing conversation, or None if not found.
+
+        Returns a dict with:
+            message_count (int or None), title (str), topics (list of str)
+        """
+        self.validate()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT c.message_count, c.title,
+                       GROUP_CONCAT(t.name, ',') AS topics
+                FROM conversations c
+                LEFT JOIN conversation_topics ct ON ct.conversation_id = c.id
+                LEFT JOIN topics t ON t.id = ct.topic_id
+                WHERE c.id = ?
+                GROUP BY c.id
+                """,
+                (conv_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            raw_topics = row['topics'] or ''
+            return {
+                'message_count': row['message_count'],
+                'title':         row['title'] or '',
+                'topics':        [t.strip() for t in raw_topics.split(',') if t.strip()],
+            }
+
+    def touch_last_active(self, conv_id: str, last_active: str):
+        """Update last_active and indexed_at without changing any other fields."""
+        self.validate()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE conversations
+                SET last_active = ?, indexed_at = datetime('now')
+                WHERE id = ?
+                """,
+                (last_active, conv_id)
+            )
 
     def is_indexed(self, conv_id: str) -> bool:
         """Return True if the session ID already exists in the DB."""

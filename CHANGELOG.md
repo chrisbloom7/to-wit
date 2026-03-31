@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-31
+
 ### Added
 - `implode` subcommand: full uninstall in one command — removes stop hook, database, and binary symlink, then prints the data directory path (with any remaining files) so nothing is left behind unexpectedly
 - `uninstall` script now delegates to `claudecat implode` instead of duplicating the teardown + symlink removal logic
+- Resumed conversations are now re-indexed when new messages are detected, instead of being silently skipped
+- Re-indexing passes the previously assigned topics to Claude with a preference hint, reducing topic drift across sessions
+- `message_count` column added to the `conversations` table; existing databases are migrated automatically on next `setup` or first use
 
 ## [0.1.1] - 2026-03-31
 

@@ -15,7 +15,7 @@ HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'
 sys.path.insert(0, HELPERS_DIR)
 
 from claudecat_db import Database
-from claudecat_index import parse_jsonl, should_index, build_transcript, index_conversation
+from claudecat_index import parse_jsonl, should_index, build_transcript, analyze_with_claude, index_conversation
 
 
 def write_jsonl(path, messages):
@@ -162,6 +162,32 @@ class TestBuildTranscript(unittest.TestCase):
         )
 
 
+class TestAnalyzeWithClaude(unittest.TestCase):
+    def _run_analyze(self, existing_topics=None):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            'skip': False, 'title': 'T', 'summary': 'S', 'topics': ['a']
+        })
+        with patch('subprocess.run', return_value=mock_result) as mock_run:
+            analyze_with_claude('some transcript', existing_topics=existing_topics)
+        return mock_run.call_args[0][0][2]  # the prompt string
+
+    def test_analyze_without_existing_topics_omits_instruction(self):
+        prompt = self._run_analyze(existing_topics=None)
+        self.assertNotIn('Previously assigned topics', prompt)
+
+    def test_analyze_with_existing_topics_includes_them_in_prompt(self):
+        prompt = self._run_analyze(existing_topics=['python', 'refactoring'])
+        self.assertIn('Previously assigned topics', prompt)
+        self.assertIn('python', prompt)
+        self.assertIn('refactoring', prompt)
+
+    def test_analyze_with_empty_existing_topics_omits_instruction(self):
+        prompt = self._run_analyze(existing_topics=[])
+        self.assertNotIn('Previously assigned topics', prompt)
+
+
 class TestIndexConversation(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -189,6 +215,7 @@ class TestIndexConversation(unittest.TestCase):
         return path
 
     def test_index_conversation_returns_already_indexed_if_in_db(self):
+        # message_count must match the parsed count of MINIMAL_MESSAGES (4)
         self.db.upsert_conversation({
             'id': 'already-indexed-session',
             'folder': '/some/folder',
@@ -197,11 +224,117 @@ class TestIndexConversation(unittest.TestCase):
             'last_active': '2026-01-15T10:30:00Z',
             'title': 'Existing',
             'summary': 'Already there',
-            'topics': []
+            'topics': [],
+            'message_count': len(MINIMAL_MESSAGES),
         })
         path = self._write_conv('already-indexed-session', MINIMAL_MESSAGES)
         result = index_conversation(path, self.db)
         self.assertEqual(result, 'already_indexed')
+
+    def test_index_conversation_with_null_message_count_reindexes(self):
+        # Pre-migration records have no message_count; they should be re-analyzed
+        self.db.upsert_conversation({
+            'id': 'legacy-session-001',
+            'folder': '/some/folder',
+            'cwd': '/Users/test',
+            'started_at': '2026-01-15T10:00:00Z',
+            'last_active': '2026-01-15T10:30:00Z',
+            'title': 'Old Title',
+            'summary': 'Old summary.',
+            'topics': ['old-topic'],
+            'message_count': None,
+        })
+        path = self._write_conv('legacy-session-001', MINIMAL_MESSAGES)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            'skip': False,
+            'title': 'New Title',
+            'summary': 'New summary.',
+            'topics': ['old-topic'],
+        })
+
+        with patch('subprocess.run', return_value=mock_result):
+            result = index_conversation(path, self.db)
+
+        self.assertEqual(result, 'indexed')
+
+    def test_index_conversation_touches_last_active_when_count_unchanged(self):
+        old_last_active = '2026-01-15T10:00:00Z'
+        self.db.upsert_conversation({
+            'id': 'resumed-session-001',
+            'folder': '/some/folder',
+            'cwd': '/Users/test',
+            'started_at': '2026-01-15T10:00:00Z',
+            'last_active': old_last_active,
+            'title': 'Keep This Title',
+            'summary': 'Keep this summary.',
+            'topics': ['sqlite', 'concurrency'],
+            'message_count': len(MINIMAL_MESSAGES),
+        })
+        # Write JSONL with a newer final timestamp but same message count
+        newer_messages = [
+            {'role': 'user',      'content': MINIMAL_MESSAGES[0]['content']},
+            {'role': 'assistant', 'content': MINIMAL_MESSAGES[1]['content']},
+            {'role': 'user',      'content': MINIMAL_MESSAGES[2]['content']},
+            {'role': 'assistant', 'content': MINIMAL_MESSAGES[3]['content']},
+        ]
+        path = os.path.join(self.tmpdir, 'resumed-session-001.jsonl')
+        with open(path, 'w') as f:
+            for i, msg in enumerate(newer_messages):
+                line = {
+                    'type': msg['role'],
+                    'message': {'role': msg['role'], 'content': msg['content']},
+                    'sessionId': 'resumed-session-001',
+                    'cwd': '/Users/test',
+                    'timestamp': f'2026-02-01T10:0{i}:00Z',  # newer timestamps
+                }
+                f.write(json.dumps(line) + '\n')
+
+        with patch('subprocess.run') as mock_run:
+            result = index_conversation(path, self.db)
+
+        self.assertEqual(result, 'already_indexed')
+        mock_run.assert_not_called()  # Claude should not be invoked
+
+        # last_active should have been updated
+        record = self.db.get_for_reindex('resumed-session-001')
+        # Verify title/topics were preserved (not re-analyzed)
+        self.assertEqual(record['topics'], ['sqlite', 'concurrency'])
+
+    def test_index_conversation_passes_existing_topics_when_reindexing(self):
+        self.db.upsert_conversation({
+            'id': 'grown-session-001',
+            'folder': '/some/folder',
+            'cwd': '/Users/test',
+            'started_at': '2026-01-15T10:00:00Z',
+            'last_active': '2026-01-15T10:30:00Z',
+            'title': 'Old Title',
+            'summary': 'Old summary.',
+            'topics': ['sqlite', 'wal-mode'],
+            'message_count': 2,  # fewer than MINIMAL_MESSAGES
+        })
+        path = self._write_conv('grown-session-001', MINIMAL_MESSAGES)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            'skip': False,
+            'title': 'Updated Title',
+            'summary': 'Updated summary.',
+            'topics': ['sqlite', 'wal-mode'],
+        })
+
+        with patch('subprocess.run', return_value=mock_result) as mock_run:
+            result = index_conversation(path, self.db)
+
+        self.assertEqual(result, 'indexed')
+        call_args = mock_run.call_args
+        prompt_arg = call_args[0][0][2]  # ['claude', '-p', <prompt>, ...]
+        self.assertIn('sqlite', prompt_arg)
+        self.assertIn('wal-mode', prompt_arg)
+        self.assertIn('Previously assigned topics', prompt_arg)
 
     def test_index_conversation_returns_skipped_for_short_conversation(self):
         short_messages = [

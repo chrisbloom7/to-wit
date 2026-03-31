@@ -148,7 +148,7 @@ Analyze the following Claude conversation transcript and return a JSON object wi
 
 - "title": A concise, descriptive title for the conversation (max 80 chars)
 - "summary": A 2-4 sentence summary of what was discussed and accomplished
-- "topics": A list of 1-5 short topic tags (e.g. ["python", "refactoring", "git"])
+- "topics": A list of 1-5 short topic tags (e.g. ["python", "refactoring", "git"]){existing_topics_instruction}
 - "skip": false (set to true only if this is a trivial/test/empty conversation not worth cataloging)
 
 Return ONLY the JSON object, no other text.
@@ -156,14 +156,26 @@ Return ONLY the JSON object, no other text.
 Transcript:
 {transcript}"""
 
+_EXISTING_TOPICS_INSTRUCTION = """
+  Previously assigned topics: {topics}. Reuse these if they still accurately describe \
+the conversation; replace any that no longer fit and add new ones for genuinely new content."""
 
-def analyze_with_claude(transcript: str) -> dict:
+
+def analyze_with_claude(transcript: str, existing_topics: list = None) -> dict:
     """
     Call Claude to produce a title, summary, and topics for a conversation.
     Returns a dict with keys: title, summary, topics, skip.
     On any error returns {'skip': True}.
     """
-    prompt = _ANALYSIS_PROMPT_TEMPLATE.format(transcript=transcript)
+    topics_instruction = ''
+    if existing_topics:
+        topics_instruction = _EXISTING_TOPICS_INSTRUCTION.format(
+            topics=json.dumps(existing_topics)
+        )
+    prompt = _ANALYSIS_PROMPT_TEMPLATE.format(
+        transcript=transcript,
+        existing_topics_instruction=topics_instruction,
+    )
 
     # Pass an explicit allowlist rather than the full environment to avoid
     # leaking unrelated credentials (AWS keys, DB passwords, etc.) to the
@@ -219,11 +231,10 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
     """
     Index a single JSONL transcript file into the catalog database.
 
-    Returns a dict with 'status' key:
-        {'status': 'already_indexed'}
-        {'status': 'skipped', 'reason': 'pre-filter' | 'claude_filter'}
-        {'status': 'indexed', 'title': ..., 'topics': [...]}
-    Returns None on unrecoverable error.
+    Returns:
+        'already_indexed' — session exists and transcript has not grown
+        'skipped'         — too short or Claude flagged as trivial
+        'indexed'         — newly indexed or re-indexed after new content
     """
     session_id = os.path.splitext(os.path.basename(jsonl_path))[0]
 
@@ -232,26 +243,38 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
     else:
         db = Database(db_path or DB_PATH)
 
+    # Parse first so we can compare message count for staleness detection
+    messages = parse_jsonl(jsonl_path)
+    current_count = len(messages)
+
+    existing = None
     if not force:
         try:
-            if db.is_indexed(session_id):
-                return 'already_indexed'
+            existing = db.get_for_reindex(session_id)
         except SystemExit:
-            # DB not yet initialized — skip check
-            pass
+            pass  # DB not yet initialized
 
-    messages = parse_jsonl(jsonl_path)
+        if existing is not None:
+            stored_count = existing.get('message_count')
+            if stored_count is not None and stored_count == current_count:
+                # Transcript hasn't grown — refresh last_active without re-analyzing
+                timestamps = [m['timestamp'] for m in messages if m.get('timestamp')]
+                last_active = timestamps[-1] if timestamps else None
+                if last_active:
+                    db.touch_last_active(session_id, last_active)
+                return 'already_indexed'
+            # stored_count is None (pre-migration record) or differs — fall through
 
     if not should_index(messages):
         return 'skipped'
 
     transcript = build_transcript(messages)
-    analysis = analyze_with_claude(transcript)
+    existing_topics = existing['topics'] if existing else None
+    analysis = analyze_with_claude(transcript, existing_topics=existing_topics)
 
     if analysis.get('skip'):
         return 'skipped'
 
-    # Extract metadata from first message
     first = messages[0] if messages else {}
     cwd = first.get('cwd', '')
     timestamps = [m['timestamp'] for m in messages if m.get('timestamp')]
@@ -260,14 +283,15 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
     folder = str(os.path.dirname(os.path.abspath(jsonl_path)))
 
     data = {
-        'id':          session_id,
-        'folder':      folder,
-        'cwd':         cwd,
-        'started_at':  started_at,
-        'last_active': last_active,
-        'title':       analysis.get('title', ''),
-        'summary':     analysis.get('summary', ''),
-        'topics':      analysis.get('topics', []),
+        'id':            session_id,
+        'folder':        folder,
+        'cwd':           cwd,
+        'started_at':    started_at,
+        'last_active':   last_active,
+        'title':         analysis.get('title', ''),
+        'summary':       analysis.get('summary', ''),
+        'topics':        analysis.get('topics', []),
+        'message_count': current_count,
     }
 
     db.upsert_conversation(data)
