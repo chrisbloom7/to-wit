@@ -20,7 +20,7 @@ teardown() {
 # ---------------------------------------------------------------------------
 
 @test "uninstall: warns and exits 0 when claudecat is not in PATH" {
-  run env PATH="/usr/bin:/bin" "${UNINSTALL}"
+  run bash -c "env PATH='/usr/bin:/bin' '${UNINSTALL}' 2>&1"
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"Warning"* ]] || [[ "${output}" == *"not found"* ]] || {
     echo "Expected 'Warning' or 'not found' in output, got: ${output}"; return 1
@@ -31,9 +31,11 @@ teardown() {
   local install_dir="${TEST_TMPDIR}/custom_bin"
   mkdir -p "${install_dir}"
 
-  cat > "${TEST_TMPDIR}/mock_bin/claudecat" <<EOF
+  local invocation_log="${TEST_TMPDIR}/claudecat_invocation"
+  export INVOCATION_LOG="${invocation_log}"
+  cat > "${TEST_TMPDIR}/mock_bin/claudecat" <<'EOF'
 #!/usr/bin/env bash
-echo "\$*" > "${TEST_TMPDIR}/claudecat_invocation"
+echo "$*" > "${INVOCATION_LOG}"
 exit 0
 EOF
   chmod +x "${TEST_TMPDIR}/mock_bin/claudecat"
@@ -41,12 +43,12 @@ EOF
   run "${UNINSTALL}" "${install_dir}"
   [ "${status}" -eq 0 ]
 
-  [ -f "${TEST_TMPDIR}/claudecat_invocation" ] || {
-    echo "Expected invocation log at ${TEST_TMPDIR}/claudecat_invocation"; return 1
+  [ -f "${invocation_log}" ] || {
+    echo "Expected invocation log at ${invocation_log}"; return 1
   }
 
   local invocation
-  invocation="$(cat "${TEST_TMPDIR}/claudecat_invocation")"
+  invocation="$(cat "${invocation_log}")"
   [[ "${invocation}" == *"implode"* ]] || {
     echo "Expected 'implode' in invocation log, got: ${invocation}"; return 1
   }
@@ -59,9 +61,11 @@ EOF
 }
 
 @test "uninstall: uses /usr/local/bin as default install dir" {
-  cat > "${TEST_TMPDIR}/mock_bin/claudecat" <<EOF
+  local invocation_log="${TEST_TMPDIR}/claudecat_invocation"
+  export INVOCATION_LOG="${invocation_log}"
+  cat > "${TEST_TMPDIR}/mock_bin/claudecat" <<'EOF'
 #!/usr/bin/env bash
-echo "\$*" > "${TEST_TMPDIR}/claudecat_invocation"
+echo "$*" > "${INVOCATION_LOG}"
 exit 0
 EOF
   chmod +x "${TEST_TMPDIR}/mock_bin/claudecat"
@@ -69,12 +73,12 @@ EOF
   run "${UNINSTALL}"
   [ "${status}" -eq 0 ]
 
-  [ -f "${TEST_TMPDIR}/claudecat_invocation" ] || {
-    echo "Expected invocation log at ${TEST_TMPDIR}/claudecat_invocation"; return 1
+  [ -f "${invocation_log}" ] || {
+    echo "Expected invocation log at ${invocation_log}"; return 1
   }
 
   local invocation
-  invocation="$(cat "${TEST_TMPDIR}/claudecat_invocation")"
+  invocation="$(cat "${invocation_log}")"
   [[ "${invocation}" == *"/usr/local/bin"* ]] || {
     echo "Expected '/usr/local/bin' in invocation log, got: ${invocation}"; return 1
   }
