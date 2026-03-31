@@ -48,9 +48,18 @@ def main():
             "SELECT COUNT(DISTINCT cwd) AS n FROM conversations WHERE cwd IS NOT NULL AND cwd != ''"
         ).fetchone()['n']
 
+    # Count pruneable entries (transcript missing from disk)
+    stubs = db.all_conversation_stubs()
+    pruneable = sum(
+        1 for s in stubs
+        if not os.path.isfile(os.path.join(s['folder'], f"{s['id']}.jsonl"))
+    )
+
     print(f"Conversations indexed : {total}")
     print(f"Date range            : {oldest or 'n/a'} — {newest or 'n/a'}")
     print(f"Unique projects       : {unique_projects}")
+    if pruneable:
+        print(f"Pruneable entries     : {pruneable}  (run: claudecat prune)")
     print()
 
     if top_topics:
