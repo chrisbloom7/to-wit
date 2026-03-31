@@ -27,12 +27,14 @@ def run_setup(db_path, home):
 
 
 def run_install_hook(home):
-    env = {**os.environ, 'HOME': home}
+    settings_path = os.path.join(home, SETTINGS_REL_PATH)
+    env = {**os.environ, 'HOME': home, 'CLAUDECAT_SETTINGS_PATH': settings_path}
     return subprocess.run(['python3', INSTALL_HOOK_SCRIPT], env=env, capture_output=True, text=True)
 
 
 def run_teardown(db_path, home, args=None, stdin_input=None):
-    env = {**os.environ, 'CLAUDECAT_DB_PATH': db_path, 'HOME': home}
+    settings_path = os.path.join(home, SETTINGS_REL_PATH)
+    env = {**os.environ, 'CLAUDECAT_DB_PATH': db_path, 'HOME': home, 'CLAUDECAT_SETTINGS_PATH': settings_path}
     return subprocess.run(
         ['python3', TEARDOWN_SCRIPT] + (args or []),
         env=env,
