@@ -25,7 +25,7 @@ jobs:
       - name: Install bats-core (Linux)
         if: runner.os == 'Linux'
         run: |
-          git clone https://github.com/bats-core/bats-core.git /tmp/bats-core
+          git clone --branch v1.11.0 --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
           sudo /tmp/bats-core/install.sh /usr/local
 
       - name: Run tests
