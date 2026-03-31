@@ -5,6 +5,7 @@ claudecat_db — Database abstraction layer for the claudecat catalog.
 This module is imported by other claudecat scripts; it is not run directly.
 """
 
+import contextlib
 import os
 import sys
 import sqlite3
@@ -67,13 +68,21 @@ class Database:
             )
             sys.exit(1)
 
+    @contextlib.contextmanager
     def connect(self):
-        """Return an open sqlite3 connection with WAL mode and foreign keys."""
+        """Context manager yielding an sqlite3 connection; commits on clean exit, always closes."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def create_schema(self):
         """Execute the full schema DDL (safe to run on a fresh DB)."""
