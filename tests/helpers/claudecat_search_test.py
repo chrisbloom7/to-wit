@@ -150,10 +150,12 @@ class TestClaudecatSearch(unittest.TestCase):
         self.assertIn('conv-c', ids)
         self.assertNotIn('conv-b', ids)
 
-    def test_search_with_nonexistent_folder_exits_1(self):
+    def test_search_with_nonexistent_folder_returns_no_results(self):
         result = run_search(self.db_path, ['SQLite', '--folder', '/nonexistent/path'])
-        self.assertEqual(result.returncode, 1)
-        self.assertIn('folder not found', result.stderr)
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn('conv-a', result.stdout)
+        self.assertNotIn('conv-b', result.stdout)
+        self.assertNotIn('conv-c', result.stdout)
 
     def test_no_results_exits_0(self):
         result = run_search(self.db_path, ['absolutelyunknownterm'])

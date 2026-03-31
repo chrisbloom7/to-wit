@@ -122,10 +122,12 @@ class TestClaudecatList(unittest.TestCase):
         rows = list(reader)
         self.assertGreaterEqual(len(rows), 4)
 
-    def test_list_with_nonexistent_folder_exits_1(self):
+    def test_list_with_nonexistent_folder_returns_no_results(self):
         result = run_list(self.db_path, ['--folder', '/nonexistent/path'])
-        self.assertEqual(result.returncode, 1)
-        self.assertIn('folder not found', result.stderr)
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn('conv-a', result.stdout)
+        self.assertNotIn('conv-b', result.stdout)
+        self.assertNotIn('conv-c', result.stdout)
 
     def test_empty_db_returns_exit_0(self):
         empty_db = os.path.join(self.tmpdir, 'empty.db')

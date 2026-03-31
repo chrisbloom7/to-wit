@@ -123,10 +123,6 @@ def main():
     db = Database()
     db.validate()
 
-    if args.folder and not os.path.isdir(args.folder):
-        print(f"Error: folder not found: {args.folder}", file=sys.stderr)
-        sys.exit(1)
-
     results = db.list_conversations(folder=args.folder, topic=args.topic)
 
     if not results:
