@@ -106,7 +106,7 @@ def _print_table(rows, terms=None, group_by_path=False):
             groups[cwd].append(row_data)
 
         first = True
-        for cwd in order:
+        for cwd in sorted(order):
             if not first:
                 print()
             first = False
