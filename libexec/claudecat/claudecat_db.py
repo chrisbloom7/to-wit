@@ -236,8 +236,8 @@ class Database:
             params = list(matched_ids)
             extra = ''
             if folder:
-                extra = ' AND c.cwd LIKE ?'
-                params.append(f'{folder}%')
+                extra = ' AND c.cwd = ?'
+                params.append(folder)
 
             sql = (
                 self._conversation_select()
@@ -255,8 +255,8 @@ class Database:
         params = []
 
         if folder:
-            conditions.append("c.cwd LIKE ?")
-            params.append(f'{folder}%')
+            conditions.append("c.cwd = ?")
+            params.append(folder)
 
         if topic:
             conditions.append(
