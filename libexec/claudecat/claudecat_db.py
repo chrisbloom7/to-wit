@@ -303,6 +303,21 @@ class Database:
                 result['folder'] = folder_row['folder']
             return result
 
+    def all_conversation_stubs(self) -> list:
+        """Return (id, folder) for every conversation — used by prune."""
+        self.validate()
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id, folder FROM conversations ORDER BY started_at DESC"
+            ).fetchall()
+            return [{'id': r['id'], 'folder': r['folder']} for r in rows]
+
+    def delete_conversation(self, conv_id: str):
+        """Delete a conversation and its topic associations (via CASCADE)."""
+        self.validate()
+        with self.connect() as conn:
+            conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+
     def is_indexed(self, conv_id: str) -> bool:
         """Return True if the session ID already exists in the DB."""
         self.validate()
