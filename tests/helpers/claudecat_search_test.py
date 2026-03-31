@@ -18,49 +18,6 @@ SEARCH_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_search.py')
 sys.path.insert(0, HELPERS_DIR)
 from claudecat_db import Database
 
-CONV_A = {
-    'id': 'conv-a',
-    'folder': '/home/user/.claude/projects/-Users-alice',
-    'cwd': '/Users/alice/src/myapp',
-    'started_at': '2026-01-15T10:00:00Z',
-    'last_active': '2026-01-15T10:30:00Z',
-    'title': 'SQLite WAL mode deep dive',
-    'summary': 'Deep dive into SQLite WAL mode',
-    'topics': ['SQLite', 'WAL mode']
-}
-CONV_B = {
-    'id': 'conv-b',
-    'folder': '/home/user/.claude/projects/-Users-alice',
-    'cwd': '/Users/alice/src/otherapp',
-    'started_at': '2026-01-16T09:00:00Z',
-    'last_active': '2026-01-16T09:45:00Z',
-    'title': 'Rails migration strategies',
-    'summary': 'Rails migration strategies',
-    'topics': ['Rails', 'migrations']
-}
-CONV_C = {
-    'id': 'conv-c',
-    'folder': '/home/user/.claude/projects/-Users-alice',
-    'cwd': '/Users/alice/src/myapp',
-    'started_at': '2026-01-17T08:00:00Z',
-    'last_active': '2026-01-17T08:30:00Z',
-    'title': 'SQLite index optimization',
-    'summary': 'SQLite index optimization techniques',
-    'topics': ['SQLite', 'indexes']
-}
-
-# Unique summary/title words; hyphenated topic for stem-match testing
-CONV_D = {
-    'id': 'conv-d',
-    'folder': '/home/user/.claude/projects/-Users-alice',
-    'cwd': '/Users/alice/src/otherapp',
-    'started_at': '2026-01-18T07:00:00Z',
-    'last_active': '2026-01-18T07:45:00Z',
-    'title': 'Velocity estimation for Q2',
-    'summary': 'Reviewed burndown charts and story-point estimation for the quarter.',
-    'topics': ['project-estimation', 'agile']
-}
-
 
 def run_search(db_path, args):
     """Run claudecat_search.py as a subprocess."""
@@ -75,13 +32,55 @@ def run_search(db_path, args):
 class TestClaudecatSearch(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
+        self.myapp_dir = os.path.join(self.tmpdir, 'myapp')
+        self.otherapp_dir = os.path.join(self.tmpdir, 'otherapp')
+        os.makedirs(self.myapp_dir)
+        os.makedirs(self.otherapp_dir)
+
         self.db_path = os.path.join(self.tmpdir, 'test.db')
         db = Database(self.db_path)
         db.create_schema()
-        db.upsert_conversation(CONV_A)
-        db.upsert_conversation(CONV_B)
-        db.upsert_conversation(CONV_C)
-        db.upsert_conversation(CONV_D)
+        db.upsert_conversation({
+            'id': 'conv-a',
+            'folder': '/home/user/.claude/projects/-Users-alice',
+            'cwd': self.myapp_dir,
+            'started_at': '2026-01-15T10:00:00Z',
+            'last_active': '2026-01-15T10:30:00Z',
+            'title': 'SQLite WAL mode deep dive',
+            'summary': 'Deep dive into SQLite WAL mode',
+            'topics': ['SQLite', 'WAL mode']
+        })
+        db.upsert_conversation({
+            'id': 'conv-b',
+            'folder': '/home/user/.claude/projects/-Users-alice',
+            'cwd': self.otherapp_dir,
+            'started_at': '2026-01-16T09:00:00Z',
+            'last_active': '2026-01-16T09:45:00Z',
+            'title': 'Rails migration strategies',
+            'summary': 'Rails migration strategies',
+            'topics': ['Rails', 'migrations']
+        })
+        db.upsert_conversation({
+            'id': 'conv-c',
+            'folder': '/home/user/.claude/projects/-Users-alice',
+            'cwd': self.myapp_dir,
+            'started_at': '2026-01-17T08:00:00Z',
+            'last_active': '2026-01-17T08:30:00Z',
+            'title': 'SQLite index optimization',
+            'summary': 'SQLite index optimization techniques',
+            'topics': ['SQLite', 'indexes']
+        })
+        # Unique summary/title words; hyphenated topic for stem-match testing
+        db.upsert_conversation({
+            'id': 'conv-d',
+            'folder': '/home/user/.claude/projects/-Users-alice',
+            'cwd': self.otherapp_dir,
+            'started_at': '2026-01-18T07:00:00Z',
+            'last_active': '2026-01-18T07:45:00Z',
+            'title': 'Velocity estimation for Q2',
+            'summary': 'Reviewed burndown charts and story-point estimation for the quarter.',
+            'topics': ['project-estimation', 'agile']
+        })
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -144,12 +143,17 @@ class TestClaudecatSearch(unittest.TestCase):
         self.assertTrue(len(rows) >= 1, "Expected at least a header row in CSV output")
 
     def test_search_with_folder_scoped_to_cwd(self):
-        result = run_search(self.db_path, ['SQLite', '--folder', '/Users/alice/src/myapp'])
+        result = run_search(self.db_path, ['SQLite', '--folder', self.myapp_dir])
         self.assertEqual(result.returncode, 0)
         ids = self._ids_in_output(result.stdout)
         self.assertIn('conv-a', ids)
         self.assertIn('conv-c', ids)
         self.assertNotIn('conv-b', ids)
+
+    def test_search_with_nonexistent_folder_exits_1(self):
+        result = run_search(self.db_path, ['SQLite', '--folder', '/nonexistent/path'])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('folder not found', result.stderr)
 
     def test_no_results_exits_0(self):
         result = run_search(self.db_path, ['absolutelyunknownterm'])
@@ -160,7 +164,7 @@ class TestClaudecatSearch(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
 
     def test_default_does_not_match_summary_only(self):
-        # "burndown" is only in CONV_D's summary, not any topic
+        # "burndown" is only in conv-d's summary, not any topic
         result = run_search(self.db_path, ['burndown'])
         self.assertEqual(result.returncode, 0)
         self.assertNotIn('conv-d', result.stdout)
@@ -171,7 +175,7 @@ class TestClaudecatSearch(unittest.TestCase):
         self.assertIn('conv-d', result.stdout)
 
     def test_title_flag_finds_title_match(self):
-        # "Velocity" is only in CONV_D's title, not any topic
+        # "Velocity" is only in conv-d's title, not any topic
         result = run_search(self.db_path, ['Velocity', '--title'])
         self.assertEqual(result.returncode, 0)
         self.assertIn('conv-d', result.stdout)

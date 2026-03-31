@@ -158,6 +158,10 @@ def main():
     db = Database()
     db.validate()
 
+    if args.folder and not os.path.isdir(args.folder):
+        print(f"Error: folder not found: {args.folder}", file=sys.stderr)
+        sys.exit(1)
+
     mode = 'or' if args.or_ else 'and'
     results = db.search(args.terms, mode=mode, folder=args.folder,
                         include_summary=args.summary, include_title=args.title)

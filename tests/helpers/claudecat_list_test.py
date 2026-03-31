@@ -18,37 +18,6 @@ LIST_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_list.py')
 sys.path.insert(0, HELPERS_DIR)
 from claudecat_db import Database
 
-CONV_A = {
-    'id': 'conv-a',
-    'folder': '/home/user/.claude/projects/-Users-alice',
-    'cwd': '/Users/alice/src/myapp',
-    'started_at': '2026-01-15T10:00:00Z',
-    'last_active': '2026-01-15T10:30:00Z',
-    'title': 'SQLite WAL mode deep dive',
-    'summary': 'Deep dive into SQLite WAL mode',
-    'topics': ['SQLite', 'WAL mode']
-}
-CONV_B = {
-    'id': 'conv-b',
-    'folder': '/home/user/.claude/projects/-Users-alice',
-    'cwd': '/Users/alice/src/otherapp',
-    'started_at': '2026-01-16T09:00:00Z',
-    'last_active': '2026-01-16T09:45:00Z',
-    'title': 'Rails migration strategies',
-    'summary': 'Rails migration strategies',
-    'topics': ['Rails', 'migrations']
-}
-CONV_C = {
-    'id': 'conv-c',
-    'folder': '/home/user/.claude/projects/-Users-alice',
-    'cwd': '/Users/alice/src/myapp',
-    'started_at': '2026-01-17T08:00:00Z',
-    'last_active': '2026-01-17T08:30:00Z',
-    'title': 'SQLite index optimization',
-    'summary': 'SQLite index optimization techniques',
-    'topics': ['SQLite', 'indexes']
-}
-
 
 def run_list(db_path, args=None):
     """Run claudecat_list.py as a subprocess."""
@@ -63,12 +32,44 @@ def run_list(db_path, args=None):
 class TestClaudecatList(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
+        self.myapp_dir = os.path.join(self.tmpdir, 'myapp')
+        self.otherapp_dir = os.path.join(self.tmpdir, 'otherapp')
+        os.makedirs(self.myapp_dir)
+        os.makedirs(self.otherapp_dir)
+
         self.db_path = os.path.join(self.tmpdir, 'test.db')
         db = Database(self.db_path)
         db.create_schema()
-        db.upsert_conversation(CONV_A)
-        db.upsert_conversation(CONV_B)
-        db.upsert_conversation(CONV_C)
+        db.upsert_conversation({
+            'id': 'conv-a',
+            'folder': '/home/user/.claude/projects/-Users-alice',
+            'cwd': self.myapp_dir,
+            'started_at': '2026-01-15T10:00:00Z',
+            'last_active': '2026-01-15T10:30:00Z',
+            'title': 'SQLite WAL mode deep dive',
+            'summary': 'Deep dive into SQLite WAL mode',
+            'topics': ['SQLite', 'WAL mode']
+        })
+        db.upsert_conversation({
+            'id': 'conv-b',
+            'folder': '/home/user/.claude/projects/-Users-alice',
+            'cwd': self.otherapp_dir,
+            'started_at': '2026-01-16T09:00:00Z',
+            'last_active': '2026-01-16T09:45:00Z',
+            'title': 'Rails migration strategies',
+            'summary': 'Rails migration strategies',
+            'topics': ['Rails', 'migrations']
+        })
+        db.upsert_conversation({
+            'id': 'conv-c',
+            'folder': '/home/user/.claude/projects/-Users-alice',
+            'cwd': self.myapp_dir,
+            'started_at': '2026-01-17T08:00:00Z',
+            'last_active': '2026-01-17T08:30:00Z',
+            'title': 'SQLite index optimization',
+            'summary': 'SQLite index optimization techniques',
+            'topics': ['SQLite', 'indexes']
+        })
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -97,7 +98,7 @@ class TestClaudecatList(unittest.TestCase):
         self.assertNotIn('conv-b', ids)
 
     def test_list_with_folder_returns_only_matching_cwd(self):
-        result = run_list(self.db_path, ['--folder', '/Users/alice/src/myapp'])
+        result = run_list(self.db_path, ['--folder', self.myapp_dir])
         self.assertEqual(result.returncode, 0)
         ids = self._ids_in_output(result.stdout)
         self.assertIn('conv-a', ids)
@@ -120,6 +121,11 @@ class TestClaudecatList(unittest.TestCase):
         reader = csv.reader(io.StringIO(result.stdout))
         rows = list(reader)
         self.assertGreaterEqual(len(rows), 4)
+
+    def test_list_with_nonexistent_folder_exits_1(self):
+        result = run_list(self.db_path, ['--folder', '/nonexistent/path'])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('folder not found', result.stderr)
 
     def test_empty_db_returns_exit_0(self):
         empty_db = os.path.join(self.tmpdir, 'empty.db')
