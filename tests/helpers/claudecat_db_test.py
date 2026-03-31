@@ -4,6 +4,7 @@
 # Run with: python3 tests/helpers/claudecat_db_test.py
 
 import unittest
+import unittest.mock
 import tempfile
 import shutil
 import sqlite3
@@ -299,8 +300,9 @@ class TestDatabaseValidate(unittest.TestCase):
     def test_validate_exits_with_1_when_db_missing(self):
         missing_path = os.path.join(self.tmpdir, 'nonexistent', 'catalog.db')
         db = Database(missing_path)
-        with self.assertRaises(SystemExit) as ctx:
-            db.validate()
+        with self.assertRaises(SystemExit) as ctx, open(os.devnull, 'w') as devnull:
+            with unittest.mock.patch('sys.stderr', devnull):
+                db.validate()
         self.assertEqual(ctx.exception.code, 1)
 
 
