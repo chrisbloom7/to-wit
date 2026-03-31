@@ -3,3 +3,4 @@ __pycache__/
 *.pyo
 *.db
 .DS_Store
+/.claude/settings.local.json
