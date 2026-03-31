@@ -19,7 +19,10 @@ def main():
         os.path.expanduser('~/.claudecat/catalog.db')
     )
 
+    db = Database(db_path)
+
     if os.path.isfile(db_path):
+        db.run_migrations()
         print(f"Database already initialized at {db_path}")
         sys.exit(0)
 
@@ -27,7 +30,6 @@ def main():
     old_umask = os.umask(0o077)
     try:
         os.makedirs(parent, exist_ok=True)
-        db = Database(db_path)
         db.create_schema()
     finally:
         os.umask(old_umask)

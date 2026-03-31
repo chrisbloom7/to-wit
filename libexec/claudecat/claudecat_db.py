@@ -89,9 +89,9 @@ class Database:
         """Execute the full schema DDL (safe to run on a fresh DB)."""
         with self.connect() as conn:
             conn.executescript(SCHEMA)
-        self._run_migrations()
+        self.run_migrations()
 
-    def _run_migrations(self):
+    def run_migrations(self):
         """Apply incremental schema changes for existing databases."""
         with self.connect() as conn:
             try:

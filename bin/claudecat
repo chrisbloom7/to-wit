@@ -34,6 +34,12 @@ SCRIPT_DIR="$(cd -P "$(dirname "${_source}")" && pwd)"
 unset _source _dir
 HELPERS_DIR="$(cd "${SCRIPT_DIR}/../libexec/claudecat" && pwd)"
 
+if ! command -v python3 &>/dev/null; then
+  echo "Error: python3 is required but was not found in PATH." >&2
+  echo "Install Python 3 and ensure it is available as 'python3'." >&2
+  exit 1
+fi
+
 usage() {
   awk '/^[^#]/ { exit } /^#!/ { next } { sub(/^# ?/, ""); print }' "$0"
 }
