@@ -49,6 +49,18 @@ CONV_C = {
     'topics': ['SQLite', 'indexes']
 }
 
+# Unique summary/title words; hyphenated topic for stem-match testing
+CONV_D = {
+    'id': 'conv-d',
+    'folder': '/home/user/.claude/projects/-Users-alice',
+    'cwd': '/Users/alice/src/otherapp',
+    'started_at': '2026-01-18T07:00:00Z',
+    'last_active': '2026-01-18T07:45:00Z',
+    'title': 'Velocity estimation for Q2',
+    'summary': 'Reviewed burndown charts and story-point estimation for the quarter.',
+    'topics': ['project-estimation', 'agile']
+}
+
 
 def run_search(db_path, args):
     """Run claudecat_search.py as a subprocess."""
@@ -69,6 +81,7 @@ class TestClaudecatSearch(unittest.TestCase):
         db.upsert_conversation(CONV_A)
         db.upsert_conversation(CONV_B)
         db.upsert_conversation(CONV_C)
+        db.upsert_conversation(CONV_D)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -145,6 +158,34 @@ class TestClaudecatSearch(unittest.TestCase):
     def test_missing_terms_exits_nonzero(self):
         result = run_search(self.db_path, [])
         self.assertNotEqual(result.returncode, 0)
+
+    def test_default_does_not_match_summary_only(self):
+        # "burndown" is only in CONV_D's summary, not any topic
+        result = run_search(self.db_path, ['burndown'])
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn('conv-d', result.stdout)
+
+    def test_summary_flag_finds_summary_match(self):
+        result = run_search(self.db_path, ['burndown', '--summary'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-d', result.stdout)
+
+    def test_title_flag_finds_title_match(self):
+        # "Velocity" is only in CONV_D's title, not any topic
+        result = run_search(self.db_path, ['Velocity', '--title'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-d', result.stdout)
+
+    def test_default_does_not_match_title_only(self):
+        result = run_search(self.db_path, ['Velocity'])
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn('conv-d', result.stdout)
+
+    def test_stem_matches_hyphenated_topic(self):
+        # "estimate" (stem "estimat") should match topic "project-estimation"
+        result = run_search(self.db_path, ['estimate'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-d', result.stdout)
 
 
 if __name__ == '__main__':

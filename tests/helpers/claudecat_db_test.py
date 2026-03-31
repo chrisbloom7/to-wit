@@ -37,6 +37,18 @@ SAMPLE_CONV_B = {
     'topics': ['Rails', 'migrations']
 }
 
+# Has a unique word only in summary/title, and a hyphenated topic for stem-match testing
+SAMPLE_CONV_C = {
+    'id': 'test-session-003',
+    'folder': '/home/user/.claude/projects/-Users-alice',
+    'cwd': '/Users/alice/src/otherapp',
+    'started_at': '2026-01-17T08:00:00Z',
+    'last_active': '2026-01-17T08:30:00Z',
+    'title': 'Velocity estimation for Q2',
+    'summary': 'Reviewed burndown charts and story-point estimation for the quarter.',
+    'topics': ['project-estimation', 'agile']
+}
+
 
 class TestDatabaseSchema(unittest.TestCase):
     def setUp(self):
@@ -149,6 +161,7 @@ class TestDatabaseSearch(unittest.TestCase):
         self.db.create_schema()
         self.db.upsert_conversation(SAMPLE_CONV)
         self.db.upsert_conversation(SAMPLE_CONV_B)
+        self.db.upsert_conversation(SAMPLE_CONV_C)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -187,6 +200,29 @@ class TestDatabaseSearch(unittest.TestCase):
         self.assertIn(SAMPLE_CONV['id'], ids)
         for r in results:
             self.assertIn('/Users/alice/src/myapp', r['cwd'])
+
+    def test_search_default_does_not_match_summary_only(self):
+        # "burndown" appears only in SAMPLE_CONV_C's summary, not in any topic
+        results = self.db.search(['burndown'], mode='and')
+        self.assertEqual(results, [])
+
+    def test_search_default_does_not_match_title_only(self):
+        # "Velocity" appears only in SAMPLE_CONV_C's title, not in any topic
+        results = self.db.search(['Velocity'], mode='and')
+        self.assertEqual(results, [])
+
+    def test_search_include_summary_finds_summary_match(self):
+        results = self.db.search(['burndown'], mode='and', include_summary=True)
+        self.assertIn(SAMPLE_CONV_C['id'], self._ids(results))
+
+    def test_search_include_title_finds_title_match(self):
+        results = self.db.search(['Velocity'], mode='and', include_title=True)
+        self.assertIn(SAMPLE_CONV_C['id'], self._ids(results))
+
+    def test_search_stem_matches_hyphenated_topic(self):
+        # "estimate" (stem "estimat") should match topic "project-estimation"
+        results = self.db.search(['estimate'], mode='and')
+        self.assertIn(SAMPLE_CONV_C['id'], self._ids(results))
 
 
 class TestDatabaseList(unittest.TestCase):

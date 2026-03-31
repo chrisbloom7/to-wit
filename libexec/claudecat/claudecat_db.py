@@ -169,9 +169,10 @@ class Database:
             'topics':     row['topics'] or '',
         }
 
-    def search(self, terms: list, mode: str = 'and', folder: str = None) -> list:
+    def search(self, terms: list, mode: str = 'and', folder: str = None,
+               include_summary: bool = False, include_title: bool = False) -> list:
         """
-        Full-text search over topic names and summaries.
+        Search over topic names, and optionally summaries and/or titles.
 
         mode='and'  — all terms must match (intersection)
         mode='or'   — any term must match (union)
@@ -183,15 +184,27 @@ class Database:
             term_id_sets = []
             for term in terms:
                 like = f'%{term}%'
+                # For topic matching, use a stemmed pattern (drop last char) so that
+                # e.g. "estimate" matches "project-estimation" via "%estimat%"
+                topic_like = f'%{term[:-1]}%' if len(term) >= 5 else like
+                conditions = ['t.name LIKE ?']
+                params = [topic_like]
+                if include_summary:
+                    conditions.append('c.summary LIKE ?')
+                    params.append(like)
+                if include_title:
+                    conditions.append('c.title LIKE ?')
+                    params.append(like)
+                where = ' OR '.join(conditions)
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT DISTINCT c.id
                     FROM conversations c
                     LEFT JOIN conversation_topics ct ON ct.conversation_id = c.id
                     LEFT JOIN topics t ON t.id = ct.topic_id
-                    WHERE t.name LIKE ? OR c.summary LIKE ?
+                    WHERE {where}
                     """,
-                    (like, like)
+                    params
                 ).fetchall()
                 term_id_sets.append({r['id'] for r in rows})
 
