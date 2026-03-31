@@ -1,5 +1,7 @@
 # claudecat
 
+> **Note:** `claudecat` is a working title. The name may change before 1.0.
+
 A searchable catalog of your [Claude Code](https://claude.ai/code) conversations, organized by topic.
 
 Claude Code conversations are analyzed, filtered for substance, and stored in a local SQLite database. A CLI lets you search, list, and export conversations. A stop hook keeps the catalog up to date automatically after each session.
@@ -11,11 +13,17 @@ Claude Code conversations are analyzed, filtered for substance, and stored in a 
 
 ## Installation
 
-> Homebrew tap coming soon. For now, clone and link manually.
+> Homebrew tap coming soon. For now, clone and run the install script.
 
 ```bash
 git clone https://github.com/chrisbloom7/claudecat.git ~/path/to/claudecat
-ln -sf ~/path/to/claudecat/bin/claudecat /usr/local/bin/claudecat
+~/path/to/claudecat/install
+```
+
+By default, `install` links into `/usr/local/bin`. Pass a different directory as the first argument if needed:
+
+```bash
+~/path/to/claudecat/install ~/.local/bin
 ```
 
 ## Quick start

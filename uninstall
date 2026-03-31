@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# uninstall — remove claudecat hook, database, and binary symlink
+#
+# Usage:
+#   ./uninstall [<install-dir>]
+#
+# Default install directory: /usr/local/bin
+
+set -euo pipefail
+
+INSTALL_DIR="${1:-/usr/local/bin}"
+BINARY="${INSTALL_DIR}/claudecat"
+
+# Run teardown first (removes hook and database, handles its own confirmation)
+if command -v claudecat &>/dev/null; then
+  claudecat teardown
+else
+  echo "Warning: claudecat not found in PATH — skipping hook and database teardown." >&2
+  echo "You may need to remove ~/.claude/catalog/ and the stop hook from ~/.claude/settings.local.json manually." >&2
+fi
+
+# Remove the binary symlink
+if [[ -L "${BINARY}" ]]; then
+  rm "${BINARY}"
+  echo "Removed: ${BINARY}"
+elif [[ -e "${BINARY}" ]]; then
+  echo "Warning: '${BINARY}' exists but is not a symlink — not removing." >&2
+  echo "Remove it manually if needed." >&2
+else
+  echo "Nothing to remove at ${BINARY}."
+fi
+
+echo "Uninstall complete."

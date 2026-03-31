@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# install — link claudecat into PATH
+#
+# Usage:
+#   ./install [<install-dir>]
+#
+# Default install directory: /usr/local/bin
+
+set -euo pipefail
+
+INSTALL_DIR="${1:-/usr/local/bin}"
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [[ ! -d "${INSTALL_DIR}" ]]; then
+  echo "Error: install directory '${INSTALL_DIR}' does not exist." >&2
+  exit 1
+fi
+
+ln -sf "${REPO_DIR}/bin/claudecat" "${INSTALL_DIR}/claudecat"
+echo "Installed: claudecat → ${INSTALL_DIR}/claudecat"
