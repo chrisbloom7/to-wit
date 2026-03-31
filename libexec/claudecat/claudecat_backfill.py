@@ -12,7 +12,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from claudecat_index import index_conversation
+from claudecat_index import index_conversation, parse_jsonl, should_index
 from claudecat_db import Database
 
 
@@ -74,9 +74,14 @@ def main():
             if db is not None and db.is_indexed(session_id) and not args.force:
                 print(f"  -> would skip (already indexed)")
                 counts['already_indexed'] += 1
-            else:
-                print(f"  -> would index")
-                counts['indexed'] += 1
+                continue
+            messages = parse_jsonl(path)
+            if not should_index(messages):
+                print(f"  -> would skip (too short / insufficient content)")
+                counts['skipped'] += 1
+                continue
+            print(f"  -> would index (Claude analysis may still skip)")
+            counts['indexed'] += 1
             continue
 
         try:
