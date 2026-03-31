@@ -72,7 +72,7 @@ done
 bats_exit=0
 
 if [[ "${has_path_arg}" == false ]]; then
-  "${BATS}" --recursive tests/ "${bats_args[@]}" || bats_exit=$?
+  "${BATS}" --recursive tests/ "${bats_args[@]+"${bats_args[@]}"}" || bats_exit=$?
 elif [[ ${#bats_args[@]} -gt 0 ]]; then
   "${BATS}" "${bats_args[@]}" || bats_exit=$?
 fi
