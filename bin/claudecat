@@ -8,7 +8,7 @@
 #   setup [--full | --hook]       Initialize database (--full also installs hook and runs backfill; --hook also installs hook)
 #   search <terms...> [--or] [--csv] [--folder <path>]
 #   list [--csv] [--folder <path>] [--topic <name>]
-#   open [--force] <session-id>   Resume a session in its original working directory
+#   resume [--force] <session-id> Resume a session in its original working directory
 #   prune [--dry-run]             Remove entries whose transcripts no longer exist
 #   export <session-id> [--format md|json] [--summarize]
 #   export --topic <name> [--format md|json] [--summarize]
@@ -75,9 +75,14 @@ case "${subcommand}" in
     shift
     python3 "${HELPERS_DIR}/claudecat_list.py" "$@" || exit $?
     ;;
+  resume)
+    shift
+    python3 "${HELPERS_DIR}/claudecat_resume.py" "$@" || exit $?
+    ;;
   open)
     shift
-    python3 "${HELPERS_DIR}/claudecat_open.py" "$@" || exit $?
+    echo "Warning: 'open' is deprecated; use 'resume' instead." >&2
+    python3 "${HELPERS_DIR}/claudecat_resume.py" "$@" || exit $?
     ;;
   prune)
     shift

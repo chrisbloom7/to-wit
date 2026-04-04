@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `open` subcommand renamed to `resume` to match Claude Code's `--resume` flag terminology; `open` remains as a deprecated alias with a warning
+
 ### Fixed
 - `backfill --dry-run` now applies the same `should_index` preflight filter as a live run, so short/trivial sessions are counted as skipped rather than inflating the "would index" total
 - `setup` now runs schema migrations on existing databases, fixing a "no such column: message_count" error on backfill and indexing for databases created before that column was added
