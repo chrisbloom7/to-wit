@@ -105,8 +105,8 @@ class TestClaudecatList(unittest.TestCase):
         self.assertIn('conv-c', ids)
         self.assertNotIn('conv-b', ids)
 
-    def test_list_with_csv_includes_header_and_all_rows(self):
-        result = run_list(self.db_path, ['--csv'])
+    def test_list_with_format_csv_includes_header_and_all_rows(self):
+        result = run_list(self.db_path, ['--format', 'csv'])
         self.assertEqual(result.returncode, 0)
         lines = result.stdout.strip().splitlines()
         # At least header + 3 data rows
@@ -121,6 +121,10 @@ class TestClaudecatList(unittest.TestCase):
         reader = csv.reader(io.StringIO(result.stdout))
         rows = list(reader)
         self.assertGreaterEqual(len(rows), 4)
+
+    def test_csv_flag_is_not_recognized(self):
+        result = run_list(self.db_path, ['--csv'])
+        self.assertNotEqual(result.returncode, 0)
 
     def test_list_with_nonexistent_folder_returns_no_results(self):
         result = run_list(self.db_path, ['--folder', '/nonexistent/path'])
@@ -169,17 +173,6 @@ class TestClaudecatList(unittest.TestCase):
         conv_a = next(r for r in data if r['id'] == 'conv-a')
         self.assertIsInstance(conv_a['topics'], list)
         self.assertIn('SQLite', conv_a['topics'])
-
-    def test_format_csv_works_same_as_csv_flag(self):
-        result_flag = run_list(self.db_path, ['--csv'])
-        result_format = run_list(self.db_path, ['--format', 'csv'])
-        self.assertEqual(result_flag.returncode, 0)
-        self.assertEqual(result_format.returncode, 0)
-        self.assertEqual(result_flag.stdout, result_format.stdout)
-
-    def test_format_and_csv_are_mutually_exclusive(self):
-        result = run_list(self.db_path, ['--format', 'json', '--csv'])
-        self.assertNotEqual(result.returncode, 0)
 
     def test_format_json_respects_topic_filter(self):
         import json

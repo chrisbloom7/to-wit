@@ -3,7 +3,7 @@
 claudecat_search — Search cataloged Claude conversations.
 
 Usage:
-    python3 claudecat_search.py [--or] [--all | --summary] [--all | --title] [--csv] [--folder <path>] <terms...>
+    python3 claudecat_search.py [--or] [--all | --summary] [--all | --title] [--format json|csv] [--folder <path>] <terms...>
 """
 
 import argparse
@@ -169,11 +169,8 @@ def main():
                        help='Also search conversation summaries')
     scope.add_argument('--title', action='store_true',
                        help='Also search conversation titles')
-    fmt_group = parser.add_mutually_exclusive_group()
-    fmt_group.add_argument('--format', choices=['json', 'csv'], metavar='FORMAT',
-                           help='Output format: json or csv')
-    fmt_group.add_argument('--csv', action='store_true',
-                           help='Output results as CSV (shorthand for --format csv)')
+    parser.add_argument('--format', choices=['json', 'csv'], metavar='FORMAT',
+                        help='Output format: json or csv')
     parser.add_argument('--folder', metavar='PATH',
                         help='Restrict search to a specific project folder')
     args = parser.parse_args()
@@ -187,11 +184,9 @@ def main():
     results = db.search(args.terms, mode=mode, folder=args.folder,
                         include_summary=include_summary, include_title=include_title)
 
-    fmt = args.format or ('csv' if args.csv else None)
-
-    if fmt == 'json':
+    if args.format == 'json':
         _print_json(results)
-    elif fmt == 'csv' or args.csv:
+    elif args.format == 'csv':
         if not results:
             print("No conversations found.", file=sys.stderr)
             sys.exit(0)

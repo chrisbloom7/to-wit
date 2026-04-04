@@ -6,8 +6,8 @@
 #
 # Subcommands:
 #   setup [--full | --hook]       Initialize database (--full also installs hook and runs backfill; --hook also installs hook)
-#   search <terms...> [--or] [--all | --summary] [--all | --title] [--format json|csv | --csv] [--folder <path>]
-#   list [--format json|csv | --csv] [--folder <path>] [--topic <name>]
+#   search <terms...> [--or] [--all | --summary] [--all | --title] [--format json|csv] [--folder <path>]
+#   list [--format json|csv] [--folder <path>] [--topic <name>]
 #   resume [--force] <session-id> Resume a session in its original working directory
 #   prune [--dry-run]             Remove entries whose transcripts no longer exist
 #   export <session-id> [--format md|json] [--summarize]
