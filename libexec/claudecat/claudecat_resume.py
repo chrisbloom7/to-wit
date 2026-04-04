@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-claudecat_open — Resume a cataloged Claude conversation.
+claudecat_resume — Resume a cataloged Claude conversation.
 
 Usage:
-    python3 claudecat_open.py [--force] <session-id>
+    python3 claudecat_resume.py [--force] <session-id>
 
 Changes to the conversation's working directory and resumes the session with
 `claude --resume <session-id>`, replacing the current process.
@@ -64,7 +64,7 @@ def main():
                 f"  claude --resume {args.session_id}\n"
                 f"\n"
                 f"To recreate the original directory and resume:\n"
-                f"  claudecat open --force {args.session_id}",
+                f"  claudecat resume --force {args.session_id}",
                 file=sys.stderr
             )
             sys.exit(1)

@@ -255,6 +255,31 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# resume subcommand
+# ---------------------------------------------------------------------------
+
+@test "claudecat: resume with unknown session-id exits non-zero" {
+  "${CLAUDECAT}" setup
+  run "${CLAUDECAT}" resume nonexistent-id
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"session not found"* ]] || {
+    echo "Expected 'session not found' in output, got: ${output}"; return 1
+  }
+}
+
+@test "claudecat: open subcommand prints deprecation warning and delegates to resume" {
+  "${CLAUDECAT}" setup
+  run "${CLAUDECAT}" open nonexistent-id
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"deprecated"* ]] || {
+    echo "Expected deprecation warning in output, got: ${output}"; return 1
+  }
+  [[ "${output}" == *"session not found"* ]] || {
+    echo "Expected 'session not found' in output (delegated to resume), got: ${output}"; return 1
+  }
+}
+
+# ---------------------------------------------------------------------------
 # setup --hook subcommand
 # ---------------------------------------------------------------------------
 
