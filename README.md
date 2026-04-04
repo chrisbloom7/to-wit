@@ -71,11 +71,13 @@ Subcommands:
     [--format json|csv]           Output format (default: table)
     [--folder <path>]             Scope to a working directory
     [--topic <name>]              Filter by topic
-  resume [--force] <session-id> Resume a session in its original working directory
+  resume <session-id>           Resume a session in its original working directory
+    [--force]                     Recreate the working directory if it no longer exists
   export <session-id>           Export a conversation
-    [--format md|json]            Output format (default: md)
+    [--format json]               Output as JSON instead of Markdown (default)
     [--summarize]                 AI summary instead of full transcript
   export --topic <name>         Export all conversations matching a topic
+    [--format json]               Output as JSON instead of Markdown (default)
     [--summarize]                 Meta-summary of all matching conversations
   backfill                      Index all existing conversations
     [--dry-run]                   Preview without writing
