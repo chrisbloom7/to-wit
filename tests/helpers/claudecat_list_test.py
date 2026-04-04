@@ -136,6 +136,61 @@ class TestClaudecatList(unittest.TestCase):
         result = run_list(empty_db)
         self.assertEqual(result.returncode, 0)
 
+    def test_format_json_outputs_valid_json(self):
+        import json
+        result = run_list(self.db_path, ['--format', 'json'])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertIsInstance(data, list)
+
+    def test_format_json_contains_all_conversations(self):
+        import json
+        result = run_list(self.db_path, ['--format', 'json'])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        ids = {row['id'] for row in data}
+        self.assertIn('conv-a', ids)
+        self.assertIn('conv-b', ids)
+        self.assertIn('conv-c', ids)
+
+    def test_format_json_includes_expected_fields(self):
+        import json
+        result = run_list(self.db_path, ['--format', 'json'])
+        self.assertEqual(result.returncode, 0)
+        row = json.loads(result.stdout)[0]
+        for field in ('id', 'title', 'topics', 'cwd', 'date'):
+            self.assertIn(field, row, f"Missing field: {field}")
+
+    def test_format_json_topics_is_list(self):
+        import json
+        result = run_list(self.db_path, ['--format', 'json'])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        conv_a = next(r for r in data if r['id'] == 'conv-a')
+        self.assertIsInstance(conv_a['topics'], list)
+        self.assertIn('SQLite', conv_a['topics'])
+
+    def test_format_csv_works_same_as_csv_flag(self):
+        result_flag = run_list(self.db_path, ['--csv'])
+        result_format = run_list(self.db_path, ['--format', 'csv'])
+        self.assertEqual(result_flag.returncode, 0)
+        self.assertEqual(result_format.returncode, 0)
+        self.assertEqual(result_flag.stdout, result_format.stdout)
+
+    def test_format_and_csv_are_mutually_exclusive(self):
+        result = run_list(self.db_path, ['--format', 'json', '--csv'])
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_format_json_respects_topic_filter(self):
+        import json
+        result = run_list(self.db_path, ['--format', 'json', '--topic', 'SQLite'])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        ids = {row['id'] for row in data}
+        self.assertIn('conv-a', ids)
+        self.assertIn('conv-c', ids)
+        self.assertNotIn('conv-b', ids)
+
 
 if __name__ == '__main__':
     unittest.main()

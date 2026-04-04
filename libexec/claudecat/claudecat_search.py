@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import csv
+import json
 import os
 import shutil
 import sys
@@ -137,6 +138,22 @@ def _print_csv(rows):
         ])
 
 
+def _print_json(rows):
+    """Print results as a JSON array of objects."""
+    out = []
+    for r in rows:
+        topics_str = r['topics'] or ''
+        topics = [t.strip() for t in topics_str.split(',')] if topics_str else []
+        out.append({
+            'id': r['id'] or '',
+            'title': r['title'] or '',
+            'topics': topics,
+            'cwd': r['cwd'] or '',
+            'date': (r['started_at'] or '')[:10],
+        })
+    print(json.dumps(out, indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Search cataloged Claude conversations.'
@@ -152,8 +169,11 @@ def main():
                        help='Also search conversation summaries')
     scope.add_argument('--title', action='store_true',
                        help='Also search conversation titles')
-    parser.add_argument('--csv', action='store_true',
-                        help='Output results as CSV')
+    fmt_group = parser.add_mutually_exclusive_group()
+    fmt_group.add_argument('--format', choices=['json', 'csv'], metavar='FORMAT',
+                           help='Output format: json or csv')
+    fmt_group.add_argument('--csv', action='store_true',
+                           help='Output results as CSV (shorthand for --format csv)')
     parser.add_argument('--folder', metavar='PATH',
                         help='Restrict search to a specific project folder')
     args = parser.parse_args()
@@ -167,13 +187,19 @@ def main():
     results = db.search(args.terms, mode=mode, folder=args.folder,
                         include_summary=include_summary, include_title=include_title)
 
-    if not results:
-        print("No conversations found.", file=sys.stderr)
-        sys.exit(0)
+    fmt = args.format or ('csv' if args.csv else None)
 
-    if args.csv:
+    if fmt == 'json':
+        _print_json(results)
+    elif fmt == 'csv' or args.csv:
+        if not results:
+            print("No conversations found.", file=sys.stderr)
+            sys.exit(0)
         _print_csv(results)
     else:
+        if not results:
+            print("No conversations found.", file=sys.stderr)
+            sys.exit(0)
         _print_table(results, terms=args.terms, group_by_path=not args.folder)
 
 
