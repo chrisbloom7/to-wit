@@ -3,7 +3,7 @@
 claudecat_search — Search cataloged Claude conversations.
 
 Usage:
-    python3 claudecat_search.py [--or] [--summary] [--title] [--csv] [--folder <path>] <terms...>
+    python3 claudecat_search.py [--or] [--all | --summary] [--all | --title] [--csv] [--folder <path>] <terms...>
 """
 
 import argparse
@@ -145,10 +145,13 @@ def main():
                         help='Search terms')
     parser.add_argument('--or', dest='or_', action='store_true',
                         help='Match any term instead of all terms')
-    parser.add_argument('--summary', action='store_true',
-                        help='Also search conversation summaries')
-    parser.add_argument('--title', action='store_true',
-                        help='Also search conversation titles')
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument('--all', action='store_true',
+                       help='Search topics, summaries, and titles')
+    scope.add_argument('--summary', action='store_true',
+                       help='Also search conversation summaries')
+    scope.add_argument('--title', action='store_true',
+                       help='Also search conversation titles')
     parser.add_argument('--csv', action='store_true',
                         help='Output results as CSV')
     parser.add_argument('--folder', metavar='PATH',
@@ -158,9 +161,11 @@ def main():
     db = Database()
     db.validate()
 
+    include_summary = args.all or args.summary
+    include_title = args.all or args.title
     mode = 'or' if args.or_ else 'and'
     results = db.search(args.terms, mode=mode, folder=args.folder,
-                        include_summary=args.summary, include_title=args.title)
+                        include_summary=include_summary, include_title=include_title)
 
     if not results:
         print("No conversations found.", file=sys.stderr)
