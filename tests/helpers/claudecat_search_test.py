@@ -122,25 +122,27 @@ class TestClaudecatSearch(unittest.TestCase):
         ids = self._ids_in_output(result.stdout)
         self.assertEqual(ids, set())
 
-    def test_search_with_csv_includes_header_row(self):
-        result = run_search(self.db_path, ['SQLite', '--csv'])
+    def test_search_with_format_csv_includes_header_row(self):
+        result = run_search(self.db_path, ['SQLite', '--format', 'csv'])
         self.assertEqual(result.returncode, 0)
         lines = result.stdout.strip().splitlines()
         self.assertTrue(len(lines) >= 1, "Expected at least a header line")
         header = lines[0].lower()
-        # Header should contain common field names
         self.assertTrue(
             'id' in header or 'title' in header or 'session' in header,
             f"Unexpected CSV header: {header!r}"
         )
 
-    def test_search_with_csv_output_is_valid_csv(self):
-        result = run_search(self.db_path, ['SQLite', '--csv'])
+    def test_search_with_format_csv_output_is_valid_csv(self):
+        result = run_search(self.db_path, ['SQLite', '--format', 'csv'])
         self.assertEqual(result.returncode, 0)
-        # Should parse without error
         reader = csv.reader(io.StringIO(result.stdout))
         rows = list(reader)
         self.assertTrue(len(rows) >= 1, "Expected at least a header row in CSV output")
+
+    def test_csv_flag_is_not_recognized(self):
+        result = run_search(self.db_path, ['SQLite', '--csv'])
+        self.assertNotEqual(result.returncode, 0)
 
     def test_search_with_folder_scoped_to_cwd(self):
         result = run_search(self.db_path, ['SQLite', '--folder', self.myapp_dir])
@@ -253,17 +255,6 @@ class TestClaudecatSearch(unittest.TestCase):
         conv_a = next(r for r in data if r['id'] == 'conv-a')
         self.assertIsInstance(conv_a['topics'], list)
         self.assertIn('SQLite', conv_a['topics'])
-
-    def test_format_csv_works_same_as_csv_flag(self):
-        result_flag = run_search(self.db_path, ['SQLite', '--csv'])
-        result_format = run_search(self.db_path, ['SQLite', '--format', 'csv'])
-        self.assertEqual(result_flag.returncode, 0)
-        self.assertEqual(result_format.returncode, 0)
-        self.assertEqual(result_flag.stdout, result_format.stdout)
-
-    def test_format_and_csv_are_mutually_exclusive(self):
-        result = run_search(self.db_path, ['SQLite', '--format', 'json', '--csv'])
-        self.assertNotEqual(result.returncode, 0)
 
     def test_format_json_no_results_outputs_empty_array(self):
         import json

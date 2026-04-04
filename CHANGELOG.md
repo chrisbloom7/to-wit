@@ -9,7 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `search --all` flag: searches topics, summaries, and titles simultaneously; mutually exclusive with `--summary` and `--title`
-- `search --format json|csv` and `list --format json|csv`: structured output for agent consumption; `--format csv` is equivalent to the existing `--csv` flag; `--format json` emits a JSON array with `id`, `title`, `topics` (array), `cwd`, and `date` fields
+- `search --format json|csv` and `list --format json|csv`: structured output for agent consumption; `--format json` emits a JSON array with `id`, `title`, `topics` (array), `cwd`, and `date` fields
+
+### Removed
+- `search --csv` and `list --csv` flags replaced by `--format csv` for consistency with `export --format`
 
 ### Changed
 - `open` subcommand renamed to `resume` to match Claude Code's `--resume` flag terminology; `open` remains as a deprecated alias with a warning
