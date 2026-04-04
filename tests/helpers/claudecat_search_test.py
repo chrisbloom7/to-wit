@@ -193,6 +193,33 @@ class TestClaudecatSearch(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn('conv-d', result.stdout)
 
+    def test_all_flag_finds_summary_only_match(self):
+        # "burndown" is only in conv-d's summary
+        result = run_search(self.db_path, ['burndown', '--all'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-d', result.stdout)
+
+    def test_all_flag_finds_title_only_match(self):
+        # "Velocity" is only in conv-d's title
+        result = run_search(self.db_path, ['Velocity', '--all'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-d', result.stdout)
+
+    def test_all_flag_still_finds_topic_match(self):
+        result = run_search(self.db_path, ['SQLite', '--all'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-a', result.stdout)
+        self.assertIn('conv-c', result.stdout)
+
+    def test_all_flag_is_exclusive_of_summary_and_title(self):
+        # --all should be mutually exclusive with --summary and --title
+        result = run_search(self.db_path, ['SQLite', '--all', '--summary'])
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_all_flag_is_exclusive_of_title(self):
+        result = run_search(self.db_path, ['SQLite', '--all', '--title'])
+        self.assertNotEqual(result.returncode, 0)
+
 
 if __name__ == '__main__':
     unittest.main()
