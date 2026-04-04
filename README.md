@@ -14,7 +14,7 @@ claudecat search hook
   350fa22f-10b7-48ff-ac9d-bd9f1081c23b  Debugging non-firing Stop …  hooks     2026-03-31
 
 claudecat open 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
-# => cd /Users/chrisbloom7 & claude --resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
+# => switch to `/Users/chrisbloom7` and call `claude --resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b`
   ```
 
 
@@ -48,7 +48,7 @@ claudecat setup --full
 # Or step by step:
 claudecat setup          # Initialize the database
 claudecat install-hook   # Add stop hook to Claude Code (auto-indexes future sessions)
-claudecat backfill       # Index all existing conversations (~30–60 min first run)
+claudecat backfill       # Index all existing conversations (~4 sec/session on Apple M4 Pro)
 ```
 
 ## Usage
