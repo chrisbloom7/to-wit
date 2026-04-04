@@ -13,9 +13,9 @@ claudecat search hook
   ------------------------------------  ---------------------------  --------  ----------
   350fa22f-10b7-48ff-ac9d-bd9f1081c23b  Debugging non-firing Stop …  hooks     2026-03-31
 
-claudecat open 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
+claudecat resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
 # => switch to `/Users/chrisbloom7` and call `claude --resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b`
-  ```
+```
 
 
 ## Requirements
@@ -60,14 +60,18 @@ Subcommands:
   setup [--full | --hook]       Initialize database
                                   --full  also installs hook and runs backfill
                                   --hook  also installs hook
-  search <terms...>             Search conversations by topic or summary
+  search <terms...>             Search conversations by topic, summary, or title
     [--or]                        Match any term instead of all (default: AND)
-    [--csv]                       Output as CSV
+    [--all]                       Search topics, summaries, and titles
+    [--summary]                   Also search conversation summaries
+    [--title]                     Also search conversation titles
+    [--format json|csv]           Output format (default: table)
     [--folder <path>]             Scope to a working directory
   list                          List all indexed conversations
-    [--csv]                       Output as CSV
+    [--format json|csv]           Output format (default: table)
     [--folder <path>]             Scope to a working directory
     [--topic <name>]              Filter by topic
+  resume [--force] <session-id> Resume a session in its original working directory
   export <session-id>           Export a conversation
     [--format md|json]            Output format (default: md)
     [--summarize]                 AI summary instead of full transcript
@@ -77,9 +81,12 @@ Subcommands:
     [--dry-run]                   Preview without writing
     [--force]                     Re-index already indexed conversations
     [--folder <path>]             Scope to one project folder
+  prune [--dry-run]             Remove entries whose transcripts no longer exist
   install-hook                  Add claudecat stop hook to Claude Code settings
   uninstall-hook                Remove claudecat stop hook from Claude Code settings
   teardown [--yes]              Remove hook and delete database
+  implode [--yes]               Full uninstall: remove hook, database, and binary symlink
+    [--install-dir <dir>]         Directory where claudecat was installed (default: /usr/local/bin)
   stats                         Show catalog statistics
   help                          Show this message
 ```
@@ -94,13 +101,19 @@ Subcommands:
 
 ## Uninstalling
 
-Run teardown before uninstalling to clean up the hook and database:
+To do a full uninstall in one step — removes the stop hook, database, and binary symlink:
+
+```bash
+claudecat implode
+```
+
+Or to remove just the hook and database while leaving the binary in place:
 
 ```bash
 claudecat teardown
 ```
 
-Then remove the binary (or `brew uninstall claudecat` when available).
+Then remove the binary manually (or `brew uninstall claudecat` when available).
 
 ## Development
 
