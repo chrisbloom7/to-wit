@@ -114,18 +114,18 @@ if [[ -n "${PYTHON_BIN}" ]]; then
     # Explicit test files passed on command line
     for spec in "${python_files[@]}"; do
       if [[ -n "${filter_pattern}" ]]; then
-        "${PYTHON_BIN}" -m unittest "${spec}" -- -k "${filter_pattern}" || python_exit=$?
+        "${PYTHON_BIN}" "${spec}" -k "${filter_pattern}" || python_exit=$?
       else
-        "${PYTHON_BIN}" -m unittest "${spec}" || python_exit=$?
+        "${PYTHON_BIN}" "${spec}" || python_exit=$?
       fi
     done
   elif [[ "${has_path_arg}" == false ]]; then
     # Discovery mode: run all *_test.py under tests/
     while IFS= read -r -d '' spec; do
       if [[ -n "${filter_pattern}" ]]; then
-        "${PYTHON_BIN}" -m unittest "${spec}" -- -k "${filter_pattern}" || python_exit=$?
+        "${PYTHON_BIN}" "${spec}" -k "${filter_pattern}" || python_exit=$?
       else
-        "${PYTHON_BIN}" -m unittest "${spec}" || python_exit=$?
+        "${PYTHON_BIN}" "${spec}" || python_exit=$?
       fi
     done < <(find tests/ -name '*_test.py' -print0 | sort -z)
   fi

@@ -113,20 +113,23 @@ teardown() {
 # ---------------------------------------------------------------------------
 
 @test "claudecat: missing python3 prints helpful error and exits non-zero" {
-  # Run claudecat in a clean environment (env -i) so that tool version managers
-  # (mise, pyenv, asdf, etc.) cannot inject python3 back into PATH.
-  # Symlink only the non-Python POSIX tools the script needs into a scratch
-  # directory and exclude /usr/bin (which has python3 on macOS) from PATH, so
-  # that `command -v python3` reliably fails on all platforms.
+  # Use env -i to clear version-manager env vars (mise, pyenv, asdf) that can
+  # redirect python3 calls even when PATH is overridden. Place a stub python3
+  # first in PATH so the script finds it before any real interpreter — this is
+  # necessary on Ubuntu 24.04 where /bin is a symlink to /usr/bin and removing
+  # /usr/bin from PATH alone does not hide python3.
   local no_py_bin="${TEST_TMPDIR}/no_python3"
   mkdir -p "${no_py_bin}"
-  for _tool in dirname readlink awk; do
-    ln -sf "/usr/bin/${_tool}" "${no_py_bin}/${_tool}"
-  done
-  run env -i \
+  cat > "${no_py_bin}/python3" <<'EOF'
+#!/bin/sh
+echo "python3: command not found" >&2
+exit 127
+EOF
+  chmod +x "${no_py_bin}/python3"
+  run -127 env -i \
     HOME="${HOME}" \
     CLAUDECAT_DB_PATH="${TEST_TMPDIR}/test.db" \
-    PATH="${no_py_bin}:/bin" \
+    PATH="${no_py_bin}:/usr/local/bin:/usr/bin:/bin" \
     "${CLAUDECAT}" setup 2>&1
   [ "${status}" -ne 0 ]
   [[ "${output}" == *"python3"* ]] || [[ "${output}" == *"Python"* ]] || {
