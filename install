@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install — link claudecat into PATH
+# install — link towit into PATH
 #
 # Usage:
 #   ./install [<install-dir>]
@@ -16,5 +16,5 @@ if [[ ! -d "${INSTALL_DIR}" ]]; then
   exit 1
 fi
 
-ln -sf "${REPO_DIR}/bin/claudecat" "${INSTALL_DIR}/claudecat"
-echo "Installed: claudecat → ${INSTALL_DIR}/claudecat"
+ln -sf "${REPO_DIR}/bin/towit" "${INSTALL_DIR}/towit"
+echo "Installed: towit → ${INSTALL_DIR}/towit"

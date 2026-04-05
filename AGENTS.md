@@ -4,11 +4,11 @@ This file provides guidance to AI coding agents when working with code in this r
 
 ## What This Project Is
 
-**claudecat** is a CLI tool that maintains a searchable SQLite catalog of Claude Code conversations, organized by topic. It auto-indexes sessions via a Claude Code stop hook, and provides search, list, export, and stats subcommands.
+**To Wit** (`towit`) is a CLI tool that maintains a searchable SQLite catalog of Claude Code conversations, organized by topic. It auto-indexes sessions via a Claude Code stop hook, and provides search, list, export, and stats subcommands.
 
-- **Entry point:** `bin/claudecat` (bash dispatcher; symlinked to `~/.local/bin/claudecat`)
-- **Helpers:** `libexec/claudecat/*.py` (Python modules, one per subcommand)
-- **Database:** `~/.claudecat/catalog.db` (SQLite WAL mode, overridable via `CLAUDECAT_DB_PATH`)
+- **Entry point:** `bin/towit` (bash dispatcher; symlinked to `~/.local/bin/towit`)
+- **Helpers:** `libexec/towit/*.py` (Python modules, one per subcommand)
+- **Database:** `~/.towit/catalog.db` (SQLite WAL mode, overridable via `TOWIT_DB_PATH`)
 - **Tests:** `tests/` (BATS integration tests + Python unit tests)
 
 ## Commands
@@ -18,8 +18,8 @@ This file provides guidance to AI coding agents when working with code in this r
 ./run-tests
 
 # Run a specific test file
-./run-tests tests/bin/claudecat.bats
-./run-tests tests/helpers/claudecat_search_test.py
+./run-tests tests/bin/towit.bats
+./run-tests tests/helpers/towit_search_test.py
 
 # Filter tests by name pattern
 ./run-tests --filter "setup"
@@ -33,14 +33,15 @@ No build step required — it's a bash/Python CLI tool.
 ## Architecture
 
 ### Dispatcher Pattern
-`bin/claudecat` resolves its real path (symlink-safe), sets `HELPERS_DIR=libexec/claudecat/`, then dispatches to `claudecat_<subcommand>.py` via `python3 "$HELPERS_DIR/claudecat_$subcommand.py"`.
+`bin/towit` resolves its real path (symlink-safe), sets `HELPERS_DIR=libexec/towit/`, then dispatches to `towit_<subcommand>.py` via `python3 "$HELPERS_DIR/towit_$subcommand.py"`.
 
-### Python Modules (libexec/claudecat/)
-- `claudecat_db.py` — Database abstraction layer; all SQL lives here
-- `claudecat_setup.py` — Schema creation and migrations (adds columns if missing)
-- `claudecat_index.py` — Core indexing: parses JSONL transcripts, calls `claude -p` to generate title/summary/topics, filters trivial sessions
-- `claudecat_backfill.py` — Batch indexes existing `~/.claude/projects/` sessions
-- `claudecat_hook.py` — Stop hook entry point; guarded by `CLAUDECAT_INDEXING=1` env var to prevent recursion
+### Python Modules (libexec/towit/)
+
+- `towit_db.py` — Database abstraction layer; all SQL lives here
+- `towit_setup.py` — Schema creation and migrations (adds columns if missing)
+- `towit_index.py` — Core indexing: parses JSONL transcripts, calls `claude -p` to generate title/summary/topics, filters trivial sessions
+- `towit_backfill.py` — Batch indexes existing `~/.claude/projects/` sessions
+- `towit_hook.py` — Stop hook entry point; guarded by `TOWIT_INDEXING=1` env var to prevent recursion
 - All other modules map 1:1 to subcommands
 
 ### Database Schema
@@ -56,16 +57,16 @@ Resumed conversations are re-indexed when new messages are detected. Previously 
 
 | Variable | Purpose |
 |---|---|
-| `CLAUDECAT_DB_PATH` | Override database path (used in tests) |
-| `CLAUDECAT_SETTINGS_PATH` | Override `~/.claude/settings.json` path (used in tests) |
-| `CLAUDECAT_INDEXING=1` | Set by hook to prevent recursive triggering |
+| `TOWIT_DB_PATH` | Override database path (used in tests) |
+| `TOWIT_SETTINGS_PATH` | Override `~/.claude/settings.json` path (used in tests) |
+| `TOWIT_INDEXING=1` | Set by hook to prevent recursive triggering |
 
 ## Test Structure
 
 - `tests/test_helper.bash` — Shared BATS setup/teardown (temp dirs, mocks, fixtures)
-- `tests/bin/claudecat.bats` — CLI integration tests
+- `tests/bin/towit.bats` — CLI integration tests
 - `tests/bin/uninstall.bats` — Install/uninstall tests
-- `tests/helpers/claudecat_*_test.py` — Python unit tests per module
+- `tests/helpers/towit_*_test.py` — Python unit tests per module
 
 ## Security Constraints
 

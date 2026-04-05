@@ -1,6 +1,6 @@
-# Tests for libexec/claudecat/claudecat_install_hook.py
+# Tests for libexec/towit/towit_install_hook.py
 #
-# Run with: python3 tests/helpers/claudecat_install_hook_test.py
+# Run with: python3 tests/helpers/towit_install_hook_test.py
 
 import unittest
 import tempfile
@@ -11,15 +11,15 @@ import sys
 import subprocess
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-HELPERS_DIR = os.path.join(PROJECT_ROOT, 'libexec', 'claudecat')
+HELPERS_DIR = os.path.join(PROJECT_ROOT, 'libexec', 'towit')
 sys.path.insert(0, HELPERS_DIR)
 
-INSTALL_HOOK_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_install_hook.py')
+INSTALL_HOOK_SCRIPT = os.path.join(HELPERS_DIR, 'towit_install_hook.py')
 
 
 def run_install_hook(settings_path):
-    """Run claudecat_install_hook.py with an isolated settings path."""
-    env = {**os.environ, 'CLAUDECAT_SETTINGS_PATH': settings_path}
+    """Run towit_install_hook.py with an isolated settings path."""
+    env = {**os.environ, 'TOWIT_SETTINGS_PATH': settings_path}
     return subprocess.run(
         ['python3', INSTALL_HOOK_SCRIPT],
         env=env, capture_output=True, text=True
@@ -38,12 +38,12 @@ class TestClaudecatInstallHook(unittest.TestCase):
         with open(self.settings_path) as f:
             return json.load(f)
 
-    def _claudecat_hooks(self, data):
-        """Return list of claudecat hook command strings from settings data."""
+    def _towit_hooks(self, data):
+        """Return list of To Wit hook command strings from settings data."""
         hooks = []
         for entry in data.get('hooks', {}).get('Stop', []):
             for hook in entry.get('hooks', []):
-                if 'claudecat_hook.py' in hook.get('command', ''):
+                if 'towit_hook.py' in hook.get('command', ''):
                     hooks.append(hook['command'])
         return hooks
 
@@ -78,9 +78,9 @@ class TestClaudecatInstallHook(unittest.TestCase):
         run_install_hook(self.settings_path)
         run_install_hook(self.settings_path)
         data = self._read_settings()
-        hooks = self._claudecat_hooks(data)
+        hooks = self._towit_hooks(data)
         self.assertEqual(len(hooks), 1,
-                         f"Expected exactly 1 claudecat hook, found {len(hooks)}: {hooks}")
+                         f"Expected exactly 1 To Wit hook, found {len(hooks)}: {hooks}")
 
     def test_preserves_existing_stop_hooks_from_other_tools(self):
         other_hook = {"matcher": "", "hooks": [{"type": "command", "command": "echo other-tool"}]}
@@ -100,20 +100,20 @@ class TestClaudecatInstallHook(unittest.TestCase):
         ]
         self.assertTrue(any('other-tool' in c for c in all_commands),
                         "Expected other-tool hook to be preserved")
-        self.assertTrue(any('claudecat_hook.py' in c for c in all_commands),
-                        "Expected claudecat hook to be added")
+        self.assertTrue(any('towit_hook.py' in c for c in all_commands),
+                        "Expected To Wit hook to be added")
 
     def test_output_contains_installed_on_success(self):
         result = run_install_hook(self.settings_path)
         self.assertEqual(result.returncode, 0)
         self.assertIn('installed', result.stdout.lower() + result.stderr.lower())
 
-    def test_hook_command_contains_claudecat_hook_py(self):
+    def test_hook_command_contains_towit_hook_py(self):
         run_install_hook(self.settings_path)
         data = self._read_settings()
-        hooks = self._claudecat_hooks(data)
+        hooks = self._towit_hooks(data)
         self.assertEqual(len(hooks), 1)
-        self.assertIn('claudecat_hook.py', hooks[0])
+        self.assertIn('towit_hook.py', hooks[0])
 
     def test_preserves_non_hooks_keys_in_settings(self):
         settings = {"permissions": {"allow": ["Bash(git log)"]}, "theme": "dark"}

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-claudecat_hook — Claude Code stop hook.
+towit_hook — Claude Code stop hook.
 
 Reads stdin JSON from Claude Code's hook mechanism and indexes the
-completed conversation into the claudecat catalog.
+completed conversation into the To Wit catalog.
 
 Always exits 0 to avoid interrupting Claude Code.
 """
@@ -13,12 +13,12 @@ import os
 import json
 import re
 
-# Guard against recursive calls triggered by claudecat's own Claude invocations
-if os.environ.get('CLAUDECAT_INDEXING'):
+# Guard against recursive calls triggered by towit's own Claude invocations
+if os.environ.get('TOWIT_INDEXING'):
     sys.exit(0)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from claudecat_index import index_conversation
+from towit_index import index_conversation
 
 _EXPECTED_ROOT = os.path.realpath(os.path.expanduser('~/.claude/projects'))
 _SESSION_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{8,}$')
@@ -33,12 +33,12 @@ def _validate_jsonl_path(path):
 
 
 def _get_error_logger():
-    """Return a rotating logger that writes to ~/.claudecat/errors.log."""
+    """Return a rotating logger that writes to ~/.towit/errors.log."""
     import logging
     import logging.handlers
-    log_dir = os.path.expanduser('~/.claudecat')
+    log_dir = os.path.expanduser('~/.towit')
     os.makedirs(log_dir, exist_ok=True)
-    logger = logging.getLogger('claudecat.hook')
+    logger = logging.getLogger('towit.hook')
     if not logger.handlers:
         handler = logging.handlers.RotatingFileHandler(
             os.path.join(log_dir, 'errors.log'),
@@ -88,10 +88,10 @@ def main():
 
         result = index_conversation(jsonl_path)
         if result == 'indexed':
-            print(f"claudecat: indexed session {session_id[:8]}...", file=sys.stderr)
+            print(f"towit: indexed session {session_id[:8]}...", file=sys.stderr)
     except Exception:
         try:
-            _get_error_logger().exception("claudecat hook error")
+            _get_error_logger().exception("towit hook error")
         except Exception:
             pass  # Never interrupt Claude Code
 

@@ -1,7 +1,7 @@
-# tests/helpers/claudecat_db_test.py
-# Tests for libexec/claudecat/claudecat_db.py
+# tests/helpers/towit_db_test.py
+# Tests for libexec/towit/towit_db.py
 #
-# Run with: python3 tests/helpers/claudecat_db_test.py
+# Run with: python3 tests/helpers/towit_db_test.py
 
 import unittest
 import unittest.mock
@@ -11,10 +11,10 @@ import sqlite3
 import os
 import sys
 
-HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'claudecat'))
+HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
 sys.path.insert(0, HELPERS_DIR)
 
-from claudecat_db import Database
+from towit_db import Database
 
 SAMPLE_CONV = {
     'id': 'test-session-001',
@@ -55,13 +55,13 @@ class TestDatabaseSchema(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['CLAUDECAT_DB_PATH'] = self.db_path
+        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('CLAUDECAT_DB_PATH', None)
+        os.environ.pop('TOWIT_DB_PATH', None)
 
     def test_create_schema_creates_conversations_table(self):
         conn = sqlite3.connect(self.db_path)
@@ -86,13 +86,13 @@ class TestDatabaseUpsert(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['CLAUDECAT_DB_PATH'] = self.db_path
+        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('CLAUDECAT_DB_PATH', None)
+        os.environ.pop('TOWIT_DB_PATH', None)
 
     def test_upsert_conversation_inserts_record(self):
         self.db.upsert_conversation(SAMPLE_CONV)
@@ -137,13 +137,13 @@ class TestDatabaseIsIndexed(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['CLAUDECAT_DB_PATH'] = self.db_path
+        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('CLAUDECAT_DB_PATH', None)
+        os.environ.pop('TOWIT_DB_PATH', None)
 
     def test_is_indexed_returns_true_for_existing(self):
         self.db.upsert_conversation(SAMPLE_CONV)
@@ -157,7 +157,7 @@ class TestDatabaseSearch(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['CLAUDECAT_DB_PATH'] = self.db_path
+        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
         self.db.upsert_conversation(SAMPLE_CONV)
@@ -166,7 +166,7 @@ class TestDatabaseSearch(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('CLAUDECAT_DB_PATH', None)
+        os.environ.pop('TOWIT_DB_PATH', None)
 
     def _ids(self, results):
         return {r['id'] for r in results}
@@ -230,7 +230,7 @@ class TestDatabaseList(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['CLAUDECAT_DB_PATH'] = self.db_path
+        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
         self.db.upsert_conversation(SAMPLE_CONV)
@@ -238,7 +238,7 @@ class TestDatabaseList(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('CLAUDECAT_DB_PATH', None)
+        os.environ.pop('TOWIT_DB_PATH', None)
 
     def _ids(self, results):
         return {r['id'] for r in results}
@@ -266,14 +266,14 @@ class TestDatabaseGetConversation(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['CLAUDECAT_DB_PATH'] = self.db_path
+        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
         self.db.upsert_conversation(SAMPLE_CONV)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('CLAUDECAT_DB_PATH', None)
+        os.environ.pop('TOWIT_DB_PATH', None)
 
     def test_get_conversation_returns_correct_data(self):
         result = self.db.get_conversation(SAMPLE_CONV['id'])
@@ -291,11 +291,11 @@ class TestDatabaseValidate(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['CLAUDECAT_DB_PATH'] = self.db_path
+        os.environ['TOWIT_DB_PATH'] = self.db_path
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('CLAUDECAT_DB_PATH', None)
+        os.environ.pop('TOWIT_DB_PATH', None)
 
     def test_validate_exits_with_1_when_db_missing(self):
         missing_path = os.path.join(self.tmpdir, 'nonexistent', 'catalog.db')

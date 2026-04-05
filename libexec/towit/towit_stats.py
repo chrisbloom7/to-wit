@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-claudecat_stats — Show statistics about the claudecat catalog.
+towit_stats — Show statistics about the To Wit catalog.
 
 Usage:
-    python3 claudecat_stats.py
+    python3 towit_stats.py
 """
 
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from claudecat_db import Database
+from towit_db import Database
 
 
 def main():
@@ -59,7 +59,7 @@ def main():
     print(f"Date range            : {oldest or 'n/a'} — {newest or 'n/a'}")
     print(f"Unique projects       : {unique_projects}")
     if pruneable:
-        print(f"Pruneable entries     : {pruneable}  (run: claudecat prune)")
+        print(f"Pruneable entries     : {pruneable}  (run: towit prune)")
     print()
 
     if top_topics:

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Project renamed from **claudecat** to **To Wit**; CLI command is now `towit`
+- All `CLAUDECAT_*` environment variables renamed to `TOWIT_*`: `TOWIT_DB_PATH`, `TOWIT_SETTINGS_PATH`, `TOWIT_INDEXING`
+- Data directory moved from `~/.claudecat/` to `~/.towit/`; existing data must be moved manually: `mv ~/.claudecat ~/.towit`
+- Hook path updated; re-run `towit install-hook` after upgrading to update the path in `~/.claude/settings.json`
+- GitHub repository renamed from `chrisbloom7/claudecat` to `chrisbloom7/towit`
+
 ## [0.3.0] - 2026-04-03
 
 ### Added

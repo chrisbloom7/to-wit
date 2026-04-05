@@ -1,7 +1,7 @@
-# tests/helpers/claudecat_backfill_test.py
-# Tests for libexec/claudecat/claudecat_backfill.py
+# tests/helpers/towit_backfill_test.py
+# Tests for libexec/towit/towit_backfill.py
 #
-# Run with: python3 tests/helpers/claudecat_backfill_test.py
+# Run with: python3 tests/helpers/towit_backfill_test.py
 
 import io
 import json
@@ -12,10 +12,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'claudecat'))
+HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
 sys.path.insert(0, HELPERS_DIR)
 
-from claudecat_db import Database
+from towit_db import Database
 
 
 def write_jsonl(path, messages, session_id='test-session-abc'):
@@ -49,15 +49,15 @@ TOO_SHORT_MESSAGES = [
 def run_backfill(argv, db_path, projects_dir):
     """Import and run main() with patched sys.argv and env."""
     import importlib
-    import claudecat_backfill
-    importlib.reload(claudecat_backfill)
+    import towit_backfill
+    importlib.reload(towit_backfill)
 
-    with patch('sys.argv', ['claudecat_backfill'] + argv), \
-         patch.dict(os.environ, {'CLAUDECAT_DB_PATH': db_path}):
+    with patch('sys.argv', ['towit_backfill'] + argv), \
+         patch.dict(os.environ, {'TOWIT_DB_PATH': db_path}):
         captured = io.StringIO()
         with patch('sys.stdout', captured), patch('sys.stderr', captured):
             try:
-                claudecat_backfill.main()
+                towit_backfill.main()
             except SystemExit:
                 pass
         return captured.getvalue()
@@ -69,13 +69,13 @@ class TestBackfillDryRun(unittest.TestCase):
         self.projects_dir = os.path.join(self.tmpdir, 'projects', 'my-project')
         os.makedirs(self.projects_dir)
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['CLAUDECAT_DB_PATH'] = self.db_path
+        os.environ['TOWIT_DB_PATH'] = self.db_path
         db = Database(self.db_path)
         db.create_schema()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('CLAUDECAT_DB_PATH', None)
+        os.environ.pop('TOWIT_DB_PATH', None)
 
     def _write_session(self, session_id, messages):
         path = os.path.join(self.projects_dir, f'{session_id}.jsonl')

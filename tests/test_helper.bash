@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# test_helper.bash — shared setup/teardown for claudecat BATS test suite
+# test_helper.bash — shared setup/teardown for towit BATS test suite
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${TESTS_DIR}/.." && pwd)"
 BIN_DIR="${PROJECT_ROOT}/bin"
-HELPERS_DIR="${PROJECT_ROOT}/libexec/claudecat"
+HELPERS_DIR="${PROJECT_ROOT}/libexec/towit"
 
 _setup_common() {
   TEST_TMPDIR="$(mktemp -d)"
@@ -19,8 +19,8 @@ EOF
   chmod +x "${TEST_TMPDIR}/mock_bin/sleep"
 
   export PATH="${TEST_TMPDIR}/mock_bin:${PATH}"
-  export CLAUDECAT_DB_PATH="${TEST_TMPDIR}/test.db"
-  export CLAUDECAT="${BIN_DIR}/claudecat"
+  export TOWIT_DB_PATH="${TEST_TMPDIR}/test.db"
+  export TOWIT="${BIN_DIR}/towit"
 
   # Clear mode vars that shell scripts might reference
   export FORCE_MODE=false

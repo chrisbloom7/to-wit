@@ -1,7 +1,7 @@
-# tests/helpers/claudecat_resume_test.py
-# Tests for libexec/claudecat/claudecat_resume.py
+# tests/helpers/towit_resume_test.py
+# Tests for libexec/towit/towit_resume.py
 #
-# Run with: python3 tests/helpers/claudecat_resume_test.py
+# Run with: python3 tests/helpers/towit_resume_test.py
 
 import unittest
 import tempfile
@@ -10,18 +10,18 @@ import subprocess
 import os
 import sys
 
-HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'claudecat'))
-RESUME_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_resume.py')
+HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
+RESUME_SCRIPT = os.path.join(HELPERS_DIR, 'towit_resume.py')
 
 sys.path.insert(0, HELPERS_DIR)
-from claudecat_db import Database
+from towit_db import Database
 
 
 def run_resume(db_path, args=None):
-    """Run claudecat_resume.py as a subprocess."""
+    """Run towit_resume.py as a subprocess."""
     return subprocess.run(
         ['python3', RESUME_SCRIPT] + (args or []),
-        env={**os.environ, 'CLAUDECAT_DB_PATH': db_path},
+        env={**os.environ, 'TOWIT_DB_PATH': db_path},
         capture_output=True,
         text=True
     )
@@ -91,7 +91,7 @@ class TestClaudecatResume(unittest.TestCase):
     def test_cwd_missing_transcript_intact_without_force_suggests_resume_subcommand(self):
         shutil.rmtree(self.cwd_dir)
         result = run_resume(self.db_path, ['conv-a'])
-        self.assertIn('claudecat resume --force', result.stderr)
+        self.assertIn('towit resume --force', result.stderr)
 
     def test_cwd_and_transcript_both_missing_exits_1(self):
         shutil.rmtree(self.cwd_dir)

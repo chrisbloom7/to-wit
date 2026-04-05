@@ -1,7 +1,7 @@
-# tests/helpers/claudecat_teardown_test.py
-# Tests for libexec/claudecat/claudecat_teardown.py
+# tests/helpers/towit_teardown_test.py
+# Tests for libexec/towit/towit_teardown.py
 #
-# Run with: python3 tests/helpers/claudecat_teardown_test.py
+# Run with: python3 tests/helpers/towit_teardown_test.py
 
 import unittest
 import tempfile
@@ -12,29 +12,29 @@ import sys
 import subprocess
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-HELPERS_DIR = os.path.join(PROJECT_ROOT, 'libexec', 'claudecat')
+HELPERS_DIR = os.path.join(PROJECT_ROOT, 'libexec', 'towit')
 sys.path.insert(0, HELPERS_DIR)
 
-INSTALL_HOOK_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_install_hook.py')
-SETUP_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_setup.py')
-TEARDOWN_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_teardown.py')
+INSTALL_HOOK_SCRIPT = os.path.join(HELPERS_DIR, 'towit_install_hook.py')
+SETUP_SCRIPT = os.path.join(HELPERS_DIR, 'towit_setup.py')
+TEARDOWN_SCRIPT = os.path.join(HELPERS_DIR, 'towit_teardown.py')
 SETTINGS_REL_PATH = os.path.join('.claude', 'settings.local.json')
 
 
 def run_setup(db_path, home):
-    env = {**os.environ, 'CLAUDECAT_DB_PATH': db_path, 'HOME': home}
+    env = {**os.environ, 'TOWIT_DB_PATH': db_path, 'HOME': home}
     return subprocess.run(['python3', SETUP_SCRIPT], env=env, capture_output=True, text=True)
 
 
 def run_install_hook(home):
     settings_path = os.path.join(home, SETTINGS_REL_PATH)
-    env = {**os.environ, 'HOME': home, 'CLAUDECAT_SETTINGS_PATH': settings_path}
+    env = {**os.environ, 'HOME': home, 'TOWIT_SETTINGS_PATH': settings_path}
     return subprocess.run(['python3', INSTALL_HOOK_SCRIPT], env=env, capture_output=True, text=True)
 
 
 def run_teardown(db_path, home, args=None, stdin_input=None):
     settings_path = os.path.join(home, SETTINGS_REL_PATH)
-    env = {**os.environ, 'CLAUDECAT_DB_PATH': db_path, 'HOME': home, 'CLAUDECAT_SETTINGS_PATH': settings_path}
+    env = {**os.environ, 'TOWIT_DB_PATH': db_path, 'HOME': home, 'TOWIT_SETTINGS_PATH': settings_path}
     return subprocess.run(
         ['python3', TEARDOWN_SCRIPT] + (args or []),
         env=env,
@@ -110,8 +110,8 @@ class TestClaudecatTeardown(unittest.TestCase):
                         if isinstance(nested, dict) and 'command' in nested:
                             all_commands.append(nested['command'])
             self.assertFalse(
-                any('claudecat_hook.py' in cmd for cmd in all_commands),
-                f"Expected claudecat hook removed, but found: {all_commands}"
+                any('towit_hook.py' in cmd for cmd in all_commands),
+                f"Expected To Wit hook removed, but found: {all_commands}"
             )
 
     def test_deletes_db_file_if_present(self):

@@ -1,7 +1,7 @@
-# tests/helpers/claudecat_stats_test.py
-# Tests for libexec/claudecat/claudecat_stats.py
+# tests/helpers/towit_stats_test.py
+# Tests for libexec/towit/towit_stats.py
 #
-# Run with: python3 tests/helpers/claudecat_stats_test.py
+# Run with: python3 tests/helpers/towit_stats_test.py
 
 import unittest
 import tempfile
@@ -10,17 +10,17 @@ import subprocess
 import os
 import sys
 
-HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'claudecat'))
-STATS_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_stats.py')
+HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
+STATS_SCRIPT = os.path.join(HELPERS_DIR, 'towit_stats.py')
 
 sys.path.insert(0, HELPERS_DIR)
-from claudecat_db import Database
+from towit_db import Database
 
 
 def run_stats(db_path):
     return subprocess.run(
         ['python3', STATS_SCRIPT],
-        env={**os.environ, 'CLAUDECAT_DB_PATH': db_path},
+        env={**os.environ, 'TOWIT_DB_PATH': db_path},
         capture_output=True,
         text=True
     )
@@ -105,7 +105,7 @@ class TestClaudecatStats(unittest.TestCase):
         result = run_stats(self.db_path)
         self.assertIn('Pruneable', result.stdout)
         self.assertIn('1', result.stdout)
-        self.assertIn('claudecat prune', result.stdout)
+        self.assertIn('towit prune', result.stdout)
 
     def test_no_pruneable_line_when_all_transcripts_intact(self):
         # Add the missing transcript so everything is intact

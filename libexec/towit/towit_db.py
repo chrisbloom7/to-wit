@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-claudecat_db — Database abstraction layer for the claudecat catalog.
+towit_db — Database abstraction layer for the To Wit catalog.
 
-This module is imported by other claudecat scripts; it is not run directly.
+This module is imported by other towit scripts; it is not run directly.
 """
 
 import contextlib
@@ -11,8 +11,8 @@ import sys
 import sqlite3
 
 DB_PATH = os.environ.get(
-    'CLAUDECAT_DB_PATH',
-    os.path.expanduser('~/.claudecat/catalog.db')
+    'TOWIT_DB_PATH',
+    os.path.expanduser('~/.towit/catalog.db')
 )
 
 SCHEMA = """
@@ -58,7 +58,7 @@ class Database:
         if not os.path.isfile(self.db_path):
             print(
                 f"Error: database not found at {self.db_path}.\n"
-                "Run 'claudecat setup' to initialize it.",
+                "Run 'towit setup' to initialize it.",
                 file=sys.stderr
             )
             sys.exit(1)

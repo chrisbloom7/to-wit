@@ -1,7 +1,7 @@
-# tests/helpers/claudecat_uninstall_hook_test.py
-# Tests for libexec/claudecat/claudecat_uninstall_hook.py
+# tests/helpers/towit_uninstall_hook_test.py
+# Tests for libexec/towit/towit_uninstall_hook.py
 #
-# Run with: python3 tests/helpers/claudecat_uninstall_hook_test.py
+# Run with: python3 tests/helpers/towit_uninstall_hook_test.py
 
 import unittest
 import tempfile
@@ -12,17 +12,17 @@ import sys
 import subprocess
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-HELPERS_DIR = os.path.join(PROJECT_ROOT, 'libexec', 'claudecat')
+HELPERS_DIR = os.path.join(PROJECT_ROOT, 'libexec', 'towit')
 sys.path.insert(0, HELPERS_DIR)
 
-INSTALL_HOOK_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_install_hook.py')
-UNINSTALL_HOOK_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_uninstall_hook.py')
+INSTALL_HOOK_SCRIPT = os.path.join(HELPERS_DIR, 'towit_install_hook.py')
+UNINSTALL_HOOK_SCRIPT = os.path.join(HELPERS_DIR, 'towit_uninstall_hook.py')
 SETTINGS_REL_PATH = os.path.join('.claude', 'settings.local.json')
 
 
 def run_install_hook(home):
     settings_path = os.path.join(home, SETTINGS_REL_PATH)
-    env = {**os.environ, 'HOME': home, 'CLAUDECAT_SETTINGS_PATH': settings_path}
+    env = {**os.environ, 'HOME': home, 'TOWIT_SETTINGS_PATH': settings_path}
     return subprocess.run(
         ['python3', INSTALL_HOOK_SCRIPT],
         env=env, capture_output=True, text=True
@@ -31,7 +31,7 @@ def run_install_hook(home):
 
 def run_uninstall_hook(home):
     settings_path = os.path.join(home, SETTINGS_REL_PATH)
-    env = {**os.environ, 'HOME': home, 'CLAUDECAT_SETTINGS_PATH': settings_path}
+    env = {**os.environ, 'HOME': home, 'TOWIT_SETTINGS_PATH': settings_path}
     return subprocess.run(
         ['python3', UNINSTALL_HOOK_SCRIPT],
         env=env, capture_output=True, text=True
@@ -92,8 +92,8 @@ class TestClaudecatUninstallHook(unittest.TestCase):
                     if isinstance(nested, dict) and 'command' in nested:
                         all_commands.append(nested['command'])
         self.assertFalse(
-            any('claudecat_hook.py' in cmd for cmd in all_commands),
-            f"Expected claudecat hook to be removed, but found: {all_commands}"
+            any('towit_hook.py' in cmd for cmd in all_commands),
+            f"Expected To Wit hook to be removed, but found: {all_commands}"
         )
 
     def test_does_not_remove_other_stop_hooks(self):
@@ -120,18 +120,18 @@ class TestClaudecatUninstallHook(unittest.TestCase):
     def test_cleans_up_empty_hooks_stop_array(self):
         run_install_hook(self.tmpdir)
         data = self._read_settings()
-        # Ensure only claudecat hook exists in Stop
+        # Ensure only To Wit hook exists in Stop
         stop_hooks = data.get('hooks', {}).get('Stop', [])
-        claudecat_only = [
+        towit_only = [
             entry for entry in stop_hooks
             if isinstance(entry, dict) and (
-                'claudecat_hook.py' in entry.get('command', '') or
-                any('claudecat_hook.py' in n.get('command', '')
+                'towit_hook.py' in entry.get('command', '') or
+                any('towit_hook.py' in n.get('command', '')
                     for n in entry.get('hooks', []) if isinstance(n, dict))
             )
         ]
-        if len(stop_hooks) == len(claudecat_only):
-            # Only claudecat hooks present — after uninstall, Stop should be empty or absent
+        if len(stop_hooks) == len(towit_only):
+            # Only To Wit hooks present — after uninstall, Stop should be empty or absent
             run_uninstall_hook(self.tmpdir)
             data = self._read_settings()
             stop_hooks_after = data.get('hooks', {}).get('Stop', [])
@@ -141,18 +141,18 @@ class TestClaudecatUninstallHook(unittest.TestCase):
     def test_cleans_up_empty_hooks_object(self):
         run_install_hook(self.tmpdir)
         data = self._read_settings()
-        # Overwrite to ensure hooks only has Stop with claudecat entry
+        # Overwrite to ensure hooks only has Stop with To Wit entry
         stop_hooks = data.get('hooks', {}).get('Stop', [])
-        claudecat_entries = [
+        towit_entries = [
             entry for entry in stop_hooks
             if isinstance(entry, dict) and (
-                'claudecat_hook.py' in entry.get('command', '') or
-                any('claudecat_hook.py' in n.get('command', '')
+                'towit_hook.py' in entry.get('command', '') or
+                any('towit_hook.py' in n.get('command', '')
                     for n in entry.get('hooks', []) if isinstance(n, dict))
             )
         ]
-        # Write a settings file where hooks only contains the claudecat Stop entry
-        self._write_settings({"hooks": {"Stop": claudecat_entries}})
+        # Write a settings file where hooks only contains the To Wit Stop entry
+        self._write_settings({"hooks": {"Stop": towit_entries}})
         run_uninstall_hook(self.tmpdir)
 
         data = self._read_settings()

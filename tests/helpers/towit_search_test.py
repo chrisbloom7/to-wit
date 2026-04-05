@@ -1,7 +1,7 @@
-# tests/helpers/claudecat_search_test.py
-# Tests for libexec/claudecat/claudecat_search.py
+# tests/helpers/towit_search_test.py
+# Tests for libexec/towit/towit_search.py
 #
-# Run with: python3 tests/helpers/claudecat_search_test.py
+# Run with: python3 tests/helpers/towit_search_test.py
 
 import unittest
 import tempfile
@@ -12,18 +12,18 @@ import io
 import os
 import sys
 
-HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'claudecat'))
-SEARCH_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_search.py')
+HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
+SEARCH_SCRIPT = os.path.join(HELPERS_DIR, 'towit_search.py')
 
 sys.path.insert(0, HELPERS_DIR)
-from claudecat_db import Database
+from towit_db import Database
 
 
 def run_search(db_path, args):
-    """Run claudecat_search.py as a subprocess."""
+    """Run towit_search.py as a subprocess."""
     return subprocess.run(
         ['python3', SEARCH_SCRIPT] + args,
-        env={**os.environ, 'CLAUDECAT_DB_PATH': db_path},
+        env={**os.environ, 'TOWIT_DB_PATH': db_path},
         capture_output=True,
         text=True
     )

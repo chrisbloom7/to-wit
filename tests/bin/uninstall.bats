@@ -19,7 +19,7 @@ teardown() {
 # Tests
 # ---------------------------------------------------------------------------
 
-@test "uninstall: warns and exits 0 when claudecat is not in PATH" {
+@test "uninstall: warns and exits 0 when towit is not in PATH" {
   run bash -c "env PATH='/usr/bin:/bin' '${UNINSTALL}' 2>&1"
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"Warning"* ]] || [[ "${output}" == *"not found"* ]] || {
@@ -27,18 +27,18 @@ teardown() {
   }
 }
 
-@test "uninstall: invokes claudecat implode with the given install dir" {
+@test "uninstall: invokes towit implode with the given install dir" {
   local install_dir="${TEST_TMPDIR}/custom_bin"
   mkdir -p "${install_dir}"
 
-  local invocation_log="${TEST_TMPDIR}/claudecat_invocation"
+  local invocation_log="${TEST_TMPDIR}/towit_invocation"
   export INVOCATION_LOG="${invocation_log}"
-  cat > "${TEST_TMPDIR}/mock_bin/claudecat" <<'EOF'
+  cat > "${TEST_TMPDIR}/mock_bin/towit" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" > "${INVOCATION_LOG}"
 exit 0
 EOF
-  chmod +x "${TEST_TMPDIR}/mock_bin/claudecat"
+  chmod +x "${TEST_TMPDIR}/mock_bin/towit"
 
   run "${UNINSTALL}" "${install_dir}"
   [ "${status}" -eq 0 ]
@@ -61,14 +61,14 @@ EOF
 }
 
 @test "uninstall: uses /usr/local/bin as default install dir" {
-  local invocation_log="${TEST_TMPDIR}/claudecat_invocation"
+  local invocation_log="${TEST_TMPDIR}/towit_invocation"
   export INVOCATION_LOG="${invocation_log}"
-  cat > "${TEST_TMPDIR}/mock_bin/claudecat" <<'EOF'
+  cat > "${TEST_TMPDIR}/mock_bin/towit" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" > "${INVOCATION_LOG}"
 exit 0
 EOF
-  chmod +x "${TEST_TMPDIR}/mock_bin/claudecat"
+  chmod +x "${TEST_TMPDIR}/mock_bin/towit"
 
   run "${UNINSTALL}"
   [ "${status}" -eq 0 ]

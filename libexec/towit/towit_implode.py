@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-claudecat_implode — remove the claudecat hook, database, and binary symlink.
+towit_implode — remove the To Wit hook, database, and binary symlink.
 
 Performs a full uninstall: removes the stop hook from ~/.claude/settings.json,
-deletes the database, and removes the claudecat binary symlink. After completing,
+deletes the database, and removes the towit binary symlink. After completing,
 prints the data directory path so the user can verify or manually remove any
 remaining files.
 """
@@ -15,24 +15,24 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
-DB_PATH = os.environ.get('CLAUDECAT_DB_PATH',
-                          os.path.expanduser('~/.claudecat/catalog.db'))
+DB_PATH = os.environ.get('TOWIT_DB_PATH',
+                          os.path.expanduser('~/.towit/catalog.db'))
 DATA_DIR = os.path.dirname(DB_PATH)
 DEFAULT_INSTALL_DIR = '/usr/local/bin'
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Remove claudecat hook, database, and binary symlink'
+        description='Remove To Wit hook, database, and binary symlink'
     )
     parser.add_argument('--yes', '-y', action='store_true',
                         help='Skip confirmation prompt')
     parser.add_argument('--install-dir', default=DEFAULT_INSTALL_DIR,
                         metavar='DIR',
-                        help=f'Directory where claudecat binary was installed (default: {DEFAULT_INSTALL_DIR})')
+                        help=f'Directory where towit binary was installed (default: {DEFAULT_INSTALL_DIR})')
     args = parser.parse_args()
 
-    binary = os.path.join(args.install_dir, 'claudecat')
+    binary = os.path.join(args.install_dir, 'towit')
     hook_installed = _check_hook_installed()
     db_exists = os.path.exists(DB_PATH)
     binary_is_symlink = os.path.islink(binary)
@@ -50,7 +50,7 @@ def main():
 
     print("The following will be removed:")
     if hook_installed:
-        print("  • claudecat stop hook from ~/.claude/settings.json")
+        print("  • To Wit stop hook from ~/.claude/settings.json")
     if db_exists:
         print(f"  • Database at {DB_PATH}")
     if binary_is_symlink:
@@ -82,7 +82,7 @@ def main():
 
 
 def _print_data_dir():
-    print(f"\nclaudecat data directory: {DATA_DIR}")
+    print(f"\nTo Wit data directory: {DATA_DIR}")
     if os.path.isdir(DATA_DIR):
         contents = os.listdir(DATA_DIR)
         if contents:
@@ -96,13 +96,13 @@ def _print_data_dir():
 
 
 def _check_hook_installed():
-    from claudecat_install_hook import _load_settings, is_installed
+    from towit_install_hook import _load_settings, is_installed
     settings = _load_settings()
     return is_installed(settings)
 
 
 def _remove_hook():
-    from claudecat_uninstall_hook import _load_settings, _save_settings, is_installed, HOOK_MARKER, SETTINGS_PATH
+    from towit_uninstall_hook import _load_settings, _save_settings, is_installed, HOOK_MARKER, SETTINGS_PATH
     if not os.path.exists(SETTINGS_PATH):
         return
     settings = _load_settings()
@@ -118,7 +118,7 @@ def _remove_hook():
     if not settings['hooks']:
         del settings['hooks']
     _save_settings(settings)
-    print("claudecat stop hook removed.")
+    print("To Wit stop hook removed.")
 
 
 if __name__ == '__main__':

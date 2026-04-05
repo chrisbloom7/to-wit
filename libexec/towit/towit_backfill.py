@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-claudecat_backfill — Backfill the catalog from existing JSONL transcripts.
+towit_backfill — Backfill the catalog from existing JSONL transcripts.
 
 Usage:
-    python3 claudecat_backfill.py [--dry-run] [--force] [--folder <path>]
+    python3 towit_backfill.py [--dry-run] [--force] [--folder <path>]
 """
 
 import argparse
@@ -12,13 +12,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from claudecat_index import index_conversation, parse_jsonl, should_index
-from claudecat_db import Database
+from towit_index import index_conversation, parse_jsonl, should_index
+from towit_db import Database
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Backfill the claudecat catalog from existing transcripts.'
+        description='Backfill the To Wit catalog from existing transcripts.'
     )
     parser.add_argument('--dry-run', action='store_true',
                         help='Show what would be indexed without writing')

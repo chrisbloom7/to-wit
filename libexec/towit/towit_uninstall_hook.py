@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-claudecat_uninstall_hook — remove the claudecat stop hook from Claude Code settings.
+towit_uninstall_hook — remove the To Wit stop hook from Claude Code settings.
 
 Idempotent: does nothing if the hook is not installed.
 """
@@ -14,7 +14,7 @@ import tempfile
 def _resolve_settings_path():
     """Return a validated settings path from env override or default."""
     raw = os.environ.get(
-        'CLAUDECAT_SETTINGS_PATH',
+        'TOWIT_SETTINGS_PATH',
         os.path.expanduser('~/.claude/settings.json')
     )
     resolved = os.path.realpath(os.path.expanduser(raw))
@@ -23,14 +23,14 @@ def _resolve_settings_path():
     if resolved.startswith(home_claude + os.sep) or resolved.startswith(tmp + os.sep):
         return resolved
     print(
-        "Warning: CLAUDECAT_SETTINGS_PATH is outside expected directories, using default.",
+        "Warning: TOWIT_SETTINGS_PATH is outside expected directories, using default.",
         file=sys.stderr
     )
     return os.path.expanduser('~/.claude/settings.json')
 
 
 SETTINGS_PATH = _resolve_settings_path()
-HOOK_MARKER = 'claudecat_hook.py'  # substring used to identify our hook
+HOOK_MARKER = 'towit_hook.py'  # substring used to identify our hook
 
 
 def _load_settings():
@@ -72,7 +72,7 @@ def main():
     settings = _load_settings()
 
     if not is_installed(settings):
-        print("claudecat stop hook is not installed.")
+        print("To Wit stop hook is not installed.")
         sys.exit(0)
 
     # Remove entries containing our hook marker; preserve all others
@@ -95,7 +95,7 @@ def main():
         del settings['hooks']
 
     _save_settings(settings)
-    print("claudecat stop hook removed.")
+    print("To Wit stop hook removed.")
 
 
 if __name__ == '__main__':

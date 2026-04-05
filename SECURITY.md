@@ -2,12 +2,12 @@
 
 ## Scope and Threat Model
 
-claudecat is a single-user CLI tool. It runs entirely on your local machine, writes only to `~/.claudecat/` and `~/.claude/settings.json`, makes no network requests of its own, and has no server component. The primary assets it protects are your Claude Code conversation transcripts and the metadata extracted from them (titles, summaries, topics), which may contain proprietary code, internal URLs, API usage patterns, and other sensitive work content.
+To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machine, writes only to `~/.towit/` and `~/.claude/settings.json`, makes no network requests of its own, and has no server component. The primary assets it protects are your Claude Code conversation transcripts and the metadata extracted from them (titles, summaries, topics), which may contain proprietary code, internal URLs, API usage patterns, and other sensitive work content.
 
 ### Trust Boundaries
 
 | Boundary | Trust Level | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Claude Code JSONL transcripts | High | Written by Claude Code itself; may indirectly contain untrusted external data (e.g. pasted content) |
 | Claude CLI responses (indexing) | Medium | Parsed with error handling; treated as structured JSON with graceful fallback |
 | Hook payload (stdin JSON) | Medium | Provided by Claude Code; `session_id` format and filesystem path are validated before use |
@@ -57,9 +57,10 @@ claudecat is a single-user CLI tool. It runs entirely on your local machine, wri
 
 This is a personal open-source project with no bug bounty program.
 
-Please report security vulnerabilities through [GitHub Private Vulnerability Reporting](https://github.com/chrisbloom7/claudecat/security). This keeps the details confidential until a fix is available. Confirmed vulnerabilities will be published as GitHub Security Advisories in the same location.
+Please report security vulnerabilities through [GitHub Private Vulnerability Reporting](https://github.com/chrisbloom7/towit/security). This keeps the details confidential until a fix is available. Confirmed vulnerabilities will be published as GitHub Security Advisories in the same location.
 
 Please include:
+
 - A description of the vulnerability and its impact
 - Steps to reproduce or a minimal proof of concept
 - The version or commit hash you tested against

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-claudecat_prune — Remove catalog entries whose transcripts no longer exist.
+towit_prune — Remove catalog entries whose transcripts no longer exist.
 
 Usage:
-    python3 claudecat_prune.py [--dry-run]
+    python3 towit_prune.py [--dry-run]
 
 Conversations whose JSONL transcript is missing from ~/.claude/projects/ cannot
 be resumed or exported. This command removes them from the catalog.
 
 Conversations whose working directory is missing but transcript is intact are
-left untouched — they can still be resumed with `claudecat open --force`.
+left untouched — they can still be resumed with `towit open --force`.
 """
 
 import argparse
@@ -17,7 +17,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from claudecat_db import Database
+from towit_db import Database
 
 
 def main():

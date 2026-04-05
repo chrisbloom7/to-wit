@@ -1,7 +1,7 @@
-# tests/helpers/claudecat_implode_test.py
-# Tests for libexec/claudecat/claudecat_implode.py
+# tests/helpers/towit_implode_test.py
+# Tests for libexec/towit/towit_implode.py
 #
-# Run with: python3 tests/helpers/claudecat_implode_test.py
+# Run with: python3 tests/helpers/towit_implode_test.py
 
 import unittest
 import tempfile
@@ -12,31 +12,31 @@ import sys
 import subprocess
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-HELPERS_DIR = os.path.join(PROJECT_ROOT, 'libexec', 'claudecat')
+HELPERS_DIR = os.path.join(PROJECT_ROOT, 'libexec', 'towit')
 sys.path.insert(0, HELPERS_DIR)
 
-INSTALL_HOOK_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_install_hook.py')
-SETUP_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_setup.py')
-IMPLODE_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_implode.py')
+INSTALL_HOOK_SCRIPT = os.path.join(HELPERS_DIR, 'towit_install_hook.py')
+SETUP_SCRIPT = os.path.join(HELPERS_DIR, 'towit_setup.py')
+IMPLODE_SCRIPT = os.path.join(HELPERS_DIR, 'towit_implode.py')
 SETTINGS_REL_PATH = os.path.join('.claude', 'settings.local.json')
 
 
 def run_setup(db_path, home):
-    env = {**os.environ, 'CLAUDECAT_DB_PATH': db_path, 'HOME': home}
+    env = {**os.environ, 'TOWIT_DB_PATH': db_path, 'HOME': home}
     return subprocess.run(['python3', SETUP_SCRIPT], env=env, capture_output=True, text=True)
 
 
 def run_install_hook(home, settings_path=None):
     env = {**os.environ, 'HOME': home}
     if settings_path:
-        env['CLAUDECAT_SETTINGS_PATH'] = settings_path
+        env['TOWIT_SETTINGS_PATH'] = settings_path
     return subprocess.run(['python3', INSTALL_HOOK_SCRIPT], env=env, capture_output=True, text=True)
 
 
 def run_implode(db_path, home, settings_path=None, args=None, stdin_input=None):
-    env = {**os.environ, 'CLAUDECAT_DB_PATH': db_path, 'HOME': home}
+    env = {**os.environ, 'TOWIT_DB_PATH': db_path, 'HOME': home}
     if settings_path:
-        env['CLAUDECAT_SETTINGS_PATH'] = settings_path
+        env['TOWIT_SETTINGS_PATH'] = settings_path
     return subprocess.run(
         ['python3', IMPLODE_SCRIPT] + (args or []),
         env=env,
@@ -53,14 +53,14 @@ class TestClaudecatImplode(unittest.TestCase):
         self.settings_path = os.path.join(self.tmpdir, SETTINGS_REL_PATH)
         self.install_dir = os.path.join(self.tmpdir, 'bin')
         os.makedirs(self.install_dir)
-        self.binary = os.path.join(self.install_dir, 'claudecat')
+        self.binary = os.path.join(self.install_dir, 'towit')
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def _make_symlink(self):
-        """Create a fake claudecat binary symlink in install_dir."""
-        target = os.path.join(self.tmpdir, 'fake_claudecat')
+        """Create a fake towit binary symlink in install_dir."""
+        target = os.path.join(self.tmpdir, 'fake_towit')
         open(target, 'w').close()
         os.symlink(target, self.binary)
 
@@ -135,8 +135,8 @@ class TestClaudecatImplode(unittest.TestCase):
                         if isinstance(nested, dict) and 'command' in nested:
                             all_commands.append(nested['command'])
             self.assertFalse(
-                any('claudecat_hook.py' in cmd for cmd in all_commands),
-                f"Expected claudecat hook removed, but found: {all_commands}"
+                any('towit_hook.py' in cmd for cmd in all_commands),
+                f"Expected To Wit hook removed, but found: {all_commands}"
             )
 
     def test_deletes_db_file_if_present(self):

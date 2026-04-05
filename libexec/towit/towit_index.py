@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-claudecat_index — Core indexing logic for the claudecat catalog.
+towit_index — Core indexing logic for the To Wit catalog.
 
 Can be used as a module (imported by backfill and hook) or run standalone:
-    python3 claudecat_index.py <path/to/session.jsonl>
+    python3 towit_index.py <path/to/session.jsonl>
 """
 
 import json
@@ -13,7 +13,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from claudecat_db import Database, DB_PATH
+from towit_db import Database, DB_PATH
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +189,7 @@ def analyze_with_claude(transcript: str, existing_topics: list = None) -> dict:
         k: v for k, v in os.environ.items()
         if any(k.startswith(p) for p in _PASS_THROUGH_PREFIXES)
     }
-    safe_env['CLAUDECAT_INDEXING'] = '1'
+    safe_env['TOWIT_INDEXING'] = '1'
 
     try:
         result = subprocess.run(

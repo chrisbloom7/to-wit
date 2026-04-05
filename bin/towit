@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# claudecat — Claude Code conversation catalog
+# To Wit — Claude Code conversation catalog
 #
 # Usage:
-#   claudecat <subcommand> [options]
+#   towit <subcommand> [options]
 #
 # Subcommands:
 #   setup [--full | --hook]       Initialize database (--full also installs hook and runs backfill; --hook also installs hook)
@@ -13,8 +13,8 @@
 #   export <session-id> [--format md|json] [--summarize]
 #   export --topic <name> [--format md|json] [--summarize]
 #   backfill [--dry-run] [--force] [--folder <path>]
-#   install-hook                  Add claudecat stop hook to ~/.claude/settings.json
-#   uninstall-hook                Remove claudecat stop hook from ~/.claude/settings.json
+#   install-hook                  Add To Wit stop hook to ~/.claude/settings.json
+#   uninstall-hook                Remove To Wit stop hook from ~/.claude/settings.json
 #   teardown [--yes]              Remove hook and delete database
 #   implode [--yes] [--install-dir <dir>]
 #                                 Full uninstall: remove hook, database, and binary symlink
@@ -32,7 +32,7 @@ while [ -L "${_source}" ]; do
 done
 SCRIPT_DIR="$(cd -P "$(dirname "${_source}")" && pwd)"
 unset _source _dir
-HELPERS_DIR="$(cd "${SCRIPT_DIR}/../libexec/claudecat" && pwd)"
+HELPERS_DIR="$(cd "${SCRIPT_DIR}/../libexec/towit" && pwd)"
 
 if ! command -v python3 &>/dev/null; then
   echo "Error: python3 is required but was not found in PATH." >&2
@@ -59,62 +59,62 @@ case "${subcommand}" in
         *) _setup_args+=("$1"); shift ;;
       esac
     done
-    python3 "${HELPERS_DIR}/claudecat_setup.py" "${_setup_args[@]+"${_setup_args[@]}"}" || exit $?
+    python3 "${HELPERS_DIR}/towit_setup.py" "${_setup_args[@]+"${_setup_args[@]}"}" || exit $?
     if [[ "${_full}" == true || "${_hook}" == true ]]; then
-      python3 "${HELPERS_DIR}/claudecat_install_hook.py" || exit $?
+      python3 "${HELPERS_DIR}/towit_install_hook.py" || exit $?
     fi
     if [[ "${_full}" == true ]]; then
-      python3 "${HELPERS_DIR}/claudecat_backfill.py" || exit $?
+      python3 "${HELPERS_DIR}/towit_backfill.py" || exit $?
     fi
     ;;
   search)
     shift
-    python3 "${HELPERS_DIR}/claudecat_search.py" "$@" || exit $?
+    python3 "${HELPERS_DIR}/towit_search.py" "$@" || exit $?
     ;;
   list)
     shift
-    python3 "${HELPERS_DIR}/claudecat_list.py" "$@" || exit $?
+    python3 "${HELPERS_DIR}/towit_list.py" "$@" || exit $?
     ;;
   resume)
     shift
-    python3 "${HELPERS_DIR}/claudecat_resume.py" "$@" || exit $?
+    python3 "${HELPERS_DIR}/towit_resume.py" "$@" || exit $?
     ;;
   open)
     shift
     echo "Warning: 'open' is deprecated; use 'resume' instead." >&2
-    python3 "${HELPERS_DIR}/claudecat_resume.py" "$@" || exit $?
+    python3 "${HELPERS_DIR}/towit_resume.py" "$@" || exit $?
     ;;
   prune)
     shift
-    python3 "${HELPERS_DIR}/claudecat_prune.py" "$@" || exit $?
+    python3 "${HELPERS_DIR}/towit_prune.py" "$@" || exit $?
     ;;
   export)
     shift
-    python3 "${HELPERS_DIR}/claudecat_export.py" "$@" || exit $?
+    python3 "${HELPERS_DIR}/towit_export.py" "$@" || exit $?
     ;;
   backfill)
     shift
-    python3 "${HELPERS_DIR}/claudecat_backfill.py" "$@" || exit $?
+    python3 "${HELPERS_DIR}/towit_backfill.py" "$@" || exit $?
     ;;
   install-hook)
     shift
-    python3 "${HELPERS_DIR}/claudecat_install_hook.py" "$@" || exit $?
+    python3 "${HELPERS_DIR}/towit_install_hook.py" "$@" || exit $?
     ;;
   uninstall-hook)
     shift
-    python3 "${HELPERS_DIR}/claudecat_uninstall_hook.py" "$@" || exit $?
+    python3 "${HELPERS_DIR}/towit_uninstall_hook.py" "$@" || exit $?
     ;;
   teardown)
     shift
-    python3 "${HELPERS_DIR}/claudecat_teardown.py" "$@" || exit $?
+    python3 "${HELPERS_DIR}/towit_teardown.py" "$@" || exit $?
     ;;
   implode)
     shift
-    python3 "${HELPERS_DIR}/claudecat_implode.py" "$@" || exit $?
+    python3 "${HELPERS_DIR}/towit_implode.py" "$@" || exit $?
     ;;
   stats)
     shift
-    python3 "${HELPERS_DIR}/claudecat_stats.py" "$@" || exit $?
+    python3 "${HELPERS_DIR}/towit_stats.py" "$@" || exit $?
     ;;
   help|--help|-h)
     usage

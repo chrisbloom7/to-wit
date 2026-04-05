@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-claudecat_export — Export one or more Claude conversations from the catalog.
+towit_export — Export one or more Claude conversations from the catalog.
 
 Usage:
-    python3 claudecat_export.py <session-id> [--format md|json] [--summarize]
-    python3 claudecat_export.py --topic <name> [--format md|json] [--summarize]
+    python3 towit_export.py <session-id> [--format md|json] [--summarize]
+    python3 towit_export.py --topic <name> [--format md|json] [--summarize]
 """
 
 import argparse
@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from claudecat_db import Database
+from towit_db import Database
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +25,7 @@ def _call_claude(prompt: str) -> str:
     result = subprocess.run(
         ['claude', '-p', prompt, '--output-format', 'text'],
         capture_output=True, text=True, timeout=120,
-        env={**os.environ, 'CLAUDECAT_INDEXING': '1'}
+        env={**os.environ, 'TOWIT_INDEXING': '1'}
     )
     if result.returncode != 0:
         print(f"Error calling Claude: {result.stderr}", file=sys.stderr)

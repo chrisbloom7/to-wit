@@ -1,7 +1,7 @@
-# tests/helpers/claudecat_prune_test.py
-# Tests for libexec/claudecat/claudecat_prune.py
+# tests/helpers/towit_prune_test.py
+# Tests for libexec/towit/towit_prune.py
 #
-# Run with: python3 tests/helpers/claudecat_prune_test.py
+# Run with: python3 tests/helpers/towit_prune_test.py
 
 import unittest
 import tempfile
@@ -10,18 +10,18 @@ import subprocess
 import os
 import sys
 
-HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'claudecat'))
-PRUNE_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_prune.py')
+HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
+PRUNE_SCRIPT = os.path.join(HELPERS_DIR, 'towit_prune.py')
 
 sys.path.insert(0, HELPERS_DIR)
-from claudecat_db import Database
+from towit_db import Database
 
 
 def run_prune(db_path, args=None):
-    """Run claudecat_prune.py as a subprocess."""
+    """Run towit_prune.py as a subprocess."""
     return subprocess.run(
         ['python3', PRUNE_SCRIPT] + (args or []),
-        env={**os.environ, 'CLAUDECAT_DB_PATH': db_path},
+        env={**os.environ, 'TOWIT_DB_PATH': db_path},
         capture_output=True,
         text=True
     )

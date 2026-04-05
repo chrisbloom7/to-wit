@@ -1,7 +1,7 @@
-# tests/helpers/claudecat_setup_test.py
-# Tests for libexec/claudecat/claudecat_setup.py
+# tests/helpers/towit_setup_test.py
+# Tests for libexec/towit/towit_setup.py
 #
-# Run with: python3 tests/helpers/claudecat_setup_test.py
+# Run with: python3 tests/helpers/towit_setup_test.py
 
 import unittest
 import tempfile
@@ -11,15 +11,15 @@ import subprocess
 import os
 import sys
 
-HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'claudecat'))
-SETUP_SCRIPT = os.path.join(HELPERS_DIR, 'claudecat_setup.py')
+HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
+SETUP_SCRIPT = os.path.join(HELPERS_DIR, 'towit_setup.py')
 
 
 def run_setup(db_path):
-    """Run claudecat_setup.py as a subprocess with the given DB path."""
+    """Run towit_setup.py as a subprocess with the given DB path."""
     return subprocess.run(
         ['python3', SETUP_SCRIPT],
-        env={**os.environ, 'CLAUDECAT_DB_PATH': db_path},
+        env={**os.environ, 'TOWIT_DB_PATH': db_path},
         capture_output=True,
         text=True
     )
@@ -33,7 +33,7 @@ class TestClaudecatSetup(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def test_creates_db_file_at_claudecat_db_path(self):
+    def test_creates_db_file_at_towit_db_path(self):
         self.assertFalse(os.path.exists(self.db_path))
         result = run_setup(self.db_path)
         self.assertEqual(result.returncode, 0, f"setup exited {result.returncode}: {result.stderr}")

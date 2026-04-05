@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-claudecat_search — Search cataloged Claude conversations.
+towit_list — List cataloged Claude conversations.
 
 Usage:
-    python3 claudecat_search.py [--or] [--all | --summary] [--all | --title] [--format json|csv] [--folder <path>] <terms...>
+    python3 towit_list.py [--format json|csv] [--folder <path>] [--topic <name>]
 """
 
 import argparse
@@ -14,7 +14,7 @@ import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from claudecat_db import Database
+from towit_db import Database
 
 
 def _truncate(s, width):
@@ -23,32 +23,7 @@ def _truncate(s, width):
     return s[:width - 1] + '…'
 
 
-def _filter_topics(topics_str, terms):
-    """Return only topics matching at least one term, or empty string if none match.
-
-    Uses substring check plus stem prefix matching against each hyphenated word in the topic
-    (e.g. "estimate" → stem "estimat" matches "project-estimation").
-    """
-    if not topics_str:
-        return ''
-    topics = [t.strip() for t in topics_str.split(',')]
-
-    def matches(topic, term):
-        tl = term.lower()
-        if tl in topic.lower():
-            return True
-        if len(tl) >= 5:
-            stem = tl[:-1]
-            for word in topic.lower().replace('-', ' ').split():
-                if word.startswith(stem):
-                    return True
-        return False
-
-    matched = [t for t in topics if any(matches(t, term) for term in terms)]
-    return matched[0] if matched else ''
-
-
-def _print_table(rows, terms=None, group_by_path=False):
+def _print_table(rows, group_by_path=False):
     """Print results as a formatted text table, optionally grouped by CWD."""
     if not rows:
         return
@@ -57,17 +32,13 @@ def _print_table(rows, terms=None, group_by_path=False):
     sep = '  '
     indent = '  ' if group_by_path else ''
 
-    # Pre-process rows: filter topics and pair each with its CWD
     processed = []
     for r in rows:
         date = (r['started_at'] or '')[:10]
-        topics = r['topics'] or ''
-        if terms:
-            topics = _filter_topics(topics, terms)
         processed.append((r['cwd'] or '', [
             r['id'] or '',
             r['title'] or '',
-            topics,
+            r['topics'] or '',
             date,
         ]))
 
@@ -156,33 +127,20 @@ def _print_json(rows):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Search cataloged Claude conversations.'
+        description='List cataloged Claude conversations.'
     )
-    parser.add_argument('terms', nargs='+', metavar='TERM',
-                        help='Search terms')
-    parser.add_argument('--or', dest='or_', action='store_true',
-                        help='Match any term instead of all terms')
-    scope = parser.add_mutually_exclusive_group()
-    scope.add_argument('--all', action='store_true',
-                       help='Search topics, summaries, and titles')
-    scope.add_argument('--summary', action='store_true',
-                       help='Also search conversation summaries')
-    scope.add_argument('--title', action='store_true',
-                       help='Also search conversation titles')
     parser.add_argument('--format', choices=['json', 'csv'], metavar='FORMAT',
                         help='Output format: json or csv')
     parser.add_argument('--folder', metavar='PATH',
-                        help='Restrict search to a specific project folder')
+                        help='Restrict to a specific project folder')
+    parser.add_argument('--topic', metavar='NAME',
+                        help='Filter by topic name')
     args = parser.parse_args()
 
     db = Database()
     db.validate()
 
-    include_summary = args.all or args.summary
-    include_title = args.all or args.title
-    mode = 'or' if args.or_ else 'and'
-    results = db.search(args.terms, mode=mode, folder=args.folder,
-                        include_summary=include_summary, include_title=include_title)
+    results = db.list_conversations(folder=args.folder, topic=args.topic)
 
     if args.format == 'json':
         _print_json(results)
@@ -195,7 +153,7 @@ def main():
         if not results:
             print("No conversations found.", file=sys.stderr)
             sys.exit(0)
-        _print_table(results, terms=args.terms, group_by_path=not args.folder)
+        _print_table(results, group_by_path=not args.folder)
 
 
 if __name__ == '__main__':

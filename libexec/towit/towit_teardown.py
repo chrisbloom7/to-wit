@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-claudecat_teardown — remove the claudecat stop hook and delete the database.
+towit_teardown — remove the To Wit stop hook and delete the database.
 
-Use before uninstalling claudecat to clean up all artifacts.
+Use before uninstalling To Wit to clean up all artifacts.
 """
 
 import argparse
@@ -12,12 +12,12 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
-DB_PATH = os.environ.get('CLAUDECAT_DB_PATH',
-                          os.path.expanduser('~/.claudecat/catalog.db'))
+DB_PATH = os.environ.get('TOWIT_DB_PATH',
+                          os.path.expanduser('~/.towit/catalog.db'))
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Remove claudecat hook and database')
+    parser = argparse.ArgumentParser(description='Remove To Wit hook and database')
     parser.add_argument('--yes', '-y', action='store_true',
                         help='Skip confirmation prompt')
     args = parser.parse_args()
@@ -32,7 +32,7 @@ def main():
     # Describe what will be removed
     print("The following will be removed:")
     if hook_installed:
-        print("  • claudecat stop hook from ~/.claude/settings.json")
+        print("  • To Wit stop hook from ~/.claude/settings.json")
     if db_exists:
         print(f"  • Database at {DB_PATH}")
 
@@ -47,7 +47,7 @@ def main():
             sys.exit(1)
 
     if hook_installed:
-        from claudecat_uninstall_hook import main as uninstall_hook
+        from towit_uninstall_hook import main as uninstall_hook
         # Redirect: call the logic directly, not the main() which exits
         _remove_hook()
 
@@ -59,13 +59,13 @@ def main():
 
 
 def _check_hook_installed():
-    from claudecat_install_hook import _load_settings, is_installed
+    from towit_install_hook import _load_settings, is_installed
     settings = _load_settings()
     return is_installed(settings)
 
 
 def _remove_hook():
-    from claudecat_uninstall_hook import _load_settings, _save_settings, is_installed, HOOK_MARKER, SETTINGS_PATH
+    from towit_uninstall_hook import _load_settings, _save_settings, is_installed, HOOK_MARKER, SETTINGS_PATH
     import os
     if not os.path.exists(SETTINGS_PATH):
         return
@@ -82,7 +82,7 @@ def _remove_hook():
     if not settings['hooks']:
         del settings['hooks']
     _save_settings(settings)
-    print("claudecat stop hook removed.")
+    print("To Wit stop hook removed.")
 
 
 if __name__ == '__main__':

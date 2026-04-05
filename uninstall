@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# uninstall — remove claudecat hook, database, and binary symlink
+# uninstall — remove To Wit hook, database, and binary symlink
 #
 # Usage:
 #   ./uninstall [<install-dir>]
@@ -10,12 +10,12 @@ set -euo pipefail
 
 INSTALL_DIR="${1:-/usr/local/bin}"
 
-if command -v claudecat &>/dev/null; then
-  claudecat implode --install-dir "${INSTALL_DIR}"
+if command -v towit &>/dev/null; then
+  towit implode --install-dir "${INSTALL_DIR}"
 else
-  echo "Warning: claudecat not found in PATH — cannot run implode." >&2
+  echo "Warning: towit not found in PATH — cannot run implode." >&2
   echo "You may need to manually remove:" >&2
-  echo "  • The claudecat binary symlink from ${INSTALL_DIR}/" >&2
+  echo "  • The towit binary symlink from ${INSTALL_DIR}/" >&2
   echo "  • The stop hook from ~/.claude/settings.json" >&2
-  echo "  • The data directory at ~/.claudecat/" >&2
+  echo "  • The data directory at ~/.towit/" >&2
 fi

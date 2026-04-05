@@ -1,7 +1,7 @@
-# tests/helpers/claudecat_index_test.py
-# Tests for libexec/claudecat/claudecat_index.py
+# tests/helpers/towit_index_test.py
+# Tests for libexec/towit/towit_index.py
 #
-# Run with: python3 tests/helpers/claudecat_index_test.py
+# Run with: python3 tests/helpers/towit_index_test.py
 
 import unittest
 import tempfile
@@ -11,11 +11,11 @@ import os
 import sys
 from unittest.mock import patch, MagicMock
 
-HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'claudecat'))
+HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
 sys.path.insert(0, HELPERS_DIR)
 
-from claudecat_db import Database
-from claudecat_index import parse_jsonl, should_index, build_transcript, analyze_with_claude, index_conversation
+from towit_db import Database
+from towit_index import parse_jsonl, should_index, build_transcript, analyze_with_claude, index_conversation
 
 
 def write_jsonl(path, messages):
@@ -192,13 +192,13 @@ class TestIndexConversation(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['CLAUDECAT_DB_PATH'] = self.db_path
+        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('CLAUDECAT_DB_PATH', None)
+        os.environ.pop('TOWIT_DB_PATH', None)
 
     def _write_conv(self, session_id, messages, cwd='/Users/test'):
         path = os.path.join(self.tmpdir, f'{session_id}.jsonl')
