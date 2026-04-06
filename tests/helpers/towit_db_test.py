@@ -55,13 +55,11 @@ class TestDatabaseSchema(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('TOWIT_DB_PATH', None)
 
     def test_create_schema_creates_conversations_table(self):
         conn = sqlite3.connect(self.db_path)
@@ -86,13 +84,11 @@ class TestDatabaseUpsert(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('TOWIT_DB_PATH', None)
 
     def test_upsert_conversation_inserts_record(self):
         self.db.upsert_conversation(SAMPLE_CONV)
@@ -137,13 +133,11 @@ class TestDatabaseIsIndexed(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('TOWIT_DB_PATH', None)
 
     def test_is_indexed_returns_true_for_existing(self):
         self.db.upsert_conversation(SAMPLE_CONV)
@@ -157,7 +151,6 @@ class TestDatabaseSearch(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
         self.db.upsert_conversation(SAMPLE_CONV)
@@ -166,7 +159,6 @@ class TestDatabaseSearch(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('TOWIT_DB_PATH', None)
 
     def _ids(self, results):
         return {r['id'] for r in results}
@@ -230,7 +222,6 @@ class TestDatabaseList(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
         self.db.upsert_conversation(SAMPLE_CONV)
@@ -238,7 +229,6 @@ class TestDatabaseList(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('TOWIT_DB_PATH', None)
 
     def _ids(self, results):
         return {r['id'] for r in results}
@@ -266,14 +256,12 @@ class TestDatabaseGetConversation(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
         self.db.upsert_conversation(SAMPLE_CONV)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('TOWIT_DB_PATH', None)
 
     def test_get_conversation_returns_correct_data(self):
         result = self.db.get_conversation(SAMPLE_CONV['id'])
@@ -291,11 +279,9 @@ class TestDatabaseValidate(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['TOWIT_DB_PATH'] = self.db_path
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('TOWIT_DB_PATH', None)
 
     def test_validate_exits_with_1_when_db_missing(self):
         missing_path = os.path.join(self.tmpdir, 'nonexistent', 'catalog.db')
