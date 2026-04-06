@@ -21,8 +21,15 @@ IMPLODE_SCRIPT = os.path.join(HELPERS_DIR, 'towit_implode.py')
 SETTINGS_REL_PATH = os.path.join('.claude', 'settings.local.json')
 
 
-def run_setup(db_path, home):
-    env = {**os.environ, 'TOWIT_DB_PATH': db_path, 'HOME': home}
+def write_config(tmpdir, db_path):
+    config_path = os.path.join(tmpdir, 'config.toml')
+    with open(config_path, 'w') as f:
+        f.write(f'[database]\npath = "{db_path}"\n')
+    return config_path
+
+
+def run_setup(db_path, config_path, home):
+    env = {**os.environ, 'TOWIT_CONFIG_PATH': config_path, 'HOME': home}
     return subprocess.run(['python3', SETUP_SCRIPT], env=env, capture_output=True, text=True)
 
 
@@ -33,8 +40,8 @@ def run_install_hook(home, settings_path=None):
     return subprocess.run(['python3', INSTALL_HOOK_SCRIPT], env=env, capture_output=True, text=True)
 
 
-def run_implode(db_path, home, settings_path=None, args=None, stdin_input=None):
-    env = {**os.environ, 'TOWIT_DB_PATH': db_path, 'HOME': home}
+def run_implode(db_path, config_path, home, settings_path=None, args=None, stdin_input=None):
+    env = {**os.environ, 'TOWIT_CONFIG_PATH': config_path, 'HOME': home}
     if settings_path:
         env['TOWIT_SETTINGS_PATH'] = settings_path
     return subprocess.run(
@@ -54,6 +61,7 @@ class TestTowitImplode(unittest.TestCase):
         self.install_dir = os.path.join(self.tmpdir, 'bin')
         os.makedirs(self.install_dir)
         self.binary = os.path.join(self.install_dir, 'towit')
+        self.config_path = write_config(self.tmpdir, self.db_path)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -65,27 +73,27 @@ class TestTowitImplode(unittest.TestCase):
         os.symlink(target, self.binary)
 
     def test_exits_0_with_message_when_nothing_to_implode(self):
-        result = run_implode(self.db_path, self.tmpdir,
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
                              args=['--yes', '--install-dir', self.install_dir])
         self.assertEqual(result.returncode, 0, f"implode failed: {result.stderr}")
         combined = result.stdout + result.stderr
         self.assertTrue(len(combined.strip()) > 0, "Expected some output when nothing to implode")
 
     def test_prints_data_dir_when_nothing_to_implode(self):
-        result = run_implode(self.db_path, self.tmpdir,
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
                              args=['--yes', '--install-dir', self.install_dir])
         self.assertEqual(result.returncode, 0)
         self.assertIn(os.path.dirname(self.db_path), result.stdout)
 
     def test_yes_flag_removes_hook_db_and_symlink(self):
-        run_setup(self.db_path, self.tmpdir)
+        run_setup(self.db_path, self.config_path, self.tmpdir)
         run_install_hook(self.tmpdir, settings_path=self.settings_path)
         self._make_symlink()
         self.assertTrue(os.path.exists(self.db_path))
         self.assertTrue(os.path.exists(self.settings_path))
         self.assertTrue(os.path.islink(self.binary))
 
-        result = run_implode(self.db_path, self.tmpdir,
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
                              settings_path=self.settings_path,
                              args=['--yes', '--install-dir', self.install_dir])
         self.assertEqual(result.returncode, 0, f"implode --yes failed: {result.stderr}")
@@ -93,20 +101,20 @@ class TestTowitImplode(unittest.TestCase):
         self.assertFalse(os.path.islink(self.binary), "Expected symlink to be removed")
 
     def test_without_yes_reading_n_aborts(self):
-        run_setup(self.db_path, self.tmpdir)
+        run_setup(self.db_path, self.config_path, self.tmpdir)
         self._make_symlink()
 
-        run_implode(self.db_path, self.tmpdir,
+        run_implode(self.db_path, self.config_path, self.tmpdir,
                     args=['--install-dir', self.install_dir],
                     stdin_input='n\n')
         self.assertTrue(os.path.exists(self.db_path), "Expected DB to remain after 'n'")
         self.assertTrue(os.path.islink(self.binary), "Expected symlink to remain after 'n'")
 
     def test_without_yes_reading_y_proceeds(self):
-        run_setup(self.db_path, self.tmpdir)
+        run_setup(self.db_path, self.config_path, self.tmpdir)
         self._make_symlink()
 
-        result = run_implode(self.db_path, self.tmpdir,
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
                              args=['--install-dir', self.install_dir],
                              stdin_input='y\n')
         self.assertEqual(result.returncode, 0, f"implode with 'y' failed: {result.stderr}")
@@ -118,7 +126,7 @@ class TestTowitImplode(unittest.TestCase):
         run_install_hook(self.tmpdir, settings_path=self.settings_path)
         self.assertTrue(os.path.exists(self.settings_path))
 
-        run_implode(self.db_path, self.tmpdir,
+        run_implode(self.db_path, self.config_path, self.tmpdir,
                     settings_path=self.settings_path,
                     args=['--yes', '--install-dir', self.install_dir])
 
@@ -140,10 +148,10 @@ class TestTowitImplode(unittest.TestCase):
             )
 
     def test_deletes_db_file_if_present(self):
-        run_setup(self.db_path, self.tmpdir)
+        run_setup(self.db_path, self.config_path, self.tmpdir)
         self.assertTrue(os.path.exists(self.db_path))
 
-        run_implode(self.db_path, self.tmpdir,
+        run_implode(self.db_path, self.config_path, self.tmpdir,
                     args=['--yes', '--install-dir', self.install_dir])
         self.assertFalse(os.path.exists(self.db_path), "Expected DB deleted")
 
@@ -151,17 +159,17 @@ class TestTowitImplode(unittest.TestCase):
         run_install_hook(self.tmpdir, settings_path=self.settings_path)
         self.assertFalse(os.path.exists(self.db_path))
 
-        result = run_implode(self.db_path, self.tmpdir,
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
                              settings_path=self.settings_path,
                              args=['--yes', '--install-dir', self.install_dir])
         self.assertEqual(result.returncode, 0,
                          f"implode should succeed without DB: {result.stderr}")
 
     def test_handles_missing_hook_gracefully(self):
-        run_setup(self.db_path, self.tmpdir)
+        run_setup(self.db_path, self.config_path, self.tmpdir)
         self.assertFalse(os.path.exists(self.settings_path))
 
-        result = run_implode(self.db_path, self.tmpdir,
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
                              args=['--yes', '--install-dir', self.install_dir])
         self.assertEqual(result.returncode, 0,
                          f"implode should succeed without hook: {result.stderr}")
@@ -172,7 +180,7 @@ class TestTowitImplode(unittest.TestCase):
         with open(self.binary, 'w') as f:
             f.write('#!/bin/bash\n')
 
-        result = run_implode(self.db_path, self.tmpdir,
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
                              args=['--yes', '--install-dir', self.install_dir])
         self.assertEqual(result.returncode, 0)
         combined = result.stdout + result.stderr
@@ -181,8 +189,8 @@ class TestTowitImplode(unittest.TestCase):
         self.assertTrue(os.path.exists(self.binary), "Regular file should not be removed")
 
     def test_prints_data_dir_after_successful_implode(self):
-        run_setup(self.db_path, self.tmpdir)
-        result = run_implode(self.db_path, self.tmpdir,
+        run_setup(self.db_path, self.config_path, self.tmpdir)
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
                              args=['--yes', '--install-dir', self.install_dir])
         self.assertEqual(result.returncode, 0)
         self.assertIn(os.path.dirname(self.db_path), result.stdout,
@@ -190,7 +198,7 @@ class TestTowitImplode(unittest.TestCase):
 
     def test_install_dir_default_used_when_not_specified(self):
         # Verify the script runs without --install-dir and uses the default
-        result = run_implode(self.db_path, self.tmpdir, args=['--yes'])
+        result = run_implode(self.db_path, self.config_path, self.tmpdir, args=['--yes'])
         self.assertEqual(result.returncode, 0, f"implode failed without --install-dir: {result.stderr}")
 
 
