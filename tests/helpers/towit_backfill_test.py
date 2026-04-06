@@ -18,6 +18,14 @@ sys.path.insert(0, HELPERS_DIR)
 from towit_db import Database
 
 
+def write_config(tmpdir, db_path):
+    """Write a minimal config.toml containing db_path. Returns config file path."""
+    config_path = os.path.join(tmpdir, 'config.toml')
+    with open(config_path, 'w') as f:
+        f.write(f'[database]\npath = "{db_path}"\n')
+    return config_path
+
+
 def write_jsonl(path, messages, session_id='test-session-abc'):
     """Write a minimal JSONL conversation file."""
     with open(path, 'w') as f:
@@ -46,14 +54,14 @@ TOO_SHORT_MESSAGES = [
 ]
 
 
-def run_backfill(argv, db_path, projects_dir):
+def run_backfill(argv, config_path, projects_dir):
     """Import and run main() with patched sys.argv and env."""
     import importlib
     import towit_backfill
     importlib.reload(towit_backfill)
 
     with patch('sys.argv', ['towit_backfill'] + argv), \
-         patch.dict(os.environ, {'TOWIT_DB_PATH': db_path}):
+         patch.dict(os.environ, {'TOWIT_CONFIG_PATH': config_path}):
         captured = io.StringIO()
         with patch('sys.stdout', captured), patch('sys.stderr', captured):
             try:
@@ -69,13 +77,12 @@ class TestBackfillDryRun(unittest.TestCase):
         self.projects_dir = os.path.join(self.tmpdir, 'projects', 'my-project')
         os.makedirs(self.projects_dir)
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['TOWIT_DB_PATH'] = self.db_path
+        self.config_path = write_config(self.tmpdir, self.db_path)
         db = Database(self.db_path)
         db.create_schema()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('TOWIT_DB_PATH', None)
 
     def _write_session(self, session_id, messages):
         path = os.path.join(self.projects_dir, f'{session_id}.jsonl')
@@ -87,7 +94,7 @@ class TestBackfillDryRun(unittest.TestCase):
         self._write_session('short-session-001', TOO_SHORT_MESSAGES)
         output = run_backfill(
             ['--dry-run', '--folder', self.projects_dir],
-            self.db_path, self.projects_dir,
+            self.config_path, self.projects_dir,
         )
         self.assertIn('Skipped: 1', output)
         self.assertIn('Indexed: 0', output)
@@ -97,7 +104,7 @@ class TestBackfillDryRun(unittest.TestCase):
         self._write_session('good-session-001', SUBSTANTIAL_MESSAGES)
         output = run_backfill(
             ['--dry-run', '--folder', self.projects_dir],
-            self.db_path, self.projects_dir,
+            self.config_path, self.projects_dir,
         )
         self.assertIn('Indexed: 1', output)
         self.assertIn('Skipped: 0', output)
@@ -107,7 +114,7 @@ class TestBackfillDryRun(unittest.TestCase):
         self._write_session('short-session-002', TOO_SHORT_MESSAGES)
         output = run_backfill(
             ['--dry-run', '--folder', self.projects_dir],
-            self.db_path, self.projects_dir,
+            self.config_path, self.projects_dir,
         )
         self.assertIn('would skip', output)
 
@@ -116,7 +123,7 @@ class TestBackfillDryRun(unittest.TestCase):
         self._write_session('good-session-002', SUBSTANTIAL_MESSAGES)
         run_backfill(
             ['--dry-run', '--folder', self.projects_dir],
-            self.db_path, self.projects_dir,
+            self.config_path, self.projects_dir,
         )
         db = Database(self.db_path)
         # is_indexed should return False — nothing was written
