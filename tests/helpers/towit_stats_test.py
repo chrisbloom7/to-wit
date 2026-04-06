@@ -17,10 +17,18 @@ sys.path.insert(0, HELPERS_DIR)
 from towit_db import Database
 
 
-def run_stats(db_path):
+def write_config(tmpdir, db_path):
+    """Write a minimal config.toml containing db_path. Returns config file path."""
+    config_path = os.path.join(tmpdir, 'config.toml')
+    with open(config_path, 'w') as f:
+        f.write(f'[database]\npath = "{db_path}"\n')
+    return config_path
+
+
+def run_stats(config_path):
     return subprocess.run(
         ['python3', STATS_SCRIPT],
-        env={**os.environ, 'TOWIT_DB_PATH': db_path},
+        env={**os.environ, 'TOWIT_CONFIG_PATH': config_path},
         capture_output=True,
         text=True
     )
@@ -33,6 +41,7 @@ class TestTowitStats(unittest.TestCase):
         os.makedirs(self.projects_dir)
 
         self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
         self.db = Database(self.db_path)
         self.db.create_schema()
 
@@ -79,30 +88,30 @@ class TestTowitStats(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_exits_0(self):
-        result = run_stats(self.db_path)
+        result = run_stats(self.config_path)
         self.assertEqual(result.returncode, 0)
 
     def test_shows_total_conversations(self):
-        result = run_stats(self.db_path)
+        result = run_stats(self.config_path)
         self.assertIn('3', result.stdout)
 
     def test_shows_date_range(self):
-        result = run_stats(self.db_path)
+        result = run_stats(self.config_path)
         self.assertIn('2026-01-15', result.stdout)
         self.assertIn('2026-01-17', result.stdout)
 
     def test_shows_unique_projects(self):
-        result = run_stats(self.db_path)
+        result = run_stats(self.config_path)
         # tmpdir and other are two distinct cwd values
         self.assertIn('2', result.stdout)
 
     def test_shows_top_topics(self):
-        result = run_stats(self.db_path)
+        result = run_stats(self.config_path)
         self.assertIn('SQLite', result.stdout)
         self.assertIn('Rails', result.stdout)
 
     def test_shows_pruneable_when_transcripts_missing(self):
-        result = run_stats(self.db_path)
+        result = run_stats(self.config_path)
         self.assertIn('Pruneable', result.stdout)
         self.assertIn('1', result.stdout)
         self.assertIn('towit prune', result.stdout)
@@ -110,14 +119,15 @@ class TestTowitStats(unittest.TestCase):
     def test_no_pruneable_line_when_all_transcripts_intact(self):
         # Add the missing transcript so everything is intact
         open(os.path.join(self.projects_dir, 'conv-c.jsonl'), 'w').close()
-        result = run_stats(self.db_path)
+        result = run_stats(self.config_path)
         self.assertNotIn('Pruneable', result.stdout)
 
     def test_empty_db_exits_0(self):
         empty_db = os.path.join(self.tmpdir, 'empty.db')
+        empty_config = write_config(self.tmpdir, empty_db)
         db = Database(empty_db)
         db.create_schema()
-        result = run_stats(empty_db)
+        result = run_stats(empty_config)
         self.assertEqual(result.returncode, 0)
 
 

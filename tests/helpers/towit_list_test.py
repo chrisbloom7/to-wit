@@ -19,11 +19,19 @@ sys.path.insert(0, HELPERS_DIR)
 from towit_db import Database
 
 
-def run_list(db_path, args=None):
+def write_config(tmpdir, db_path):
+    """Write a minimal config.toml containing db_path. Returns config file path."""
+    config_path = os.path.join(tmpdir, 'config.toml')
+    with open(config_path, 'w') as f:
+        f.write(f'[database]\npath = "{db_path}"\n')
+    return config_path
+
+
+def run_list(config_path, args=None):
     """Run towit_list.py as a subprocess."""
     return subprocess.run(
         ['python3', LIST_SCRIPT] + (args or []),
-        env={**os.environ, 'TOWIT_DB_PATH': db_path},
+        env={**os.environ, 'TOWIT_CONFIG_PATH': config_path},
         capture_output=True,
         text=True
     )
@@ -38,6 +46,7 @@ class TestTowitList(unittest.TestCase):
         os.makedirs(self.otherapp_dir)
 
         self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
         db = Database(self.db_path)
         db.create_schema()
         db.upsert_conversation({
@@ -82,7 +91,7 @@ class TestTowitList(unittest.TestCase):
         return ids
 
     def test_list_returns_all_conversations(self):
-        result = run_list(self.db_path)
+        result = run_list(self.config_path)
         self.assertEqual(result.returncode, 0)
         ids = self._ids_in_output(result.stdout)
         self.assertIn('conv-a', ids)
@@ -90,7 +99,7 @@ class TestTowitList(unittest.TestCase):
         self.assertIn('conv-c', ids)
 
     def test_list_with_topic_returns_only_matching(self):
-        result = run_list(self.db_path, ['--topic', 'SQLite'])
+        result = run_list(self.config_path, ['--topic', 'SQLite'])
         self.assertEqual(result.returncode, 0)
         ids = self._ids_in_output(result.stdout)
         self.assertIn('conv-a', ids)
@@ -98,7 +107,7 @@ class TestTowitList(unittest.TestCase):
         self.assertNotIn('conv-b', ids)
 
     def test_list_with_folder_returns_only_matching_cwd(self):
-        result = run_list(self.db_path, ['--folder', self.myapp_dir])
+        result = run_list(self.config_path, ['--folder', self.myapp_dir])
         self.assertEqual(result.returncode, 0)
         ids = self._ids_in_output(result.stdout)
         self.assertIn('conv-a', ids)
@@ -106,7 +115,7 @@ class TestTowitList(unittest.TestCase):
         self.assertNotIn('conv-b', ids)
 
     def test_list_with_format_csv_includes_header_and_all_rows(self):
-        result = run_list(self.db_path, ['--format', 'csv'])
+        result = run_list(self.config_path, ['--format', 'csv'])
         self.assertEqual(result.returncode, 0)
         lines = result.stdout.strip().splitlines()
         # At least header + 3 data rows
@@ -123,11 +132,11 @@ class TestTowitList(unittest.TestCase):
         self.assertGreaterEqual(len(rows), 4)
 
     def test_csv_flag_is_not_recognized(self):
-        result = run_list(self.db_path, ['--csv'])
+        result = run_list(self.config_path, ['--csv'])
         self.assertNotEqual(result.returncode, 0)
 
     def test_list_with_nonexistent_folder_returns_no_results(self):
-        result = run_list(self.db_path, ['--folder', '/nonexistent/path'])
+        result = run_list(self.config_path, ['--folder', '/nonexistent/path'])
         self.assertEqual(result.returncode, 0)
         self.assertNotIn('conv-a', result.stdout)
         self.assertNotIn('conv-b', result.stdout)
@@ -135,21 +144,22 @@ class TestTowitList(unittest.TestCase):
 
     def test_empty_db_returns_exit_0(self):
         empty_db = os.path.join(self.tmpdir, 'empty.db')
+        empty_config = write_config(self.tmpdir, empty_db)
         db = Database(empty_db)
         db.create_schema()
-        result = run_list(empty_db)
+        result = run_list(empty_config)
         self.assertEqual(result.returncode, 0)
 
     def test_format_json_outputs_valid_json(self):
         import json
-        result = run_list(self.db_path, ['--format', 'json'])
+        result = run_list(self.config_path, ['--format', 'json'])
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
         self.assertIsInstance(data, list)
 
     def test_format_json_contains_all_conversations(self):
         import json
-        result = run_list(self.db_path, ['--format', 'json'])
+        result = run_list(self.config_path, ['--format', 'json'])
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
         ids = {row['id'] for row in data}
@@ -159,7 +169,7 @@ class TestTowitList(unittest.TestCase):
 
     def test_format_json_includes_expected_fields(self):
         import json
-        result = run_list(self.db_path, ['--format', 'json'])
+        result = run_list(self.config_path, ['--format', 'json'])
         self.assertEqual(result.returncode, 0)
         row = json.loads(result.stdout)[0]
         for field in ('id', 'title', 'topics', 'cwd', 'date'):
@@ -167,7 +177,7 @@ class TestTowitList(unittest.TestCase):
 
     def test_format_json_topics_is_list(self):
         import json
-        result = run_list(self.db_path, ['--format', 'json'])
+        result = run_list(self.config_path, ['--format', 'json'])
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
         conv_a = next(r for r in data if r['id'] == 'conv-a')
@@ -176,7 +186,7 @@ class TestTowitList(unittest.TestCase):
 
     def test_format_json_respects_topic_filter(self):
         import json
-        result = run_list(self.db_path, ['--format', 'json', '--topic', 'SQLite'])
+        result = run_list(self.config_path, ['--format', 'json', '--topic', 'SQLite'])
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
         ids = {row['id'] for row in data}

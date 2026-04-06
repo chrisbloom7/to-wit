@@ -17,11 +17,19 @@ sys.path.insert(0, HELPERS_DIR)
 from towit_db import Database
 
 
-def run_prune(db_path, args=None):
+def write_config(tmpdir, db_path):
+    """Write a minimal config.toml containing db_path. Returns config file path."""
+    config_path = os.path.join(tmpdir, 'config.toml')
+    with open(config_path, 'w') as f:
+        f.write(f'[database]\npath = "{db_path}"\n')
+    return config_path
+
+
+def run_prune(config_path, args=None):
     """Run towit_prune.py as a subprocess."""
     return subprocess.run(
         ['python3', PRUNE_SCRIPT] + (args or []),
-        env={**os.environ, 'TOWIT_DB_PATH': db_path},
+        env={**os.environ, 'TOWIT_CONFIG_PATH': config_path},
         capture_output=True,
         text=True
     )
@@ -34,6 +42,7 @@ class TestTowitPrune(unittest.TestCase):
         os.makedirs(self.projects_dir)
 
         self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
         self.db = Database(self.db_path)
         self.db.create_schema()
 
@@ -67,29 +76,29 @@ class TestTowitPrune(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_dry_run_does_not_delete(self):
-        run_prune(self.db_path, ['--dry-run'])
+        run_prune(self.config_path, ['--dry-run'])
         self.assertTrue(self.db.is_indexed('conv-b'))
 
     def test_dry_run_reports_missing(self):
-        result = run_prune(self.db_path, ['--dry-run'])
+        result = run_prune(self.config_path, ['--dry-run'])
         self.assertEqual(result.returncode, 0)
         self.assertIn('conv-b', result.stdout)
         self.assertIn('would remove', result.stdout)
 
     def test_dry_run_does_not_report_intact(self):
-        result = run_prune(self.db_path, ['--dry-run'])
+        result = run_prune(self.config_path, ['--dry-run'])
         self.assertNotIn('conv-a', result.stdout)
 
     def test_prune_removes_missing_transcript(self):
-        run_prune(self.db_path)
+        run_prune(self.config_path)
         self.assertFalse(self.db.is_indexed('conv-b'))
 
     def test_prune_keeps_intact_transcript(self):
-        run_prune(self.db_path)
+        run_prune(self.config_path)
         self.assertTrue(self.db.is_indexed('conv-a'))
 
     def test_prune_reports_removed(self):
-        result = run_prune(self.db_path)
+        result = run_prune(self.config_path)
         self.assertEqual(result.returncode, 0)
         self.assertIn('conv-b', result.stdout)
         self.assertIn('removed', result.stdout)
@@ -97,14 +106,14 @@ class TestTowitPrune(unittest.TestCase):
     def test_nothing_to_prune_reports_clean(self):
         # Remove conv-b from DB manually so both are intact
         self.db.delete_conversation('conv-b')
-        result = run_prune(self.db_path)
+        result = run_prune(self.config_path)
         self.assertEqual(result.returncode, 0)
         self.assertIn('Nothing to prune', result.stdout)
 
     def test_empty_catalog(self):
         self.db.delete_conversation('conv-a')
         self.db.delete_conversation('conv-b')
-        result = run_prune(self.db_path)
+        result = run_prune(self.config_path)
         self.assertEqual(result.returncode, 0)
         self.assertIn('No conversations', result.stdout)
 

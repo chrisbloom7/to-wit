@@ -17,11 +17,19 @@ sys.path.insert(0, HELPERS_DIR)
 from towit_db import Database
 
 
-def run_resume(db_path, args=None):
+def write_config(tmpdir, db_path):
+    """Write a minimal config.toml containing db_path. Returns config file path."""
+    config_path = os.path.join(tmpdir, 'config.toml')
+    with open(config_path, 'w') as f:
+        f.write(f'[database]\npath = "{db_path}"\n')
+    return config_path
+
+
+def run_resume(config_path, args=None):
     """Run towit_resume.py as a subprocess."""
     return subprocess.run(
         ['python3', RESUME_SCRIPT] + (args or []),
-        env={**os.environ, 'TOWIT_DB_PATH': db_path},
+        env={**os.environ, 'TOWIT_CONFIG_PATH': config_path},
         capture_output=True,
         text=True
     )
@@ -38,6 +46,7 @@ class TestTowitResume(unittest.TestCase):
         os.makedirs(self.projects_dir)
 
         self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
         db = Database(self.db_path)
         db.create_schema()
         db.upsert_conversation({
@@ -68,54 +77,54 @@ class TestTowitResume(unittest.TestCase):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
     def test_unknown_session_exits_1(self):
-        result = run_resume(self.db_path, ['nonexistent-id'])
+        result = run_resume(self.config_path, ['nonexistent-id'])
         self.assertEqual(result.returncode, 1)
         self.assertIn('session not found', result.stderr)
 
     def test_missing_session_id_exits_nonzero(self):
-        result = run_resume(self.db_path, [])
+        result = run_resume(self.config_path, [])
         self.assertNotEqual(result.returncode, 0)
 
     def test_cwd_missing_transcript_intact_without_force_exits_1(self):
         shutil.rmtree(self.cwd_dir)
-        result = run_resume(self.db_path, ['conv-a'])
+        result = run_resume(self.config_path, ['conv-a'])
         self.assertEqual(result.returncode, 1)
         self.assertIn('working directory no longer exists', result.stderr)
         self.assertIn('--force', result.stderr)
 
     def test_cwd_missing_transcript_intact_without_force_mentions_manual_resume(self):
         shutil.rmtree(self.cwd_dir)
-        result = run_resume(self.db_path, ['conv-a'])
+        result = run_resume(self.config_path, ['conv-a'])
         self.assertIn('claude --resume', result.stderr)
 
     def test_cwd_missing_transcript_intact_without_force_suggests_resume_subcommand(self):
         shutil.rmtree(self.cwd_dir)
-        result = run_resume(self.db_path, ['conv-a'])
+        result = run_resume(self.config_path, ['conv-a'])
         self.assertIn('towit resume --force', result.stderr)
 
     def test_cwd_and_transcript_both_missing_exits_1(self):
         shutil.rmtree(self.cwd_dir)
         os.remove(os.path.join(self.projects_dir, 'conv-a.jsonl'))
-        result = run_resume(self.db_path, ['conv-a'])
+        result = run_resume(self.config_path, ['conv-a'])
         self.assertEqual(result.returncode, 1)
         self.assertIn('no longer resumable', result.stderr)
 
     def test_cwd_missing_with_force_recreates_directory(self):
         shutil.rmtree(self.cwd_dir)
         # Will fail trying to exec claude, but the directory should be created first
-        run_resume(self.db_path, ['--force', 'conv-a'])
+        run_resume(self.config_path, ['--force', 'conv-a'])
         self.assertTrue(os.path.isdir(self.cwd_dir))
 
     def test_cwd_missing_with_force_warns_about_recreation(self):
         shutil.rmtree(self.cwd_dir)
-        result = run_resume(self.db_path, ['--force', 'conv-a'])
+        result = run_resume(self.config_path, ['--force', 'conv-a'])
         self.assertIn('recreated missing directory', result.stderr)
 
     def test_valid_session_attempts_exec(self):
         # With a valid session and existing cwd, the script will try to exec
-        # `claude --resume conv-a`. Since `claude` may not be installed in the
+        # claude --resume conv-a. Since claude may not be installed in the
         # test environment, we just verify it does NOT fail with our own errors.
-        result = run_resume(self.db_path, ['conv-a'])
+        result = run_resume(self.config_path, ['conv-a'])
         self.assertNotIn('session not found', result.stderr)
         self.assertNotIn('working directory no longer exists', result.stderr)
         self.assertNotIn('no longer resumable', result.stderr)
