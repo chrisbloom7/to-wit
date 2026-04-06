@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-06
+
 ### Added
 
 - Config file support: To Wit now reads `~/.towit/config.toml` (TOML format) for persistent configuration. Generate a starter file with `towit setup --config` or `towit setup --full`.

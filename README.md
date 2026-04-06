@@ -21,7 +21,7 @@ towit resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
 ## Requirements
 
 - [Claude Code](https://www.anthropic.com/claude-code) (`brew install claude-code`)
-- Python 3.6+ (`brew install python`)
+- Python 3.11+ (`brew install python`)
 
 ## Installation
 
@@ -41,13 +41,14 @@ By default, `install` links into `/usr/local/bin`. Pass a different directory as
 ## Quick start
 
 ```bash
-# Full setup: initialize database, install stop hook, and index existing conversations
+# Full setup: generate config, initialize database, install stop hook, and index existing conversations
 towit setup --full
 
 # Or step by step:
-towit setup          # Initialize the database
-towit install-hook   # Add stop hook to Claude Code (auto-indexes future sessions)
-towit backfill       # Index all existing conversations (~4 sec/session on Apple M4 Pro)
+towit setup --config  # Generate ~/.towit/config.toml (optional but recommended)
+towit setup           # Initialize the database
+towit install-hook    # Add stop hook to Claude Code (auto-indexes future sessions)
+towit backfill        # Index all existing conversations (~4 sec/session on Apple M4 Pro)
 ```
 
 ## Usage
@@ -56,9 +57,10 @@ towit backfill       # Index all existing conversations (~4 sec/session on Apple
 towit <subcommand> [options]
 
 Subcommands:
-  setup [--full | --hook]       Initialize database
-                                  --full  also installs hook and runs backfill
-                                  --hook  also installs hook
+  setup [--full | --hook | --config]  Initialize database
+                                  --full    also generates config, installs hook, and runs backfill
+                                  --hook    also installs hook
+                                  --config  generate ~/.towit/config.toml (skips if already exists)
   search <terms...>             Search conversations by topic, summary, or title
     [--or]                        Match any term instead of all (default: AND)
     [--all]                       Search topics, summaries, and titles
