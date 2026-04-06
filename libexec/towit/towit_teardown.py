@@ -12,18 +12,18 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
-DB_PATH = os.environ.get('TOWIT_DB_PATH',
-                          os.path.expanduser('~/.towit/catalog.db'))
+from towit_config import config
 
 
 def main():
+    db_path = config.db_path
     parser = argparse.ArgumentParser(description='Remove To Wit hook and database')
     parser.add_argument('--yes', '-y', action='store_true',
                         help='Skip confirmation prompt')
     args = parser.parse_args()
 
     hook_installed = _check_hook_installed()
-    db_exists = os.path.exists(DB_PATH)
+    db_exists = os.path.exists(db_path)
 
     if not hook_installed and not db_exists:
         print("Nothing to tear down — hook is not installed and database does not exist.")
@@ -34,7 +34,7 @@ def main():
     if hook_installed:
         print("  • To Wit stop hook from ~/.claude/settings.json")
     if db_exists:
-        print(f"  • Database at {DB_PATH}")
+        print(f"  • Database at {db_path}")
 
     if not args.yes:
         try:
@@ -52,8 +52,8 @@ def main():
         _remove_hook()
 
     if db_exists:
-        os.remove(DB_PATH)
-        print(f"Database deleted: {DB_PATH}")
+        os.remove(db_path)
+        print(f"Database deleted: {db_path}")
 
     print("Teardown complete.")
 
