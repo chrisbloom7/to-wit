@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Config file support: To Wit now reads `~/.towit/config.toml` (TOML format) for persistent configuration. Generate a starter file with `towit setup --config` or `towit setup --full`.
+- `towit setup --config` flag: generates a commented starter `~/.towit/config.toml` with all options documented; does nothing if the file already exists.
+
+### Changed
+
+- `TOWIT_DB_PATH` environment variable is deprecated. Set `[database] path` in `~/.towit/config.toml` instead. `TOWIT_DB_PATH` continues to work but emits a deprecation warning. Migration:
+
+  ```toml
+  # ~/.towit/config.toml
+  [database]
+  path = "/your/custom/path/catalog.db"
+  ```
+
+- Minimum Python version bumped to **3.11** (required for stdlib `tomllib`).
+- `towit setup --full` now also generates the config file as its first step.
+
 ## [0.4.0] - 2026-04-06
 
 ### Changed
