@@ -1,6 +1,8 @@
 # To Wit
 
-A searchable catalog of your [Claude Code](https://claude.ai/code) conversations, organized by topic.
+> _to wit: to make clearer or more particular something that you have already said_
+
+To Wit is a searchable catalog of your [Claude Code](https://claude.ai/code) conversations, organized by topic.
 
 Claude Code conversations are analyzed, filtered for substance, and stored in a local SQLite database. A CLI lets you search, list, and export conversations. A stop hook keeps the catalog up to date automatically after each session.
 
@@ -19,22 +21,21 @@ towit resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
 ## Requirements
 
 - [Claude Code](https://www.anthropic.com/claude-code) (`brew install claude-code`)
-- Python 3.10+ (`brew install python`)
-  _(3.6+ works technically; 3.10 is the oldest actively maintained release)_
+- Python 3.6+ (`brew install python`)
 
 ## Installation
 
 > Homebrew tap coming soon. For now, clone and run the install script.
 
 ```bash
-git clone https://github.com/chrisbloom7/towit.git ~/path/to/towit
-~/path/to/towit/install
+git clone https://github.com/chrisbloom7/to-wit.git ~/path/to/to-wit
+~/path/to/to-wit/install
 ```
 
 By default, `install` links into `/usr/local/bin`. Pass a different directory as the first argument if needed:
 
 ```bash
-~/path/to/towit/install ~/.local/bin
+~/path/to/to-wit/install ~/.local/bin
 ```
 
 ## Quick start
@@ -118,8 +119,8 @@ Then remove the binary manually (or `brew uninstall towit` when available).
 ## Development
 
 ```bash
-git clone https://github.com/chrisbloom7/towit.git
-cd towit
+git clone https://github.com/chrisbloom7/to-wit.git
+cd to-wit
 
 # Run tests (requires bats-core: brew install bats-core)
 ./run-tests

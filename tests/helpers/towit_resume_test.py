@@ -27,7 +27,7 @@ def run_resume(db_path, args=None):
     )
 
 
-class TestClaudecatResume(unittest.TestCase):
+class TestTowitResume(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.cwd_dir = os.path.join(self.tmpdir, 'myapp')

@@ -26,7 +26,7 @@ def run_stats(db_path):
     )
 
 
-class TestClaudecatStats(unittest.TestCase):
+class TestTowitStats(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.projects_dir = os.path.join(self.tmpdir, 'projects', '-Users-alice')

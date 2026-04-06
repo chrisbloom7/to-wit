@@ -38,7 +38,7 @@ def run_uninstall_hook(home):
     )
 
 
-class TestClaudecatUninstallHook(unittest.TestCase):
+class TestTowitUninstallHook(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.settings_path = os.path.join(self.tmpdir, SETTINGS_REL_PATH)

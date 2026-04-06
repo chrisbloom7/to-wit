@@ -29,7 +29,7 @@ def run_list(db_path, args=None):
     )
 
 
-class TestClaudecatList(unittest.TestCase):
+class TestTowitList(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.myapp_dir = os.path.join(self.tmpdir, 'myapp')

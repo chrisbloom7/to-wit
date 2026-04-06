@@ -46,7 +46,7 @@ def run_implode(db_path, home, settings_path=None, args=None, stdin_input=None):
     )
 
 
-class TestClaudecatImplode(unittest.TestCase):
+class TestTowitImplode(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')

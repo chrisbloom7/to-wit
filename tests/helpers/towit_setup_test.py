@@ -25,7 +25,7 @@ def run_setup(db_path):
     )
 
 
-class TestClaudecatSetup(unittest.TestCase):
+class TestTowitSetup(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')

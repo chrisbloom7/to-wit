@@ -24,8 +24,8 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 
 ### Data at Rest
 
-- The database directory (`~/.claudecat/`) is created with mode `0700`; the database file is created with mode `0600` (owner-only, using `umask(0o077)` at creation time)
-- No conversation content is written outside `~/.claudecat/` and `~/.claude/`
+- The database directory (`~/.towit/`) is created with mode `0700`; the database file is created with mode `0600` (owner-only, using `umask(0o077)` at creation time)
+- No conversation content is written outside `~/.towit/` and `~/.claude/`
 
 ### Input Validation
 
@@ -46,18 +46,18 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 ### Settings File Writes
 
 - Writes to `~/.claude/settings.json` are atomic: a temp file is written and renamed via `os.replace()`
-- The `CLAUDECAT_SETTINGS_PATH` override is validated to be within `~/.claude/` or the system temp directory
+- The `TOWIT_SETTINGS_PATH` override is validated to be within `~/.claude/` or the system temp directory
 
 ### Error Handling
 
 - The stop hook catches all exceptions and never exits non-zero (to avoid interrupting Claude Code)
-- Errors are logged to `~/.claudecat/errors.log` (rotating, 100 KB max, 2 backups) for post-hoc debugging
+- Errors are logged to `~/.towit/errors.log` (rotating, 100 KB max, 2 backups) for post-hoc debugging
 
 ## Reporting a Vulnerability
 
 This is a personal open-source project with no bug bounty program.
 
-Please report security vulnerabilities through [GitHub Private Vulnerability Reporting](https://github.com/chrisbloom7/towit/security). This keeps the details confidential until a fix is available. Confirmed vulnerabilities will be published as GitHub Security Advisories in the same location.
+Please report security vulnerabilities through [GitHub Private Vulnerability Reporting](https://github.com/chrisbloom7/to-wit/security). This keeps the details confidential until a fix is available. Confirmed vulnerabilities will be published as GitHub Security Advisories in the same location.
 
 Please include:
 

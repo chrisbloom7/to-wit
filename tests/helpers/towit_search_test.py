@@ -29,7 +29,7 @@ def run_search(db_path, args):
     )
 
 
-class TestClaudecatSearch(unittest.TestCase):
+class TestTowitSearch(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.myapp_dir = os.path.join(self.tmpdir, 'myapp')

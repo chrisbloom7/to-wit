@@ -44,7 +44,7 @@ def run_teardown(db_path, home, args=None, stdin_input=None):
     )
 
 
-class TestClaudecatTeardown(unittest.TestCase):
+class TestTowitTeardown(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')

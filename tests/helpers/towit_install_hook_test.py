@@ -26,7 +26,7 @@ def run_install_hook(settings_path):
     )
 
 
-class TestClaudecatInstallHook(unittest.TestCase):
+class TestTowitInstallHook(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.settings_path = os.path.join(self.tmpdir, 'settings.local.json')

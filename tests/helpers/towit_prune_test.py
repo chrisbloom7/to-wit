@@ -27,7 +27,7 @@ def run_prune(db_path, args=None):
     )
 
 
-class TestClaudecatPrune(unittest.TestCase):
+class TestTowitPrune(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.projects_dir = os.path.join(self.tmpdir, 'projects', '-Users-alice')

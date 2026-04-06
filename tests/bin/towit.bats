@@ -84,7 +84,7 @@ teardown() {
 
 @test "towit: search with no terms exits non-zero" {
   "${TOWIT}" setup
-  run bash -c "\"${CLAUDECAT}\" search 2>&1"
+  run bash -c "\"${TOWIT}\" search 2>&1"
   [ "${status}" -ne 0 ]
 }
 
