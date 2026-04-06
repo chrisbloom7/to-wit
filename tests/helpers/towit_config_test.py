@@ -28,14 +28,12 @@ def write_config(tmpdir, content):
 class TestConfigNoFile(unittest.TestCase):
     def test_missing_file_returns_default_db_path(self):
         cfg = Config(path='/nonexistent/config.toml')
-        with unittest.mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('TOWIT_DB_PATH', None)
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(cfg.db_path, _DEFAULT_DB_PATH)
 
     def test_missing_file_produces_no_warnings(self):
         cfg = Config(path='/nonexistent/config.toml')
-        with unittest.mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('TOWIT_DB_PATH', None)
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
             with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
                 _ = cfg.db_path
                 self.assertEqual(mock_err.getvalue(), '')
@@ -52,22 +50,19 @@ class TestConfigValidToml(unittest.TestCase):
     def test_reads_database_path(self):
         path = write_config(self.tmpdir, '[database]\npath = "/tmp/custom.db"\n')
         cfg = Config(path=path)
-        with unittest.mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('TOWIT_DB_PATH', None)
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(cfg.db_path, '/tmp/custom.db')
 
     def test_expands_tilde_in_database_path(self):
         path = write_config(self.tmpdir, '[database]\npath = "~/.towit/custom.db"\n')
         cfg = Config(path=path)
-        with unittest.mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('TOWIT_DB_PATH', None)
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(cfg.db_path, os.path.expanduser('~/.towit/custom.db'))
 
     def test_empty_config_returns_defaults(self):
         path = write_config(self.tmpdir, '')
         cfg = Config(path=path)
-        with unittest.mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('TOWIT_DB_PATH', None)
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(cfg.db_path, _DEFAULT_DB_PATH)
 
 
@@ -88,8 +83,7 @@ class TestConfigBadToml(unittest.TestCase):
     def test_bad_toml_returns_default_db_path(self):
         path = write_config(self.tmpdir, 'this is not [ valid toml !!!')
         cfg = Config(path=path)
-        with unittest.mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('TOWIT_DB_PATH', None)
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(cfg.db_path, _DEFAULT_DB_PATH)
 
 
@@ -116,8 +110,7 @@ class TestConfigUnknownKeys(unittest.TestCase):
     def test_known_keys_still_work_after_unknown_key_warning(self):
         path = write_config(self.tmpdir, '[database]\npath = "/tmp/ok.db"\nunknown_key = true\n')
         cfg = Config(path=path)
-        with unittest.mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('TOWIT_DB_PATH', None)
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(cfg.db_path, '/tmp/ok.db')
 
 
@@ -132,8 +125,7 @@ class TestConfigWrongType(unittest.TestCase):
     def test_wrong_type_for_database_path_warns(self):
         path = write_config(self.tmpdir, '[database]\npath = 42\n')
         cfg = Config(path=path)
-        with unittest.mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('TOWIT_DB_PATH', None)
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
             with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
                 _ = cfg.db_path
                 self.assertIn('Warning', mock_err.getvalue())
@@ -141,8 +133,7 @@ class TestConfigWrongType(unittest.TestCase):
     def test_wrong_type_for_database_path_uses_default(self):
         path = write_config(self.tmpdir, '[database]\npath = 42\n')
         cfg = Config(path=path)
-        with unittest.mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('TOWIT_DB_PATH', None)
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(cfg.db_path, _DEFAULT_DB_PATH)
 
 

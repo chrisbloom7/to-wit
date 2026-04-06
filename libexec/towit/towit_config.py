@@ -34,6 +34,7 @@ class Config:
         self._path = path if path is not None else CONFIG_PATH
         self._data = self._load()
         self._warn_unknown_keys()
+        self._deprecated_warned = False
 
     def _load(self):
         if not os.path.exists(self._path):
@@ -86,11 +87,13 @@ class Config:
         """Resolved database path. TOWIT_DB_PATH env var overrides (deprecated)."""
         env_db_path = os.environ.get('TOWIT_DB_PATH')
         if env_db_path:
-            print(
-                "Warning: TOWIT_DB_PATH is deprecated. "
-                "Set [database] path in your config file instead.",
-                file=sys.stderr,
-            )
+            if not self._deprecated_warned:
+                print(
+                    "Warning: TOWIT_DB_PATH is deprecated. "
+                    "Set [database] path in your config file instead.",
+                    file=sys.stderr,
+                )
+                self._deprecated_warned = True
             return env_db_path
         raw = self._get('database', 'path', _DEFAULT_DB_PATH, str)
         return os.path.expanduser(raw)
