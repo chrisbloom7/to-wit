@@ -10,10 +10,8 @@ import os
 import sys
 import sqlite3
 
-DB_PATH = os.environ.get(
-    'TOWIT_DB_PATH',
-    os.path.expanduser('~/.towit/catalog.db')
-)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from towit_config import config
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -50,8 +48,8 @@ CREATE INDEX IF NOT EXISTS idx_ct_conv               ON conversation_topics(conv
 
 
 class Database:
-    def __init__(self, db_path=DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path if db_path is not None else config.db_path
 
     def validate(self):
         """Check that the DB file exists and is readable/writable."""
