@@ -13,7 +13,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from towit_db import Database, DB_PATH
+from towit_db import Database
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +241,7 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
     if isinstance(db_path, Database):
         db = db_path
     else:
-        db = Database(db_path or DB_PATH)
+        db = Database(db_path)
 
     # Parse first so we can compare message count for staleness detection
     messages = parse_jsonl(jsonl_path)
