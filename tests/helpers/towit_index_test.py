@@ -192,13 +192,11 @@ class TestIndexConversation(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
         self.db_path = os.path.join(self.tmpdir, 'test.db')
-        os.environ['TOWIT_DB_PATH'] = self.db_path
         self.db = Database(self.db_path)
         self.db.create_schema()
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
-        os.environ.pop('TOWIT_DB_PATH', None)
 
     def _write_conv(self, session_id, messages, cwd='/Users/test'):
         path = os.path.join(self.tmpdir, f'{session_id}.jsonl')
