@@ -19,7 +19,12 @@ EOF
   chmod +x "${TEST_TMPDIR}/mock_bin/sleep"
 
   export PATH="${TEST_TMPDIR}/mock_bin:${PATH}"
-  export TOWIT_DB_PATH="${TEST_TMPDIR}/test.db"
+
+  # Config file controls DB path for all subprocess invocations
+  export TOWIT_CONFIG_PATH="${TEST_TMPDIR}/config.toml"
+  local db_path="${TEST_TMPDIR}/test.db"
+  printf '[database]\npath = "%s"\n' "${db_path}" > "${TOWIT_CONFIG_PATH}"
+
   export TOWIT="${BIN_DIR}/towit"
 
   # Clear mode vars that shell scripts might reference

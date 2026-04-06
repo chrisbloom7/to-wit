@@ -8,8 +8,9 @@ load "../test_helper"
 
 setup() {
   _setup_common
-  export TOWIT_DB_PATH="${TEST_TMPDIR}/test.db"
   TOWIT="${BIN_DIR}/towit"
+  # Convenience variable for assertions — mirrors the DB path written into TOWIT_CONFIG_PATH
+  TOWIT_DB_PATH="${TEST_TMPDIR}/test.db"
 }
 
 teardown() {
@@ -79,6 +80,53 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
+# setup --config subcommand
+# ---------------------------------------------------------------------------
+
+@test "towit: setup --config creates config file" {
+  local cfg="${TEST_TMPDIR}/new_config.toml"
+  TOWIT_CONFIG_PATH="${cfg}" run "${TOWIT}" setup --config
+  [ "${status}" -eq 0 ]
+  [ -f "${cfg}" ] || {
+    echo "Expected config file at ${cfg}"; return 1
+  }
+}
+
+@test "towit: setup --config prints path of created config" {
+  local cfg="${TEST_TMPDIR}/new_config.toml"
+  TOWIT_CONFIG_PATH="${cfg}" run "${TOWIT}" setup --config
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"${cfg}"* ]] || {
+    echo "Expected config path in output, got: ${output}"; return 1
+  }
+}
+
+@test "towit: setup --config is idempotent — does not overwrite existing config" {
+  local cfg="${TEST_TMPDIR}/existing_config.toml"
+  echo "# my custom config" > "${cfg}"
+  local mtime_before
+  mtime_before="$(stat -f '%m' "${cfg}" 2>/dev/null || stat -c '%Y' "${cfg}")"
+  TOWIT_CONFIG_PATH="${cfg}" run "${TOWIT}" setup --config
+  [ "${status}" -eq 0 ]
+  local mtime_after
+  mtime_after="$(stat -f '%m' "${cfg}" 2>/dev/null || stat -c '%Y' "${cfg}")"
+  [ "${mtime_before}" = "${mtime_after}" ] || {
+    echo "Config file was overwritten — it should not be"; return 1
+  }
+  [[ "$(cat "${cfg}")" == "# my custom config" ]] || {
+    echo "Config file content was changed"; return 1
+  }
+}
+
+@test "towit: setup --config does not require database to exist" {
+  local cfg="${TEST_TMPDIR}/standalone_config.toml"
+  local fresh_db="${TEST_TMPDIR}/fresh.db"
+  printf '[database]\npath = "%s"\n' "${fresh_db}" > "${cfg}"
+  TOWIT_CONFIG_PATH="${cfg}" run "${TOWIT}" setup --config
+  [ "${status}" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
 # search subcommand
 # ---------------------------------------------------------------------------
 
@@ -128,7 +176,7 @@ EOF
   chmod +x "${no_py_bin}/python3"
   run -127 env -i \
     HOME="${HOME}" \
-    TOWIT_DB_PATH="${TEST_TMPDIR}/test.db" \
+    TOWIT_CONFIG_PATH="${TOWIT_CONFIG_PATH}" \
     PATH="${no_py_bin}:/usr/local/bin:/usr/bin:/bin" \
     "${TOWIT}" setup 2>&1
   [ "${status}" -ne 0 ]
