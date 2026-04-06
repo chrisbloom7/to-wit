@@ -47,8 +47,6 @@ def main():
             sys.exit(1)
 
     if hook_installed:
-        from towit_uninstall_hook import main as uninstall_hook
-        # Redirect: call the logic directly, not the main() which exits
         _remove_hook()
 
     if db_exists:
@@ -66,7 +64,6 @@ def _check_hook_installed():
 
 def _remove_hook():
     from towit_uninstall_hook import _load_settings, _save_settings, is_installed, HOOK_MARKER, SETTINGS_PATH
-    import os
     if not os.path.exists(SETTINGS_PATH):
         return
     settings = _load_settings()
