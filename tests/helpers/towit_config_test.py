@@ -164,5 +164,186 @@ class TestConfigDeprecatedEnvVar(unittest.TestCase):
             self.assertEqual(cfg.db_path, '/tmp/from_env.db')
 
 
+class TestIndexingConfig(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # --- model ---
+
+    def test_indexing_model_defaults_to_haiku(self):
+        cfg = Config(path='/nonexistent/config.toml')
+        self.assertEqual(cfg.indexing_model, 'haiku')
+
+    def test_indexing_model_reads_from_config(self):
+        path = write_config(self.tmpdir, '[indexing]\nmodel = "sonnet"\n')
+        cfg = Config(path=path)
+        self.assertEqual(cfg.indexing_model, 'sonnet')
+
+    def test_indexing_model_accepts_default_string(self):
+        path = write_config(self.tmpdir, '[indexing]\nmodel = "default"\n')
+        cfg = Config(path=path)
+        self.assertEqual(cfg.indexing_model, 'default')
+
+    def test_indexing_model_wrong_type_warns_and_uses_default(self):
+        path = write_config(self.tmpdir, '[indexing]\nmodel = 42\n')
+        cfg = Config(path=path)
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            result = cfg.indexing_model
+            self.assertIn('Warning', mock_err.getvalue())
+        self.assertEqual(result, 'haiku')
+
+    # --- reindex_delta (in exchanges) ---
+
+    def test_reindex_delta_defaults_to_2(self):
+        cfg = Config(path='/nonexistent/config.toml')
+        self.assertEqual(cfg.indexing_reindex_delta, 2)
+
+    def test_reindex_delta_reads_from_config(self):
+        path = write_config(self.tmpdir, '[indexing]\nreindex_delta = 5\n')
+        cfg = Config(path=path)
+        self.assertEqual(cfg.indexing_reindex_delta, 5)
+
+    def test_reindex_delta_wrong_type_warns_and_uses_default(self):
+        path = write_config(self.tmpdir, '[indexing]\nreindex_delta = "two"\n')
+        cfg = Config(path=path)
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            result = cfg.indexing_reindex_delta
+            self.assertIn('Warning', mock_err.getvalue())
+        self.assertEqual(result, 2)
+
+    # --- topics ---
+
+    def test_min_topics_defaults_to_1(self):
+        cfg = Config(path='/nonexistent/config.toml')
+        self.assertEqual(cfg.indexing_min_topics, 1)
+
+    def test_max_topics_defaults_to_5(self):
+        cfg = Config(path='/nonexistent/config.toml')
+        self.assertEqual(cfg.indexing_max_topics, 5)
+
+    def test_topics_reads_from_config(self):
+        path = write_config(self.tmpdir, '[indexing]\nmin_topics = 2\nmax_topics = 4\n')
+        cfg = Config(path=path)
+        self.assertEqual(cfg.indexing_min_topics, 2)
+        self.assertEqual(cfg.indexing_max_topics, 4)
+
+    def test_topics_min_greater_than_max_warns_and_uses_defaults(self):
+        path = write_config(self.tmpdir, '[indexing]\nmin_topics = 8\nmax_topics = 3\n')
+        cfg = Config(path=path)
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            min_val = cfg.indexing_min_topics
+            max_val = cfg.indexing_max_topics
+            self.assertIn('Warning', mock_err.getvalue())
+        self.assertEqual(min_val, 1)
+        self.assertEqual(max_val, 5)
+
+    def test_max_topics_wrong_type_warns_and_uses_default(self):
+        path = write_config(self.tmpdir, '[indexing]\nmax_topics = "five"\n')
+        cfg = Config(path=path)
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            result = cfg.indexing_max_topics
+            self.assertIn('Warning', mock_err.getvalue())
+        self.assertEqual(result, 5)
+
+    # --- keywords ---
+
+    def test_min_keywords_defaults_to_15(self):
+        cfg = Config(path='/nonexistent/config.toml')
+        self.assertEqual(cfg.indexing_min_keywords, 15)
+
+    def test_max_keywords_defaults_to_30(self):
+        cfg = Config(path='/nonexistent/config.toml')
+        self.assertEqual(cfg.indexing_max_keywords, 30)
+
+    def test_keywords_reads_from_config(self):
+        path = write_config(self.tmpdir, '[indexing]\nmin_keywords = 5\nmax_keywords = 15\n')
+        cfg = Config(path=path)
+        self.assertEqual(cfg.indexing_min_keywords, 5)
+        self.assertEqual(cfg.indexing_max_keywords, 15)
+
+    def test_keywords_min_greater_than_max_warns_and_uses_defaults(self):
+        path = write_config(self.tmpdir, '[indexing]\nmin_keywords = 20\nmax_keywords = 10\n')
+        cfg = Config(path=path)
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            min_val = cfg.indexing_min_keywords
+            max_val = cfg.indexing_max_keywords
+            self.assertIn('Warning', mock_err.getvalue())
+        self.assertEqual(min_val, 15)
+        self.assertEqual(max_val, 30)
+
+    def test_max_keywords_wrong_type_warns_and_uses_default(self):
+        path = write_config(self.tmpdir, '[indexing]\nmax_keywords = true\n')
+        cfg = Config(path=path)
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            result = cfg.indexing_max_keywords
+            self.assertIn('Warning', mock_err.getvalue())
+        self.assertEqual(result, 30)
+
+    # --- summary sentences ---
+
+    def test_min_summary_sentences_defaults_to_3(self):
+        cfg = Config(path='/nonexistent/config.toml')
+        self.assertEqual(cfg.indexing_min_summary_sentences, 3)
+
+    def test_max_summary_sentences_defaults_to_6(self):
+        cfg = Config(path='/nonexistent/config.toml')
+        self.assertEqual(cfg.indexing_max_summary_sentences, 6)
+
+    def test_summary_sentences_reads_from_config(self):
+        path = write_config(self.tmpdir, '[indexing]\nmin_summary_sentences = 2\nmax_summary_sentences = 4\n')
+        cfg = Config(path=path)
+        self.assertEqual(cfg.indexing_min_summary_sentences, 2)
+        self.assertEqual(cfg.indexing_max_summary_sentences, 4)
+
+    def test_summary_sentences_min_greater_than_max_warns_and_uses_defaults(self):
+        path = write_config(self.tmpdir, '[indexing]\nmin_summary_sentences = 5\nmax_summary_sentences = 2\n')
+        cfg = Config(path=path)
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            min_val = cfg.indexing_min_summary_sentences
+            max_val = cfg.indexing_max_summary_sentences
+            self.assertIn('Warning', mock_err.getvalue())
+        self.assertEqual(min_val, 3)
+        self.assertEqual(max_val, 6)
+
+    def test_max_summary_sentences_wrong_type_warns_and_uses_default(self):
+        path = write_config(self.tmpdir, '[indexing]\nmax_summary_sentences = 3.5\n')
+        cfg = Config(path=path)
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            result = cfg.indexing_max_summary_sentences
+            self.assertIn('Warning', mock_err.getvalue())
+        self.assertEqual(result, 6)
+
+    # --- transcript_max_chars ---
+
+    def test_transcript_max_chars_defaults_to_8000(self):
+        cfg = Config(path='/nonexistent/config.toml')
+        self.assertEqual(cfg.indexing_transcript_max_chars, 8000)
+
+    def test_transcript_max_chars_reads_from_config(self):
+        path = write_config(self.tmpdir, '[indexing]\ntranscript_max_chars = 4000\n')
+        cfg = Config(path=path)
+        self.assertEqual(cfg.indexing_transcript_max_chars, 4000)
+
+    def test_transcript_max_chars_wrong_type_warns_and_uses_default(self):
+        path = write_config(self.tmpdir, '[indexing]\ntranscript_max_chars = "8k"\n')
+        cfg = Config(path=path)
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            result = cfg.indexing_transcript_max_chars
+            self.assertIn('Warning', mock_err.getvalue())
+        self.assertEqual(result, 8000)
+
+    # --- unknown key warning ---
+
+    def test_unknown_key_in_indexing_section_warns(self):
+        path = write_config(self.tmpdir, '[indexing]\nfuture_param = true\n')
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            cfg = Config(path=path)
+            self.assertIn('Warning', mock_err.getvalue())
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -26,6 +26,13 @@ CONFIG_PATH = os.environ.get('TOWIT_CONFIG_PATH', _DEFAULT_CONFIG_PATH)
 # Used to emit warnings for unrecognized entries.
 _KNOWN_KEYS = {
     'database': {'path'},
+    'indexing': {
+        'model', 'reindex_delta',
+        'min_topics', 'max_topics',
+        'min_keywords', 'max_keywords',
+        'min_summary_sentences', 'max_summary_sentences',
+        'transcript_max_chars',
+    },
 }
 
 
@@ -81,6 +88,63 @@ class Config:
             )
             return default
         return value
+
+    def _get_range(self, section, min_key, max_key, default_min, default_max):
+        """
+        Return (min_val, max_val) for a paired min/max config entry.
+        If either value has the wrong type or min > max, emits a warning and
+        returns the defaults for both.
+        """
+        raw_min = self._get(section, min_key, default_min, int)
+        raw_max = self._get(section, max_key, default_max, int)
+        if raw_min > raw_max:
+            print(
+                f"Warning: config [{section}] {min_key!r} ({raw_min}) must not exceed "
+                f"{max_key!r} ({raw_max}); using defaults "
+                f"({default_min}, {default_max}).",
+                file=sys.stderr,
+            )
+            return default_min, default_max
+        return raw_min, raw_max
+
+    @property
+    def indexing_model(self) -> str:
+        """Model passed to `claude -p`. 'default' uses the user's configured default."""
+        return self._get('indexing', 'model', 'haiku', str)
+
+    @property
+    def indexing_reindex_delta(self) -> int:
+        """Exchanges (user+assistant pairs) between re-analyses of a growing session."""
+        return self._get('indexing', 'reindex_delta', 2, int)
+
+    @property
+    def indexing_min_topics(self) -> int:
+        return self._get_range('indexing', 'min_topics', 'max_topics', 1, 5)[0]
+
+    @property
+    def indexing_max_topics(self) -> int:
+        return self._get_range('indexing', 'min_topics', 'max_topics', 1, 5)[1]
+
+    @property
+    def indexing_min_keywords(self) -> int:
+        return self._get_range('indexing', 'min_keywords', 'max_keywords', 15, 30)[0]
+
+    @property
+    def indexing_max_keywords(self) -> int:
+        return self._get_range('indexing', 'min_keywords', 'max_keywords', 15, 30)[1]
+
+    @property
+    def indexing_min_summary_sentences(self) -> int:
+        return self._get_range('indexing', 'min_summary_sentences', 'max_summary_sentences', 3, 6)[0]
+
+    @property
+    def indexing_max_summary_sentences(self) -> int:
+        return self._get_range('indexing', 'min_summary_sentences', 'max_summary_sentences', 3, 6)[1]
+
+    @property
+    def indexing_transcript_max_chars(self) -> int:
+        """Character cap applied to the transcript before sending to Claude."""
+        return self._get('indexing', 'transcript_max_chars', 8000, int)
 
     @property
     def db_path(self) -> str:
