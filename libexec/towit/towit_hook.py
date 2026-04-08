@@ -12,13 +12,11 @@ import sys
 import os
 import json
 import re
+import subprocess
 
 # Guard against recursive calls triggered by towit's own Claude invocations
 if os.environ.get('TOWIT_INDEXING'):
     sys.exit(0)
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from towit_index import index_conversation
 
 _EXPECTED_ROOT = os.path.realpath(os.path.expanduser('~/.claude/projects'))
 _SESSION_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{8,}$')
@@ -86,9 +84,15 @@ def main():
         if '/subagents/' in jsonl_path:
             sys.exit(0)
 
-        result = index_conversation(jsonl_path)
-        if result == 'indexed':
-            print(f"towit: indexed session {session_id[:8]}...", file=sys.stderr)
+        # Spawn indexing as a detached background process so the stop hook
+        # exits immediately rather than blocking on the Claude API call.
+        helpers_dir = os.path.dirname(os.path.abspath(__file__))
+        subprocess.Popen(
+            [sys.executable, os.path.join(helpers_dir, 'towit_index.py'), jsonl_path],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     except Exception:
         try:
             _get_error_logger().exception("towit hook error")
