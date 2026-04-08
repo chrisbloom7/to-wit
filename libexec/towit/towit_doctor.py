@@ -7,6 +7,7 @@ warnings), 1 if any check fails.  Never performs automatic remediation.
 """
 
 import argparse
+import json
 import os
 import shutil
 import sqlite3
@@ -238,3 +239,64 @@ def check_db_schema(db_path: str) -> CheckResult:
             remediation="Run 'towit setup' to apply pending schema migrations.",
         )
     return CheckResult('PASS', 'Database schema is current')
+
+
+# ---------------------------------------------------------------------------
+# Stop hook checks
+# ---------------------------------------------------------------------------
+
+_HOOK_MARKER = 'towit_hook.py'
+
+
+def _find_hook_command(settings_path: str) -> str | None:
+    """Return the hook command string if our hook is installed, else None."""
+    try:
+        with open(settings_path) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    for entry in data.get('hooks', {}).get('Stop', []):
+        for hook in entry.get('hooks', []):
+            cmd = hook.get('command', '')
+            if _HOOK_MARKER in cmd:
+                return cmd
+    return None
+
+
+def check_hook_settings_file(settings_path: str) -> CheckResult:
+    if not os.path.isfile(settings_path):
+        return CheckResult(
+            'WARN',
+            f'Claude Code settings not found at {settings_path}',
+            remediation='Install Claude Code or run it once to create settings.json.',
+        )
+    return CheckResult('PASS', f'Claude Code settings found at {settings_path}')
+
+
+def check_hook_installed(settings_path: str) -> CheckResult:
+    if not os.path.isfile(settings_path):
+        return CheckResult('WARN', 'Cannot check hook — settings file absent (see above)')
+    cmd = _find_hook_command(settings_path)
+    if cmd is None:
+        return CheckResult(
+            'FAIL',
+            f'To Wit stop hook not found in {settings_path}',
+            remediation="Run 'towit install-hook' to register the stop hook.",
+        )
+    return CheckResult('PASS', f'Stop hook installed: {cmd}')
+
+
+def check_hook_script_exists(hook_command: str) -> CheckResult:
+    """Given the raw hook command string, verify the script path exists on disk."""
+    # Command form: "python3 /abs/path/to/towit_hook.py"
+    parts = hook_command.strip().split()
+    script_path = next((p for p in parts if _HOOK_MARKER in p), None)
+    if script_path is None:
+        return CheckResult('WARN', 'Could not parse hook script path from command')
+    if not os.path.isfile(script_path):
+        return CheckResult(
+            'FAIL',
+            f'Hook script not found on disk: {script_path}',
+            remediation="Reinstall To Wit to restore the hook script, then run 'towit install-hook'.",
+        )
+    return CheckResult('PASS', f'Hook script exists at {script_path}')

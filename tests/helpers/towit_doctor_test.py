@@ -4,6 +4,7 @@ import sys, os
 import tempfile
 import shutil
 import sqlite3
+import json
 from unittest.mock import patch
 from collections import namedtuple
 
@@ -276,6 +277,61 @@ class TestDatabaseChecks(unittest.TestCase):
         result = check_db_schema(self.db_path)
         self.assertEqual(result.status, 'WARN')
         self.assertIn('towit setup', result.remediation)
+
+
+class TestHookChecks(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.settings_path = os.path.join(self.tmpdir, 'settings.json')
+        self.hook_script = os.path.join(self.tmpdir, 'towit_hook.py')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_settings(self, data):
+        with open(self.settings_path, 'w') as f:
+            json.dump(data, f)
+
+    def test_settings_missing_is_warn(self):
+        from towit_doctor import check_hook_settings_file
+        result = check_hook_settings_file('/tmp/no_such_settings_towit.json')
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('not found', result.label)
+
+    def test_settings_present_is_pass(self):
+        from towit_doctor import check_hook_settings_file
+        self._write_settings({})
+        result = check_hook_settings_file(self.settings_path)
+        self.assertEqual(result.status, 'PASS')
+
+    def test_hook_not_installed_is_fail(self):
+        from towit_doctor import check_hook_installed
+        self._write_settings({'hooks': {'Stop': []}})
+        result = check_hook_installed(self.settings_path)
+        self.assertEqual(result.status, 'FAIL')
+        self.assertIn('towit install-hook', result.remediation)
+
+    def test_hook_installed_is_pass(self):
+        from towit_doctor import check_hook_installed
+        data = {'hooks': {'Stop': [{'matcher': '', 'hooks': [
+            {'type': 'command', 'command': f'python3 {self.hook_script}'}
+        ]}]}}
+        self._write_settings(data)
+        result = check_hook_installed(self.settings_path)
+        self.assertEqual(result.status, 'PASS')
+
+    def test_hook_script_missing_from_disk_is_fail(self):
+        from towit_doctor import check_hook_script_exists
+        command = f'python3 /no/such/towit_hook.py'
+        result = check_hook_script_exists(command)
+        self.assertEqual(result.status, 'FAIL')
+        self.assertIn('/no/such/towit_hook.py', result.label)
+
+    def test_hook_script_exists_on_disk_is_pass(self):
+        from towit_doctor import check_hook_script_exists
+        open(self.hook_script, 'w').close()
+        result = check_hook_script_exists(f'python3 {self.hook_script}')
+        self.assertEqual(result.status, 'PASS')
 
 if __name__ == '__main__':
     unittest.main()
