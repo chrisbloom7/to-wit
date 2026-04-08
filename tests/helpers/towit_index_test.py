@@ -16,6 +16,7 @@ sys.path.insert(0, HELPERS_DIR)
 
 from towit_db import Database
 from towit_index import parse_jsonl, should_index, build_transcript, analyze_with_claude, index_conversation
+import towit_index
 
 
 def write_jsonl(path, messages):
@@ -160,6 +161,26 @@ class TestBuildTranscript(unittest.TestCase):
             '[...truncated' in transcript or '...' in transcript or 'omitted' in transcript.lower(),
             f"Expected truncation marker in long transcript. Length: {len(transcript)}"
         )
+
+
+def _make_mock_cfg_early(**overrides):
+    """Return a MagicMock config with sensible indexing defaults, allowing overrides."""
+    defaults = dict(
+        indexing_model='default',
+        indexing_reindex_delta=1,
+        indexing_min_topics=1,
+        indexing_max_topics=5,
+        indexing_min_keywords=15,
+        indexing_max_keywords=30,
+        indexing_min_summary_sentences=3,
+        indexing_max_summary_sentences=6,
+        indexing_transcript_max_chars=8000,
+    )
+    defaults.update(overrides)
+    cfg = MagicMock()
+    for k, v in defaults.items():
+        setattr(cfg, k, v)
+    return cfg
 
 
 class TestAnalyzeWithClaude(unittest.TestCase):
@@ -353,8 +374,9 @@ class TestIndexConversation(unittest.TestCase):
             'topics': ['sqlite', 'wal-mode'],
         })
 
-        with patch('subprocess.run', return_value=mock_result) as mock_run:
-            result = index_conversation(path, self.db)
+        with patch('towit_index._config', _make_mock_cfg_early()):
+            with patch('subprocess.run', return_value=mock_result) as mock_run:
+                result = index_conversation(path, self.db)
 
         self.assertEqual(result, 'indexed')
         call_args = mock_run.call_args
@@ -446,13 +468,233 @@ class TestIndexConversation(unittest.TestCase):
             'topics': ['sqlite'], 'keywords': ['wal-mode', 'concurrent-reads'],
         })
 
-        with patch('subprocess.run', return_value=mock_result) as mock_run:
-            index_conversation(path, self.db)
+        with patch('towit_index._config', _make_mock_cfg_early()):
+            with patch('subprocess.run', return_value=mock_result) as mock_run:
+                index_conversation(path, self.db)
 
         prompt_arg = mock_run.call_args[0][0][2]
         self.assertIn('wal-mode', prompt_arg)
         self.assertIn('concurrent-reads', prompt_arg)
         self.assertIn('Previously assigned keywords', prompt_arg)
+
+
+def _make_mock_cfg(**overrides):
+    """Return a MagicMock config with sensible indexing defaults, allowing overrides."""
+    defaults = dict(
+        indexing_model='default',
+        indexing_reindex_delta=2,
+        indexing_min_topics=1,
+        indexing_max_topics=5,
+        indexing_min_keywords=15,
+        indexing_max_keywords=30,
+        indexing_min_summary_sentences=3,
+        indexing_max_summary_sentences=6,
+        indexing_transcript_max_chars=8000,
+    )
+    defaults.update(overrides)
+    cfg = MagicMock()
+    for k, v in defaults.items():
+        setattr(cfg, k, v)
+    return cfg
+
+
+class TestAnalyzeWithClaudeModel(unittest.TestCase):
+    def _run_and_get_cmd(self, model_value):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            'skip': False, 'title': 'T', 'summary': 'S',
+            'topics': ['a'], 'keywords': ['x'],
+        })
+        mock_cfg = _make_mock_cfg(indexing_model=model_value)
+        with patch('towit_index._config', mock_cfg):
+            with patch('subprocess.run', return_value=mock_result) as mock_run:
+                analyze_with_claude('transcript')
+        return mock_run.call_args[0][0]
+
+    def test_haiku_model_adds_model_flag(self):
+        cmd = self._run_and_get_cmd('haiku')
+        self.assertIn('--model', cmd)
+        self.assertEqual(cmd[cmd.index('--model') + 1], 'haiku')
+
+    def test_default_model_omits_model_flag(self):
+        cmd = self._run_and_get_cmd('default')
+        self.assertNotIn('--model', cmd)
+
+    def test_explicit_full_model_id_passes_through(self):
+        cmd = self._run_and_get_cmd('claude-sonnet-4-6')
+        self.assertIn('--model', cmd)
+        self.assertEqual(cmd[cmd.index('--model') + 1], 'claude-sonnet-4-6')
+
+
+class TestAnalyzeWithClaudePromptRanges(unittest.TestCase):
+    def _prompt_for(self, **cfg_overrides):
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({'skip': False, 'title': 'T', 'summary': 'S', 'topics': [], 'keywords': []})
+        mock_cfg = _make_mock_cfg(**cfg_overrides)
+        with patch('towit_index._config', mock_cfg):
+            with patch('subprocess.run', return_value=mock_result) as mock_run:
+                analyze_with_claude('transcript')
+        return mock_run.call_args[0][0][2]  # the prompt string
+
+    def test_prompt_uses_min_and_max_topics(self):
+        prompt = self._prompt_for(indexing_min_topics=2, indexing_max_topics=4)
+        self.assertIn('2-4', prompt)
+
+    def test_prompt_uses_min_and_max_keywords(self):
+        prompt = self._prompt_for(indexing_min_keywords=5, indexing_max_keywords=10)
+        self.assertIn('5-10', prompt)
+
+    def test_prompt_uses_min_and_max_summary_sentences(self):
+        prompt = self._prompt_for(indexing_min_summary_sentences=2, indexing_max_summary_sentences=4)
+        self.assertIn('2-4', prompt)
+
+    def test_prompt_defaults_produce_original_ranges(self):
+        prompt = self._prompt_for()
+        self.assertIn('1-5', prompt)    # topics
+        self.assertIn('15-30', prompt)  # keywords
+        self.assertIn('3-6', prompt)    # sentences
+
+
+class TestIndexConversationReindexDelta(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.db = Database(self.db_path)
+        self.db.create_schema()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_conv(self, session_id, messages):
+        path = os.path.join(self.tmpdir, f'{session_id}.jsonl')
+        with open(path, 'w') as f:
+            for i, msg in enumerate(messages):
+                line = {
+                    'type': msg['role'],
+                    'message': {'role': msg['role'], 'content': msg['content']},
+                    'sessionId': session_id,
+                    'cwd': '/Users/test',
+                    'timestamp': f'2026-01-15T10:{i:02d}:00Z',
+                }
+                f.write(json.dumps(line) + '\n')
+        return path
+
+    def _seed_db(self, session_id, message_count):
+        self.db.upsert_conversation({
+            'id': session_id,
+            'folder': self.tmpdir,
+            'cwd': '/Users/test',
+            'started_at': '2026-01-15T10:00:00Z',
+            'last_active': '2026-01-15T10:00:00Z',
+            'title': 'Old',
+            'summary': 'Old summary.',
+            'topics': ['test'],
+            'keywords': ['test'],
+            'message_count': message_count,
+        })
+
+    def test_growth_below_delta_skips_claude(self):
+        # stored=4 messages, current=6 messages (1 new exchange = 2 messages)
+        # delta=2 exchanges = 4 messages required; growth of 2 < 4 → skip
+        self._seed_db('delta-001', 4)
+        six_msgs = MINIMAL_MESSAGES + [
+            {'role': 'user',      'content': 'One more question about WAL mode checkpointing.'},
+            {'role': 'assistant', 'content': 'Checkpointing copies WAL records back to the main db file.'},
+        ]
+        path = self._write_conv('delta-001', six_msgs)
+        mock_cfg = _make_mock_cfg(indexing_reindex_delta=2)  # 2 exchanges = 4 messages
+        with patch('towit_index._config', mock_cfg):
+            with patch('subprocess.run') as mock_run:
+                result = index_conversation(path, self.db)
+        self.assertEqual(result, 'already_indexed')
+        mock_run.assert_not_called()
+
+    def test_growth_at_delta_triggers_reindex(self):
+        # stored=2 messages, current=6 messages, growth=4 = 2 exchanges = delta → reindex
+        self._seed_db('delta-002', 2)
+        six_msgs = MINIMAL_MESSAGES + [
+            {'role': 'user',      'content': 'One more question about WAL mode checkpointing.'},
+            {'role': 'assistant', 'content': 'Checkpointing copies WAL records back to the main db file.'},
+        ]
+        path = self._write_conv('delta-002', six_msgs)  # 6 messages
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({'skip': False, 'title': 'T', 'summary': 'S', 'topics': [], 'keywords': []})
+        mock_cfg = _make_mock_cfg(indexing_reindex_delta=2)  # 2 exchanges = 4 messages
+        with patch('towit_index._config', mock_cfg):
+            with patch('subprocess.run', return_value=mock_result) as mock_run:
+                result = index_conversation(path, self.db)
+        self.assertEqual(result, 'indexed')
+        mock_run.assert_called_once()
+
+    def test_zero_growth_always_skips_regardless_of_delta(self):
+        self._seed_db('delta-003', len(MINIMAL_MESSAGES))
+        path = self._write_conv('delta-003', MINIMAL_MESSAGES)
+        mock_cfg = _make_mock_cfg(indexing_reindex_delta=0)
+        with patch('towit_index._config', mock_cfg):
+            with patch('subprocess.run') as mock_run:
+                result = index_conversation(path, self.db)
+        self.assertEqual(result, 'already_indexed')
+        mock_run.assert_not_called()
+
+    def test_delta_1_reindexes_after_single_exchange(self):
+        # stored=4, current=6, growth=2 = 1 exchange >= delta=1 → reindex
+        self._seed_db('delta-004', 4)
+        six_msgs = MINIMAL_MESSAGES + [
+            {'role': 'user',      'content': 'One more question about WAL mode checkpointing.'},
+            {'role': 'assistant', 'content': 'Checkpointing copies WAL records back to the main db file.'},
+        ]
+        path = self._write_conv('delta-004', six_msgs)
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({'skip': False, 'title': 'T', 'summary': 'S', 'topics': [], 'keywords': []})
+        mock_cfg = _make_mock_cfg(indexing_reindex_delta=1)
+        with patch('towit_index._config', mock_cfg):
+            with patch('subprocess.run', return_value=mock_result) as mock_run:
+                result = index_conversation(path, self.db)
+        self.assertEqual(result, 'indexed')
+        mock_run.assert_called_once()
+
+
+class TestIndexConversationTranscriptCap(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.db = Database(self.db_path)
+        self.db.create_schema()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_index_conversation_passes_transcript_max_chars_to_build_transcript(self):
+        path = os.path.join(self.tmpdir, 'cap-session-001.jsonl')
+        with open(path, 'w') as f:
+            for i, msg in enumerate(MINIMAL_MESSAGES):
+                f.write(json.dumps({
+                    'type': msg['role'],
+                    'message': {'role': msg['role'], 'content': msg['content']},
+                    'sessionId': 'cap-session-001',
+                    'cwd': '/Users/test',
+                    'timestamp': f'2026-01-15T10:{i:02d}:00Z',
+                }) + '\n')
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({'skip': False, 'title': 'T', 'summary': 'S', 'topics': [], 'keywords': []})
+        mock_cfg = _make_mock_cfg(indexing_transcript_max_chars=1234)
+
+        with patch('towit_index._config', mock_cfg):
+            with patch('towit_index.build_transcript', wraps=towit_index.build_transcript) as mock_bt:
+                with patch('subprocess.run', return_value=mock_result):
+                    index_conversation(path, self.db)
+
+        mock_bt.assert_called_once()
+        call_kwargs = mock_bt.call_args
+        # build_transcript is called as build_transcript(messages, max_chars=N)
+        actual_max_chars = call_kwargs[1].get('max_chars') if call_kwargs[1] else call_kwargs[0][1]
+        self.assertEqual(actual_max_chars, 1234)
 
 
 if __name__ == '__main__':
