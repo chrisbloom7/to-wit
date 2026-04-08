@@ -26,11 +26,29 @@ class CheckResult:
     remediation: str = ''  # shown indented below for WARN/FAIL
 
 
+_USE_COLOR = sys.stdout.isatty()
+_RESET = '\033[0m'
+_STATUS_COLORS = {
+    'PASS': '\033[32m',    # green
+    'WARN': '\033[1;33m',  # bold yellow
+    'FAIL': '\033[31m',    # red
+}
+_DARK_YELLOW = '\033[33m'
+
+
 def format_result(result: CheckResult) -> list:
     """Return a list of output lines for one CheckResult."""
-    lines = [f'[{result.status}] {result.label}']
+    if _USE_COLOR:
+        color = _STATUS_COLORS.get(result.status, '')
+        tag = f'{color}[{result.status}]{_RESET}'
+    else:
+        tag = f'[{result.status}]'
+    lines = [f'{tag} {result.label}']
     if result.remediation and result.status in ('WARN', 'FAIL'):
-        lines.append(f'       → {result.remediation}')
+        if _USE_COLOR:
+            lines.append(f'       → {_DARK_YELLOW}{result.remediation}{_RESET}')
+        else:
+            lines.append(f'       → {result.remediation}')
     return lines
 
 

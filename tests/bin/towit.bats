@@ -358,7 +358,9 @@ EOF
 
 @test "towit: doctor exits non-zero when database is missing" {
   # DB not set up; TOWIT_CONFIG_PATH points to a config referencing a nonexistent DB
-  run "${TOWIT}" doctor
+  local settings_file="${TEST_TMPDIR}/settings.json"
+  echo '{}' > "${settings_file}"
+  run env TOWIT_SETTINGS_PATH="${settings_file}" "${TOWIT}" doctor
   [ "${status}" -ne 0 ]
   [[ "${output}" == *"[FAIL]"* ]] || {
     echo "Expected [FAIL] in output, got: ${output}"; return 1
@@ -366,8 +368,10 @@ EOF
 }
 
 @test "towit: doctor prints [PASS] for database after setup" {
+  local settings_file="${TEST_TMPDIR}/settings.json"
+  echo '{}' > "${settings_file}"
   "${TOWIT}" setup
-  run "${TOWIT}" doctor
+  run env TOWIT_SETTINGS_PATH="${settings_file}" "${TOWIT}" doctor
   [[ "${output}" == *"[PASS]"* ]] || {
     echo "Expected [PASS] lines in output, got: ${output}"; return 1
   }
@@ -377,7 +381,9 @@ EOF
 }
 
 @test "towit: doctor output contains no JSON or CSV" {
-  run "${TOWIT}" doctor
+  local settings_file="${TEST_TMPDIR}/settings.json"
+  echo '{}' > "${settings_file}"
+  run env TOWIT_SETTINGS_PATH="${settings_file}" "${TOWIT}" doctor
   [[ "${output}" != *"{"* ]] || { echo "Unexpected JSON in output"; return 1; }
   [[ "${output}" != *'","'* ]] || { echo "Unexpected CSV in output"; return 1; }
 }
