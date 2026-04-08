@@ -24,6 +24,39 @@ _CONFIG_TEMPLATE = """\
 [database]
 # Database file path. Default: ~/.towit/catalog.db
 # path = "~/.towit/catalog.db"
+
+[indexing]
+# Model used for analysis. Use "default" to inherit your Claude Code default model,
+# or any alias ("sonnet", "opus") or full model ID ("claude-sonnet-4-6").
+# Haiku is fast and inexpensive; Sonnet/Opus are more capable but cost significantly more.
+# Default: "haiku"
+# model = "haiku"
+
+# How many exchanges (user + assistant pairs) must occur before a resumed session
+# is re-analyzed. The stop hook fires after every response; this prevents unnecessary
+# API calls mid-conversation. Set to 1 to re-analyze after every exchange.
+# Default: 2
+# reindex_delta = 2
+
+# Range of topic tags Claude should assign per conversation (min must be <= max).
+# Default: 1–5
+# min_topics = 1
+# max_topics = 5
+
+# Range of keywords Claude should extract per conversation (min must be <= max).
+# Default: 15–30
+# min_keywords = 15
+# max_keywords = 30
+
+# Range of sentences for the generated summary (min must be <= max).
+# Default: 3–6
+# min_summary_sentences = 3
+# max_summary_sentences = 6
+
+# Maximum characters of transcript text sent to Claude for analysis.
+# Longer transcripts cost more; the excerpt always keeps the first 30% and last 70%.
+# Default: 8000
+# transcript_max_chars = 8000
 """
 
 
