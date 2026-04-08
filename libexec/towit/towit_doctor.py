@@ -9,6 +9,7 @@ warnings), 1 if any check fails.  Never performs automatic remediation.
 import argparse
 import os
 import shutil
+import sqlite3
 import sys
 import tomllib
 from dataclasses import dataclass, field
@@ -130,3 +131,98 @@ def check_deprecated_env() -> CheckResult:
             remediation="Move the path to [database] path in your config file and unset TOWIT_DB_PATH.",
         )
     return CheckResult('PASS', 'TOWIT_DB_PATH not set')
+
+
+# ---------------------------------------------------------------------------
+# Database checks
+# ---------------------------------------------------------------------------
+
+_REQUIRED_TABLES = {
+    'conversations', 'topics', 'conversation_topics',
+    'keywords', 'conversation_keywords',
+}
+
+
+def check_db_exists(db_path: str) -> CheckResult:
+    if not os.path.isfile(db_path):
+        return CheckResult(
+            'FAIL',
+            f'Database not found at {db_path}',
+            remediation="Run 'towit setup' to initialize the database.",
+        )
+    return CheckResult('PASS', f'Database found at {db_path}')
+
+
+def check_db_permissions(db_path: str) -> CheckResult:
+    mode = os.stat(db_path).st_mode & 0o777
+    if mode != 0o600:
+        octal = oct(mode)[2:]
+        return CheckResult(
+            'WARN',
+            f'Database file permissions are {octal} (expected 600)',
+            remediation=f"Run 'chmod 600 {db_path}' to restrict access.",
+        )
+    return CheckResult('PASS', 'Database file permissions are 600')
+
+
+def check_db_dir_permissions(db_path: str) -> CheckResult:
+    db_dir = os.path.dirname(db_path)
+    mode = os.stat(db_dir).st_mode & 0o777
+    if mode != 0o700:
+        octal = oct(mode)[2:]
+        return CheckResult(
+            'WARN',
+            f'Database directory permissions are {octal} (expected 700): {db_dir}',
+            remediation=f"Run 'chmod 700 {db_dir}' to restrict access.",
+        )
+    return CheckResult('PASS', f'Database directory permissions are 700: {db_dir}')
+
+
+def check_db_tables(db_path: str) -> CheckResult:
+    try:
+        with sqlite3.connect(db_path, timeout=5.0) as conn:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+    except sqlite3.Error as exc:
+        return CheckResult(
+            'FAIL',
+            f'Could not query database: {exc}',
+            remediation="Run 'towit setup' to reinitialize the database.",
+        )
+    present = {row[0] for row in rows}
+    missing = _REQUIRED_TABLES - present
+    if missing:
+        return CheckResult(
+            'FAIL',
+            f'Missing tables: {", ".join(sorted(missing))}',
+            remediation="Run 'towit setup' to create missing tables.",
+        )
+    return CheckResult('PASS', f'All required tables present: {", ".join(sorted(_REQUIRED_TABLES))}')
+
+
+def check_db_schema(db_path: str) -> CheckResult:
+    """Check that incremental migrations have been applied."""
+    issues = []
+    try:
+        with sqlite3.connect(db_path, timeout=5.0) as conn:
+            cols = {row[1] for row in conn.execute('PRAGMA table_info(conversations)').fetchall()}
+            if 'message_count' not in cols:
+                issues.append('conversations.message_count column missing')
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+            if 'keywords' not in tables:
+                issues.append('keywords table missing')
+            if 'conversation_keywords' not in tables:
+                issues.append('conversation_keywords table missing')
+    except sqlite3.Error as exc:
+        return CheckResult('WARN', f'Could not verify schema: {exc}',
+                           remediation="Run 'towit setup' to apply migrations.")
+    if issues:
+        return CheckResult(
+            'WARN',
+            f'Schema needs migration: {"; ".join(issues)}',
+            remediation="Run 'towit setup' to apply pending schema migrations.",
+        )
+    return CheckResult('PASS', 'Database schema is current')
