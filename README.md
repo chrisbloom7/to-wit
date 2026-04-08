@@ -102,7 +102,7 @@ Subcommands:
 
 **What gets indexed:** Deep explorations, research, TIL moments, technical discoveries, documentation writing, theoretical discussions, estimation with depth. Quick one-shots, command execution sessions, and subagent traces are skipped.
 
-**Auto-indexing:** The stop hook (`towit install-hook`) fires after each Claude Code session and indexes the conversation in the background.
+**Auto-indexing:** The stop hook (`towit install-hook`) fires after each Claude Code response and indexes the conversation in the background.
 
 ## Configuration
 
@@ -126,7 +126,7 @@ These settings control how To Wit calls the Claude API during indexing and direc
 | `max_keywords` | `30` | Maximum keywords Claude should extract per conversation. |
 | `min_summary_sentences` | `3` | Minimum sentences in the generated summary. |
 | `max_summary_sentences` | `6` | Maximum sentences in the generated summary. |
-| `transcript_max_chars` | `8000` | Character cap on the transcript excerpt sent to Claude. The excerpt always keeps the first 30% and last 70% of the conversation. |
+| `transcript_max_chars` | `8000` | Character cap on the transcript excerpt sent to Claude. When the transcript exceeds this limit, the middle is dropped and replaced with an omission marker; the budget is split 30% from the start and 70% from the end. |
 
 **Example:**
 
