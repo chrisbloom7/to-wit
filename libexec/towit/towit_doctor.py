@@ -10,6 +10,7 @@ import argparse
 import os
 import shutil
 import sys
+import tomllib
 from dataclasses import dataclass, field
 
 
@@ -61,3 +62,79 @@ def check_claude_cli() -> CheckResult:
             remediation="Install Claude Code and ensure it is available as 'claude' on your PATH.",
         )
     return CheckResult('PASS', f'claude CLI found at {path}')
+
+
+# ---------------------------------------------------------------------------
+# Config checks
+# ---------------------------------------------------------------------------
+
+_KNOWN_KEYS = {
+    'database': {'path'},
+    'indexing': {
+        'model', 'reindex_delta',
+        'min_topics', 'max_topics',
+        'min_keywords', 'max_keywords',
+        'min_summary_sentences', 'max_summary_sentences',
+        'transcript_max_chars',
+    },
+}
+
+
+def check_config_file(config_path: str) -> CheckResult:
+    """Check whether the config file exists and contains valid TOML."""
+    if not os.path.isfile(config_path):
+        return CheckResult(
+            'WARN',
+            f'Config file not found at {config_path}',
+            remediation="Run 'towit setup --config' to generate a starter config. Defaults apply until then.",
+        )
+    try:
+        with open(config_path, 'rb') as f:
+            tomllib.load(f)
+    except tomllib.TOMLDecodeError as exc:
+        return CheckResult(
+            'FAIL',
+            f'Config file has invalid TOML: {config_path}',
+            remediation=f'Fix the syntax error: {exc}',
+        )
+    return CheckResult('PASS', f'Config file found and valid: {config_path}')
+
+
+def check_config_unknown_keys(config_path: str) -> CheckResult:
+    """Check for unknown sections/keys in a valid config file."""
+    if not os.path.isfile(config_path):
+        return CheckResult('PASS', 'Config file absent — no keys to validate')
+    try:
+        with open(config_path, 'rb') as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError:
+        return CheckResult('PASS', 'Config file invalid TOML — covered by previous check')
+
+    unknown = []
+    for section, value in data.items():
+        if section not in _KNOWN_KEYS:
+            unknown.append(f'[{section}]')
+            continue
+        if isinstance(value, dict):
+            for key in value:
+                if key not in _KNOWN_KEYS[section]:
+                    unknown.append(f'[{section}] {key!r}')
+
+    if unknown:
+        return CheckResult(
+            'WARN',
+            f'Config file has unknown keys: {", ".join(unknown)}',
+            remediation='Remove or correct unrecognised keys; they are ignored by To Wit.',
+        )
+    return CheckResult('PASS', 'Config file has no unknown keys')
+
+
+def check_deprecated_env() -> CheckResult:
+    """Warn if TOWIT_DB_PATH is set (deprecated in favour of config file)."""
+    if os.environ.get('TOWIT_DB_PATH'):
+        return CheckResult(
+            'WARN',
+            'TOWIT_DB_PATH environment variable is set (deprecated)',
+            remediation="Move the path to [database] path in your config file and unset TOWIT_DB_PATH.",
+        )
+    return CheckResult('PASS', 'TOWIT_DB_PATH not set (not deprecated)')

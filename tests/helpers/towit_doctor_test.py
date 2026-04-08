@@ -74,5 +74,72 @@ class TestChecks(unittest.TestCase):
         self.assertIn('not found', result.label)
         self.assertTrue(result.remediation)
 
+
+import tempfile, shutil
+
+
+class TestConfigChecks(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
+
+    def _config_path(self, content=None):
+        p = os.path.join(self.tmpdir, 'config.toml')
+        if content is not None:
+            with open(p, 'w') as f:
+                f.write(content)
+        return p
+
+    def test_config_missing_is_warn(self):
+        from towit_doctor import check_config_file
+        result = check_config_file(os.path.join(self.tmpdir, 'nonexistent.toml'))
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('not found', result.label)
+        self.assertIn('towit setup --config', result.remediation)
+
+    def test_config_present_is_pass(self):
+        from towit_doctor import check_config_file
+        p = self._config_path('[database]\npath = "/tmp/x.db"\n')
+        result = check_config_file(p)
+        self.assertEqual(result.status, 'PASS')
+        self.assertIn(p, result.label)
+
+    def test_config_invalid_toml_is_fail(self):
+        from towit_doctor import check_config_file
+        p = self._config_path('not valid toml ][')
+        result = check_config_file(p)
+        self.assertEqual(result.status, 'FAIL')
+        self.assertIn('invalid TOML', result.label)
+        self.assertTrue(result.remediation)
+
+    def test_unknown_keys_is_warn(self):
+        from towit_doctor import check_config_unknown_keys
+        p = self._config_path('[unknownsection]\nfoo = 1\n')
+        result = check_config_unknown_keys(p)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('unknown', result.label.lower())
+
+    def test_known_keys_only_is_pass(self):
+        from towit_doctor import check_config_unknown_keys
+        p = self._config_path('[database]\npath = "/tmp/x.db"\n')
+        result = check_config_unknown_keys(p)
+        self.assertEqual(result.status, 'PASS')
+
+    def test_deprecated_env_var_is_warn(self):
+        from towit_doctor import check_deprecated_env
+        with patch.dict(os.environ, {'TOWIT_DB_PATH': '/tmp/x.db'}):
+            result = check_deprecated_env()
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('TOWIT_DB_PATH', result.label)
+
+    def test_no_deprecated_env_var_is_pass(self):
+        from towit_doctor import check_deprecated_env
+        env = {k: v for k, v in os.environ.items() if k != 'TOWIT_DB_PATH'}
+        with patch.dict(os.environ, env, clear=True):
+            result = check_deprecated_env()
+        self.assertEqual(result.status, 'PASS')
+
 if __name__ == '__main__':
     unittest.main()
