@@ -57,7 +57,8 @@ class TestTowitList(unittest.TestCase):
             'last_active': '2026-01-15T10:30:00Z',
             'title': 'SQLite WAL mode deep dive',
             'summary': 'Deep dive into SQLite WAL mode',
-            'topics': ['SQLite', 'WAL mode']
+            'topics': ['SQLite', 'WAL mode'],
+            'keywords': ['sqlite', 'wal-mode', 'journal-mode'],
         })
         db.upsert_conversation({
             'id': 'conv-b',
@@ -67,7 +68,8 @@ class TestTowitList(unittest.TestCase):
             'last_active': '2026-01-16T09:45:00Z',
             'title': 'Rails migration strategies',
             'summary': 'Rails migration strategies',
-            'topics': ['Rails', 'migrations']
+            'topics': ['Rails', 'migrations'],
+            'keywords': ['rails', 'schema-changes', 'rollback'],
         })
         db.upsert_conversation({
             'id': 'conv-c',
@@ -77,7 +79,8 @@ class TestTowitList(unittest.TestCase):
             'last_active': '2026-01-17T08:30:00Z',
             'title': 'SQLite index optimization',
             'summary': 'SQLite index optimization techniques',
-            'topics': ['SQLite', 'indexes']
+            'topics': ['SQLite', 'indexes'],
+            'keywords': ['sqlite', 'index-optimization', 'query-performance'],
         })
 
     def tearDown(self):
@@ -193,6 +196,51 @@ class TestTowitList(unittest.TestCase):
         self.assertIn('conv-a', ids)
         self.assertIn('conv-c', ids)
         self.assertNotIn('conv-b', ids)
+
+    def test_keyword_filter_returns_only_matching(self):
+        result = run_list(self.config_path, ['--keyword', 'journal-mode'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-a', result.stdout)
+        self.assertNotIn('conv-b', result.stdout)
+        self.assertNotIn('conv-c', result.stdout)
+
+    def test_keyword_filter_excludes_non_matching(self):
+        result = run_list(self.config_path, ['--keyword', 'rollback'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-b', result.stdout)
+        self.assertNotIn('conv-a', result.stdout)
+
+    def test_table_output_shows_keywords_column_header(self):
+        result = run_list(self.config_path)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('Keywords', result.stdout)
+        self.assertNotIn('Topics', result.stdout)
+
+    def test_format_json_includes_keywords_field(self):
+        import json
+        result = run_list(self.config_path, ['--format', 'json'])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        conv_a = next(r for r in data if r['id'] == 'conv-a')
+        self.assertIn('keywords', conv_a)
+        self.assertIsInstance(conv_a['keywords'], list)
+
+    def test_format_csv_includes_keywords_column(self):
+        import csv, io
+        result = run_list(self.config_path, ['--format', 'csv'])
+        self.assertEqual(result.returncode, 0)
+        reader = csv.DictReader(io.StringIO(result.stdout))
+        self.assertIn('keywords', reader.fieldnames)
+
+    def test_format_json_respects_keyword_filter(self):
+        import json
+        result = run_list(self.config_path, ['--format', 'json', '--keyword', 'rollback'])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        ids = {row['id'] for row in data}
+        self.assertIn('conv-b', ids)
+        self.assertNotIn('conv-a', ids)
+        self.assertNotIn('conv-c', ids)
 
 
 if __name__ == '__main__':

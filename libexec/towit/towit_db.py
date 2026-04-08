@@ -40,10 +40,23 @@ CREATE TABLE IF NOT EXISTS conversation_topics (
   PRIMARY KEY (conversation_id, topic_id)
 );
 
+CREATE TABLE IF NOT EXISTS keywords (
+  id   INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL COLLATE NOCASE
+);
+
+CREATE TABLE IF NOT EXISTS conversation_keywords (
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  keyword_id      INTEGER NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+  PRIMARY KEY (conversation_id, keyword_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_conversations_started ON conversations(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_conversations_cwd     ON conversations(cwd);
 CREATE INDEX IF NOT EXISTS idx_ct_topic              ON conversation_topics(topic_id);
 CREATE INDEX IF NOT EXISTS idx_ct_conv               ON conversation_topics(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_ck_keyword            ON conversation_keywords(keyword_id);
+CREATE INDEX IF NOT EXISTS idx_ck_conv               ON conversation_keywords(conversation_id);
 """
 
 
@@ -96,6 +109,19 @@ class Database:
                 conn.execute("ALTER TABLE conversations ADD COLUMN message_count INTEGER")
             except sqlite3.OperationalError:
                 pass  # Column already exists
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS keywords (
+                  id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT UNIQUE NOT NULL COLLATE NOCASE
+                );
+                CREATE TABLE IF NOT EXISTS conversation_keywords (
+                  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                  keyword_id      INTEGER NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+                  PRIMARY KEY (conversation_id, keyword_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_ck_keyword ON conversation_keywords(keyword_id);
+                CREATE INDEX IF NOT EXISTS idx_ck_conv    ON conversation_keywords(conversation_id);
+            """)
 
     def upsert_conversation(self, data: dict):
         """
@@ -106,6 +132,7 @@ class Database:
             topics (list of str)
         """
         topics = data.get('topics', [])
+        keywords = data.get('keywords', [])
 
         with self.connect() as conn:
             conn.execute(
@@ -162,6 +189,30 @@ class Database:
                         (data['id'], row['id'])
                     )
 
+            # Remove old keyword links so we start fresh on re-index
+            conn.execute(
+                "DELETE FROM conversation_keywords WHERE conversation_id = ?",
+                (data['id'],)
+            )
+
+            for keyword_name in keywords:
+                if not keyword_name:
+                    continue
+                conn.execute(
+                    "INSERT OR IGNORE INTO keywords (name) VALUES (?)",
+                    (keyword_name,)
+                )
+                row = conn.execute(
+                    "SELECT id FROM keywords WHERE name = ? COLLATE NOCASE",
+                    (keyword_name,)
+                ).fetchone()
+                if row:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO conversation_keywords "
+                        "(conversation_id, keyword_id) VALUES (?, ?)",
+                        (data['id'], row['id'])
+                    )
+
     # ------------------------------------------------------------------
     # Private helper — builds the base query and returns (sql, params)
     # ------------------------------------------------------------------
@@ -173,10 +224,13 @@ class Database:
                 c.summary,
                 c.cwd,
                 c.started_at,
-                GROUP_CONCAT(t.name, ', ') AS topics
+                GROUP_CONCAT(DISTINCT t.name) AS topics,
+                GROUP_CONCAT(DISTINCT k.name) AS keywords
             FROM conversations c
             LEFT JOIN conversation_topics ct ON ct.conversation_id = c.id
             LEFT JOIN topics t ON t.id = ct.topic_id
+            LEFT JOIN conversation_keywords ck ON ck.conversation_id = c.id
+            LEFT JOIN keywords k ON k.id = ck.keyword_id
         """
 
     def _row_to_dict(self, row) -> dict:
@@ -187,12 +241,14 @@ class Database:
             'cwd':        row['cwd'],
             'started_at': row['started_at'],
             'topics':     row['topics'] or '',
+            'keywords':   row['keywords'] or '',
         }
 
     def search(self, terms: list, mode: str = 'and', folder: str = None,
+               include_keywords: bool = True, include_topics: bool = False,
                include_summary: bool = False, include_title: bool = False) -> list:
         """
-        Search over topic names, and optionally summaries and/or titles.
+        Search over keywords (default) and optionally topics, summaries, and/or titles.
 
         mode='and'  — all terms must match (intersection)
         mode='or'   — any term must match (union)
@@ -204,21 +260,29 @@ class Database:
             term_id_sets = []
             for term in terms:
                 like = f'%{term}%'
-                # For topic matching, use a stemmed pattern (drop last char) so that
-                # e.g. "estimate" matches "project-estimation" via "%estimat%"
-                topic_like = f'%{term[:-1]}%' if len(term) >= 5 else like
+                # Use a stemmed pattern (drop last char) for name fields so that
+                # e.g. "sprint" matches "sprint-planning" via "%sprin%"
+                stem_like = f'%{term[:-1]}%' if len(term) >= 5 else like
                 # Security: conditions must contain ONLY hardcoded parameterized SQL
                 # clauses. All user-supplied values must be bound through the params
                 # list using '?' placeholders. Never append user-controlled strings to
                 # conditions directly — that would introduce SQL injection.
-                conditions = ['t.name LIKE ?']
-                params = [topic_like]
+                conditions = []
+                params = []
+                if include_keywords:
+                    conditions.append('k.name LIKE ?')
+                    params.append(stem_like)
+                if include_topics:
+                    conditions.append('t.name LIKE ?')
+                    params.append(stem_like)
                 if include_summary:
                     conditions.append('c.summary LIKE ?')
                     params.append(like)
                 if include_title:
                     conditions.append('c.title LIKE ?')
                     params.append(like)
+                if not conditions:
+                    return []
                 assert all(isinstance(c, str) and '?' in c for c in conditions), \
                     "conditions must be hardcoded parameterized clauses only"
                 where = ' OR '.join(conditions)
@@ -228,6 +292,8 @@ class Database:
                     FROM conversations c
                     LEFT JOIN conversation_topics ct ON ct.conversation_id = c.id
                     LEFT JOIN topics t ON t.id = ct.topic_id
+                    LEFT JOIN conversation_keywords ck ON ck.conversation_id = c.id
+                    LEFT JOIN keywords k ON k.id = ck.keyword_id
                     WHERE {where}
                     """,
                     params
@@ -264,8 +330,8 @@ class Database:
             rows = conn.execute(sql, params).fetchall()
             return [self._row_to_dict(r) for r in rows]
 
-    def list_conversations(self, folder: str = None, topic: str = None) -> list:
-        """Return all conversations, optionally filtered by folder and/or topic."""
+    def list_conversations(self, folder: str = None, topic: str = None, keyword: str = None) -> list:
+        """Return all conversations, optionally filtered by folder, topic, and/or keyword."""
         self.validate()
 
         conditions = []
@@ -284,6 +350,16 @@ class Database:
                 ")"
             )
             params.append(f'%{topic}%')
+
+        if keyword:
+            conditions.append(
+                "c.id IN ("
+                "  SELECT ck2.conversation_id FROM conversation_keywords ck2"
+                "  JOIN keywords k2 ON k2.id = ck2.keyword_id"
+                "  WHERE k2.name LIKE ? COLLATE NOCASE"
+                ")"
+            )
+            params.append(f'%{keyword}%')
 
         where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -347,10 +423,13 @@ class Database:
             row = conn.execute(
                 """
                 SELECT c.message_count, c.title,
-                       GROUP_CONCAT(t.name, ',') AS topics
+                       GROUP_CONCAT(DISTINCT t.name) AS topics,
+                       GROUP_CONCAT(DISTINCT k.name) AS keywords
                 FROM conversations c
                 LEFT JOIN conversation_topics ct ON ct.conversation_id = c.id
                 LEFT JOIN topics t ON t.id = ct.topic_id
+                LEFT JOIN conversation_keywords ck ON ck.conversation_id = c.id
+                LEFT JOIN keywords k ON k.id = ck.keyword_id
                 WHERE c.id = ?
                 GROUP BY c.id
                 """,
@@ -359,10 +438,12 @@ class Database:
             if row is None:
                 return None
             raw_topics = row['topics'] or ''
+            raw_keywords = row['keywords'] or ''
             return {
                 'message_count': row['message_count'],
                 'title':         row['title'] or '',
                 'topics':        [t.strip() for t in raw_topics.split(',') if t.strip()],
+                'keywords':      [k.strip() for k in raw_keywords.split(',') if k.strip()],
             }
 
     def touch_last_active(self, conv_id: str, last_active: str):

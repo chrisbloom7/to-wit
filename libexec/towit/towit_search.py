@@ -3,7 +3,7 @@
 towit_search — Search cataloged Claude conversations.
 
 Usage:
-    python3 towit_search.py [--or] [--all | --summary] [--all | --title] [--format json|csv] [--folder <path>] <terms...>
+    python3 towit_search.py [--or] [--topic] [--all | --summary] [--all | --title] [--format json|csv] [--folder <path>] <terms...>
 """
 
 import argparse
@@ -23,28 +23,28 @@ def _truncate(s, width):
     return s[:width - 1] + '…'
 
 
-def _filter_topics(topics_str, terms):
-    """Return only topics matching at least one term, or empty string if none match.
+def _filter_keywords(keywords_str, terms):
+    """Return only keywords matching at least one term, or empty string if none match.
 
-    Uses substring check plus stem prefix matching against each hyphenated word in the topic
-    (e.g. "estimate" → stem "estimat" matches "project-estimation").
+    Uses substring check plus stem prefix matching against each hyphenated word in the keyword
+    (e.g. "sprint" → stem "sprin" matches "sprint-planning").
     """
-    if not topics_str:
+    if not keywords_str:
         return ''
-    topics = [t.strip() for t in topics_str.split(',')]
+    keywords = [k.strip() for k in keywords_str.split(',')]
 
-    def matches(topic, term):
+    def matches(keyword, term):
         tl = term.lower()
-        if tl in topic.lower():
+        if tl in keyword.lower():
             return True
         if len(tl) >= 5:
             stem = tl[:-1]
-            for word in topic.lower().replace('-', ' ').split():
+            for word in keyword.lower().replace('-', ' ').split():
                 if word.startswith(stem):
                     return True
         return False
 
-    matched = [t for t in topics if any(matches(t, term) for term in terms)]
+    matched = [k for k in keywords if any(matches(k, term) for term in terms)]
     return matched[0] if matched else ''
 
 
@@ -53,21 +53,21 @@ def _print_table(rows, terms=None, group_by_path=False):
     if not rows:
         return
 
-    headers = ['ID', 'Title', 'Topics', 'Date']
+    headers = ['ID', 'Title', 'Keywords', 'Date']
     sep = '  '
     indent = '  ' if group_by_path else ''
 
-    # Pre-process rows: filter topics and pair each with its CWD
+    # Pre-process rows: filter keywords and pair each with its CWD
     processed = []
     for r in rows:
         date = (r['started_at'] or '')[:10]
-        topics = r['topics'] or ''
+        keywords = r['keywords'] or ''
         if terms:
-            topics = _filter_topics(topics, terms)
+            keywords = _filter_keywords(keywords, terms)
         processed.append((r['cwd'] or '', [
             r['id'] or '',
             r['title'] or '',
-            topics,
+            keywords,
             date,
         ]))
 
@@ -77,11 +77,11 @@ def _print_table(rows, terms=None, group_by_path=False):
         for i, val in enumerate(row_data):
             col_widths[i] = max(col_widths[i], len(val))
 
-    # Shrink Title and Topics proportionally if table exceeds terminal width
+    # Shrink Title and Keywords proportionally if table exceeds terminal width
     term_width = shutil.get_terminal_size((120, 24)).columns - 4
     total = sum(col_widths) + len(sep) * (len(headers) - 1) + len(indent)
     if total > term_width:
-        shrink_cols = [1, 2]  # Title, Topics
+        shrink_cols = [1, 2]  # Title, Keywords
         shrinkable = sum(col_widths[i] for i in shrink_cols)
         overflow = total - term_width
         for i in shrink_cols:
@@ -124,14 +124,15 @@ def _print_table(rows, terms=None, group_by_path=False):
 
 
 def _print_csv(rows):
-    """Print results as CSV with header id,title,topics,cwd,date."""
+    """Print results as CSV with header id,title,keywords,topics,cwd,date."""
     writer = csv.writer(sys.stdout)
-    writer.writerow(['id', 'title', 'topics', 'cwd', 'date'])
+    writer.writerow(['id', 'title', 'keywords', 'topics', 'cwd', 'date'])
     for r in rows:
         date = (r['started_at'] or '')[:10]
         writer.writerow([
             r['id'] or '',
             r['title'] or '',
+            r['keywords'] or '',
             r['topics'] or '',
             r['cwd'] or '',
             date,
@@ -144,9 +145,12 @@ def _print_json(rows):
     for r in rows:
         topics_str = r['topics'] or ''
         topics = [t.strip() for t in topics_str.split(',')] if topics_str else []
+        keywords_str = r['keywords'] or ''
+        keywords = [k.strip() for k in keywords_str.split(',')] if keywords_str else []
         out.append({
             'id': r['id'] or '',
             'title': r['title'] or '',
+            'keywords': keywords,
             'topics': topics,
             'cwd': r['cwd'] or '',
             'date': (r['started_at'] or '')[:10],
@@ -162,9 +166,11 @@ def main():
                         help='Search terms')
     parser.add_argument('--or', dest='or_', action='store_true',
                         help='Match any term instead of all terms')
+    parser.add_argument('--topic', action='store_true',
+                        help='Also search conversation topics')
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument('--all', action='store_true',
-                       help='Search topics, summaries, and titles')
+                       help='Search keywords, topics, summaries, and titles')
     scope.add_argument('--summary', action='store_true',
                        help='Also search conversation summaries')
     scope.add_argument('--title', action='store_true',
@@ -178,10 +184,12 @@ def main():
     db = Database()
     db.validate()
 
+    include_topics = args.all or args.topic
     include_summary = args.all or args.summary
     include_title = args.all or args.title
     mode = 'or' if args.or_ else 'and'
     results = db.search(args.terms, mode=mode, folder=args.folder,
+                        include_keywords=True, include_topics=include_topics,
                         include_summary=include_summary, include_title=include_title)
 
     if args.format == 'json':
