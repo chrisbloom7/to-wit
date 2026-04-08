@@ -59,7 +59,7 @@ towit <subcommand> [options]
 Subcommands:
   setup [--full | --hook | --config]  Initialize database
                                   --full    also generates config, installs hook, and runs backfill
-                                  --hook    also installs hook
+                                  --hook    also installs the stop hook
                                   --config  generate ~/.towit/config.toml (skips if already exists)
   search <terms...>             Search conversations by keyword (default), topic, summary, or title
     [--or]                        Match any term instead of all (default: AND)
@@ -76,23 +76,24 @@ Subcommands:
     [--keyword <name>]            Filter by keyword
   resume <session-id>           Resume a session in its original working directory
     [--force]                     Recreate the working directory if it no longer exists
+  prune [--dry-run]             Remove entries whose transcripts no longer exist
   export <session-id>           Export a conversation
-    [--format json]               Output as JSON instead of Markdown (default)
+    [--format md|json]            Output format: md (default) or json
     [--summarize]                 AI summary instead of full transcript
   export --topic <name>         Export all conversations matching a topic
-    [--format json]               Output as JSON instead of Markdown (default)
+    [--format md|json]            Output format: md (default) or json
     [--summarize]                 Meta-summary of all matching conversations
   backfill                      Index all existing conversations
     [--dry-run]                   Preview without writing
     [--force]                     Re-index already indexed conversations
     [--folder <path>]             Scope to one project folder
-  prune [--dry-run]             Remove entries whose transcripts no longer exist
   install-hook                  Add To Wit stop hook to Claude Code settings
   uninstall-hook                Remove To Wit stop hook from Claude Code settings
   teardown [--yes]              Remove hook and delete database
   implode [--yes]               Full uninstall: remove hook, database, and binary symlink
     [--install-dir <dir>]         Directory where towit was installed (default: /usr/local/bin)
   stats                         Show catalog statistics
+  doctor                        Verify setup: config, database, and hook
   help                          Show this message
 ```
 

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-04-08
+
+### Fixed
+
+- README Usage section: added missing `doctor` subcommand, corrected `export --format` to show `md|json`, fixed `setup --hook` wording, reordered `prune` to match `towit help` output.
+
 ## [0.8.0] - 2026-04-08
 
 ### Added
