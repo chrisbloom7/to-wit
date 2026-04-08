@@ -14,6 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_db import Database
+from towit_config import config as _config
 
 
 # ---------------------------------------------------------------------------
@@ -147,14 +148,14 @@ _ANALYSIS_PROMPT_TEMPLATE = """\
 Analyze the following Claude conversation transcript and return a JSON object with these fields:
 
 - "title": A concise, descriptive title for the conversation (max 80 chars)
-- "summary": A 3-6 sentence summary of what was discussed and accomplished. For wide-ranging \
+- "summary": A {min_sentences}-{max_sentences} sentence summary of what was discussed and accomplished. For wide-ranging \
 conversations, capture the key threads rather than just the final outcome. Include notable \
 context, decisions, and domain-specific details.
-- "keywords": A list of 15-30 specific terms drawn from the conversation content: identifiers, \
+- "keywords": A list of {min_keywords}-{max_keywords} specific terms drawn from the conversation content: identifiers, \
 class/method/variable names, error messages, domain terminology, proper nouns, formula \
 components, filenames, plan names, and other specific details worth finding later. Prefer \
 specific over generic. Use lowercase with hyphens for multi-word terms.{existing_keywords_instruction}
-- "topics": A list of 1-5 short topic tags (e.g. ["python", "refactoring", "git"]){existing_topics_instruction}
+- "topics": A list of {min_topics}-{max_topics} short topic tags (e.g. ["python", "refactoring", "git"]){existing_topics_instruction}
 - "skip": false (set to true only if this is a trivial/test/empty conversation not worth cataloging)
 
 Return ONLY the JSON object, no other text.
@@ -192,12 +193,14 @@ def analyze_with_claude(transcript: str, existing_topics: list = None,
         transcript=transcript,
         existing_topics_instruction=topics_instruction,
         existing_keywords_instruction=keywords_instruction,
+        min_sentences=_config.indexing_min_summary_sentences,
+        max_sentences=_config.indexing_max_summary_sentences,
+        min_keywords=_config.indexing_min_keywords,
+        max_keywords=_config.indexing_max_keywords,
+        min_topics=_config.indexing_min_topics,
+        max_topics=_config.indexing_max_topics,
     )
 
-    # Pass an explicit allowlist rather than the full environment to avoid
-    # leaking unrelated credentials (AWS keys, DB passwords, etc.) to the
-    # claude subprocess. Prefix-based allowlist covers Claude/Anthropic vars
-    # and the shell basics the CLI needs to locate binaries and config.
     _PASS_THROUGH_PREFIXES = (
         'HOME', 'PATH', 'USER', 'TMPDIR', 'TERM', 'LANG', 'LC_',
         'CLAUDE_', 'ANTHROPIC_',
@@ -208,9 +211,14 @@ def analyze_with_claude(transcript: str, existing_topics: list = None,
     }
     safe_env['TOWIT_INDEXING'] = '1'
 
+    cmd = ['claude', '-p', prompt, '--output-format', 'text']
+    model = _config.indexing_model
+    if model and model != 'default':
+        cmd += ['--model', model]
+
     try:
         result = subprocess.run(
-            ['claude', '-p', prompt, '--output-format', 'text'],
+            cmd,
             capture_output=True, text=True, timeout=60,
             env=safe_env,
         )
@@ -222,7 +230,6 @@ def analyze_with_claude(transcript: str, existing_topics: list = None,
 
     output = result.stdout.strip()
 
-    # Try direct parse first, then regex fallback
     try:
         data = json.loads(output)
     except json.JSONDecodeError:
@@ -273,19 +280,23 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
 
         if existing is not None:
             stored_count = existing.get('message_count')
-            if stored_count is not None and stored_count == current_count:
-                # Transcript hasn't grown — refresh last_active without re-analyzing
-                timestamps = [m['timestamp'] for m in messages if m.get('timestamp')]
-                last_active = timestamps[-1] if timestamps else None
-                if last_active:
-                    db.touch_last_active(session_id, last_active)
-                return 'already_indexed'
-            # stored_count is None (pre-migration record) or differs — fall through
+            if stored_count is not None:
+                growth = current_count - stored_count
+                # Convert exchange delta to message delta (each exchange = 2 messages).
+                # Floor at 2 so zero growth never triggers a re-analysis.
+                delta_messages = max(2, _config.indexing_reindex_delta * 2)
+                if growth < delta_messages:
+                    timestamps = [m['timestamp'] for m in messages if m.get('timestamp')]
+                    last_active = timestamps[-1] if timestamps else None
+                    if last_active:
+                        db.touch_last_active(session_id, last_active)
+                    return 'already_indexed'
+            # stored_count is None (pre-migration record) or growth meets delta — fall through
 
     if not should_index(messages):
         return 'skipped'
 
-    transcript = build_transcript(messages)
+    transcript = build_transcript(messages, max_chars=_config.indexing_transcript_max_chars)
     existing_topics = existing['topics'] if existing else None
     existing_keywords = existing['keywords'] if existing else None
     analysis = analyze_with_claude(transcript, existing_topics=existing_topics,
