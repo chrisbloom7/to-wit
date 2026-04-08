@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-08
+
+### Added
+
+- **`towit doctor` subcommand**: runs 15 health checks across 5 categories and prints a plain-text report with `[PASS]`, `[WARN]`, or `[FAIL]` per check. Exits 0 when all checks pass or only warnings are present; exits 1 on any failure. Never performs automatic remediation — each failing check includes a remediation hint.
+  - **Python**: version ≥ 3.11 required for TOML config support
+  - **Claude CLI**: `claude` binary present on `$PATH`
+  - **Config file**: existence, TOML validity, unknown section/key warnings, `TOWIT_DB_PATH` deprecation warning
+  - **Database**: file exists, read/write permissions (600), directory permissions (700), required tables present, schema up to date
+  - **Stop hook**: Claude Code `settings.json` exists, hook registered, hook script present on disk
+- Color output in `towit doctor`: `[PASS]` in green, `[WARN]` in bold yellow, `[FAIL]` in red, remediation hints in dark yellow. Colors are applied only when stdout is a TTY; plain text otherwise.
+
 ## [0.7.0] - 2026-04-08
 
 ### Added
