@@ -17,7 +17,20 @@ If the user provided an explicit version (e.g. `0.7.0`), use it. Otherwise:
 
 Tags use a `v` prefix: `v0.7.0`.
 
-## Step 2 — Audit the README
+## Step 2 — Audit Help Text and README
+
+### 2a — Validate `towit --help`
+
+Run `bin/towit help` and compare its output against the Usage section of `README.md` and the actual subcommand implementations in `bin/towit` and `libexec/towit/`.
+
+Check for:
+- Subcommands or flags present in the implementation but missing from `--help`
+- Subcommands or flags in `--help` that no longer exist
+- Description or default values in `--help` that contradict the implementation
+
+If any discrepancies are found, **stop and fix `bin/towit` before proceeding**. Help text must match the implementation before a release is tagged.
+
+### 2b — Audit README.md
 
 Read `README.md` and compare it against the `## [Unreleased]` section of `CHANGELOG.md` plus recent tagged releases.
 
@@ -26,6 +39,7 @@ Check for:
 - Removed or renamed subcommands still listed
 - Changed behavior (default scope, flag names, output format) that contradicts the README
 - Installation or requirements notes that are out of date
+- Usage section out of sync with `bin/towit help` output
 
 Present a brief audit summary. If nothing is out of date, say so explicitly. If issues are found, propose edits and wait for approval before editing `README.md`.
 

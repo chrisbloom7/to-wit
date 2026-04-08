@@ -16,9 +16,10 @@ The plan must include:
 1. **What changes** — affected files in `bin/`, `libexec/towit/`, `tests/`
 2. **New/changed CLI surface** — flags, subcommands, output format changes
 3. **TDD order** — which ZOMBIES cases to write first (see Step 2)
-4. **README delta** — exact sections that need updating for user-facing changes
-5. **CHANGELOG entry** — draft of the `## [Unreleased]` bullet(s) under the appropriate heading (`Added`, `Changed`, `Fixed`, `Removed`, `Security`)
-6. **Optimization notes** — proactively flag any simpler approaches, consolidation opportunities, or performance concerns noticed during planning
+4. **Help text delta** — exact additions, removals, or edits needed in `bin/towit`'s `help` output; if the CLI surface is unchanged, explicitly state "no help text changes"
+5. **README delta** — exact sections that need updating for user-facing changes
+6. **CHANGELOG entry** — draft of the `## [Unreleased]` bullet(s) under the appropriate heading (`Added`, `Changed`, `Fixed`, `Removed`, `Security`)
+7. **Optimization notes** — proactively flag any simpler approaches, consolidation opportunities, or performance concerns noticed during planning
 
 After drafting the plan, **critique it before presenting it**:
 
@@ -86,7 +87,7 @@ A separate final commit covers documentation: README, CHANGELOG, and helper text
 
 **CHANGELOG.md** — add a bullet under `## [Unreleased]` using the draft from the plan. Use Keep a Changelog headings: `Added`, `Changed`, `Fixed`, `Removed`, `Security`.
 
-**Helper text (`bin/towit`)** — keep in sync with README; both must match the implementation.
+**Helper text (`bin/towit`)** — run `bin/towit help` and verify the output matches the implementation and README Usage section. Every subcommand, flag, and description must be consistent across all three. Fix any gaps before committing docs.
 
 ## Optimization Checklist
 
