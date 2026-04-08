@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-04-08
+
+### Added
+
+- **Indexing cost controls**: new `[indexing]` section in `~/.towit/config.toml` with 9 settings to tune Claude API spend:
+  - `model` (default: `"haiku"`) — model passed to `claude -p`; use `"default"` to inherit your Claude Code default, or any alias/full model ID
+  - `reindex_delta` (default: `2`) — exchanges (user+assistant pairs) that must occur before a resumed session is re-analyzed; prevents re-indexing on every turn of a long conversation
+  - `min_topics` / `max_topics` (defaults: `1` / `5`) — range of topic tags Claude assigns per conversation
+  - `min_keywords` / `max_keywords` (defaults: `15` / `30`) — range of keywords Claude extracts per conversation
+  - `min_summary_sentences` / `max_summary_sentences` (defaults: `3` / `6`) — sentence range for the generated summary
+  - `transcript_max_chars` (default: `8000`) — character cap on the transcript excerpt sent to Claude
+- `towit setup --config` now generates a fully commented `[indexing]` section in the starter config file
+- README `## Configuration` section documents all settings with a cost-estimates table
+
 ## [0.6.0] - 2026-04-08
 
 ### Added
