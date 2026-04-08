@@ -80,7 +80,7 @@ class Config:
         if key not in section_data:
             return default
         value = section_data[key]
-        if not isinstance(value, expected_type):
+        if not isinstance(value, expected_type) or isinstance(value, bool):
             print(
                 f"Warning: config [{section}] {key!r} must be a "
                 f"{expected_type.__name__}; using default ({default!r}).",
