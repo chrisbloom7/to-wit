@@ -126,5 +126,40 @@ class TestTowitInstallHook(unittest.TestCase):
         self.assertIn('permissions', data)
 
 
+class TestInstallHookHelp(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.settings_path = os.path.join(self.tmpdir, 'settings.local.json')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_help_flag_exits_zero(self):
+        env = {**os.environ, 'TOWIT_SETTINGS_PATH': self.settings_path}
+        result = subprocess.run(
+            ['python3', INSTALL_HOOK_SCRIPT, '--help'],
+            env=env, capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0)
+
+    def test_help_flag_prints_usage(self):
+        env = {**os.environ, 'TOWIT_SETTINGS_PATH': self.settings_path}
+        result = subprocess.run(
+            ['python3', INSTALL_HOOK_SCRIPT, '--help'],
+            env=env, capture_output=True, text=True
+        )
+        combined = result.stdout + result.stderr
+        self.assertIn('usage', combined.lower())
+
+    def test_help_flag_does_not_install_hook(self):
+        env = {**os.environ, 'TOWIT_SETTINGS_PATH': self.settings_path}
+        subprocess.run(
+            ['python3', INSTALL_HOOK_SCRIPT, '--help'],
+            env=env, capture_output=True, text=True
+        )
+        self.assertFalse(os.path.exists(self.settings_path),
+                         "--help should not create or modify settings file")
+
+
 if __name__ == '__main__':
     unittest.main()

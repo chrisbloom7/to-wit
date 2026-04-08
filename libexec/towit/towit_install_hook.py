@@ -5,6 +5,7 @@ towit_install_hook — add the To Wit stop hook to Claude Code settings.
 Idempotent: does nothing if the hook is already installed.
 """
 
+import argparse
 import json
 import os
 import sys
@@ -69,6 +70,9 @@ def is_installed(settings):
 
 
 def main():
+    argparse.ArgumentParser(
+        description='Add the To Wit stop hook to Claude Code settings.'
+    ).parse_args()
     settings = _load_settings()
 
     if is_installed(settings):

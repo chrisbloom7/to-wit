@@ -6,6 +6,7 @@ Usage:
     python3 towit_stats.py
 """
 
+import argparse
 import os
 import sys
 
@@ -14,6 +15,9 @@ from towit_db import Database
 
 
 def main():
+    argparse.ArgumentParser(
+        description='Show statistics about the To Wit catalog.'
+    ).parse_args()
     db = Database()
     db.validate()
 

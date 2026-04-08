@@ -131,5 +131,22 @@ class TestTowitStats(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
 
 
+class TestStatsHelp(unittest.TestCase):
+    def test_help_flag_exits_zero(self):
+        result = subprocess.run(
+            ['python3', STATS_SCRIPT, '--help'],
+            capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0)
+
+    def test_help_flag_prints_usage(self):
+        result = subprocess.run(
+            ['python3', STATS_SCRIPT, '--help'],
+            capture_output=True, text=True
+        )
+        combined = result.stdout + result.stderr
+        self.assertIn('usage', combined.lower())
+
+
 if __name__ == '__main__':
     unittest.main()

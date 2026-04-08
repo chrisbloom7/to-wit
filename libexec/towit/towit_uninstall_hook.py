@@ -5,6 +5,7 @@ towit_uninstall_hook — remove the To Wit stop hook from Claude Code settings.
 Idempotent: does nothing if the hook is not installed.
 """
 
+import argparse
 import json
 import os
 import sys
@@ -65,6 +66,9 @@ def is_installed(settings):
 
 
 def main():
+    argparse.ArgumentParser(
+        description='Remove the To Wit stop hook from Claude Code settings.'
+    ).parse_args()
     if not os.path.exists(SETTINGS_PATH):
         print("No settings file found — hook was not installed.")
         sys.exit(0)
