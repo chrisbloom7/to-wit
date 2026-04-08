@@ -152,30 +152,32 @@ class TestDatabaseChecks(unittest.TestCase):
 
     def _make_db(self, tables=True):
         conn = sqlite3.connect(self.db_path)
-        if tables:
-            conn.executescript("""
-                CREATE TABLE conversations (id TEXT PRIMARY KEY, folder TEXT NOT NULL,
-                    cwd TEXT, started_at TEXT, last_active TEXT, title TEXT, summary TEXT,
-                    message_count INTEGER, indexed_at TEXT NOT NULL DEFAULT (datetime('now')));
-                CREATE TABLE topics (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE NOT NULL COLLATE NOCASE);
-                CREATE TABLE conversation_topics (
-                    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-                    topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
-                    PRIMARY KEY (conversation_id, topic_id));
-                CREATE TABLE keywords (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT UNIQUE NOT NULL COLLATE NOCASE);
-                CREATE TABLE conversation_keywords (
-                    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-                    keyword_id INTEGER NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
-                    PRIMARY KEY (conversation_id, keyword_id));
-            """)
-        conn.commit()
-        conn.close()
+        try:
+            if tables:
+                conn.executescript("""
+                    CREATE TABLE conversations (id TEXT PRIMARY KEY, folder TEXT NOT NULL,
+                        cwd TEXT, started_at TEXT, last_active TEXT, title TEXT, summary TEXT,
+                        message_count INTEGER, indexed_at TEXT NOT NULL DEFAULT (datetime('now')));
+                    CREATE TABLE topics (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT UNIQUE NOT NULL COLLATE NOCASE);
+                    CREATE TABLE conversation_topics (
+                        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                        topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+                        PRIMARY KEY (conversation_id, topic_id));
+                    CREATE TABLE keywords (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT UNIQUE NOT NULL COLLATE NOCASE);
+                    CREATE TABLE conversation_keywords (
+                        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                        keyword_id INTEGER NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+                        PRIMARY KEY (conversation_id, keyword_id));
+                """)
+            conn.commit()
+        finally:
+            conn.close()
 
     def test_db_missing_is_fail(self):
         from towit_doctor import check_db_exists
-        result = check_db_exists('/tmp/does_not_exist_towit.db')
+        result = check_db_exists(os.path.join(self.tmpdir, 'nonexistent.db'))
         self.assertEqual(result.status, 'FAIL')
         self.assertIn('not found', result.label)
         self.assertIn('towit setup', result.remediation)
@@ -250,6 +252,27 @@ class TestDatabaseChecks(unittest.TestCase):
             PRIMARY KEY (conversation_id, topic_id))""")
         conn.commit()
         conn.close()
+        result = check_db_schema(self.db_path)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('towit setup', result.remediation)
+
+    def test_db_schema_missing_keywords_table_is_warn(self):
+        from towit_doctor import check_db_schema
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.executescript("""
+                CREATE TABLE conversations (id TEXT PRIMARY KEY, folder TEXT NOT NULL,
+                    cwd TEXT, started_at TEXT, last_active TEXT, title TEXT, summary TEXT,
+                    message_count INTEGER, indexed_at TEXT NOT NULL DEFAULT (datetime('now')));
+                CREATE TABLE topics (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL COLLATE NOCASE);
+                CREATE TABLE conversation_topics (
+                    conversation_id TEXT NOT NULL, topic_id INTEGER NOT NULL,
+                    PRIMARY KEY (conversation_id, topic_id));
+            """)
+            conn.commit()
+        finally:
+            conn.close()
         result = check_db_schema(self.db_path)
         self.assertEqual(result.status, 'WARN')
         self.assertIn('towit setup', result.remediation)

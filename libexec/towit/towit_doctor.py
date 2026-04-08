@@ -154,7 +154,10 @@ def check_db_exists(db_path: str) -> CheckResult:
 
 
 def check_db_permissions(db_path: str) -> CheckResult:
-    mode = os.stat(db_path).st_mode & 0o777
+    try:
+        mode = os.stat(db_path).st_mode & 0o777
+    except OSError:
+        return CheckResult('WARN', f'Could not read permissions for {db_path}')
     if mode != 0o600:
         octal = oct(mode)[2:]
         return CheckResult(
@@ -167,7 +170,10 @@ def check_db_permissions(db_path: str) -> CheckResult:
 
 def check_db_dir_permissions(db_path: str) -> CheckResult:
     db_dir = os.path.dirname(db_path)
-    mode = os.stat(db_dir).st_mode & 0o777
+    try:
+        mode = os.stat(db_dir).st_mode & 0o777
+    except OSError:
+        return CheckResult('WARN', f'Could not read permissions for {db_dir}')
     if mode != 0o700:
         octal = oct(mode)[2:]
         return CheckResult(
@@ -180,10 +186,13 @@ def check_db_dir_permissions(db_path: str) -> CheckResult:
 
 def check_db_tables(db_path: str) -> CheckResult:
     try:
-        with sqlite3.connect(db_path, timeout=5.0) as conn:
+        conn = sqlite3.connect(db_path, timeout=5.0)
+        try:
             rows = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
+        finally:
+            conn.close()
     except sqlite3.Error as exc:
         return CheckResult(
             'FAIL',
@@ -205,7 +214,8 @@ def check_db_schema(db_path: str) -> CheckResult:
     """Check that incremental migrations have been applied."""
     issues = []
     try:
-        with sqlite3.connect(db_path, timeout=5.0) as conn:
+        conn = sqlite3.connect(db_path, timeout=5.0)
+        try:
             cols = {row[1] for row in conn.execute('PRAGMA table_info(conversations)').fetchall()}
             if 'message_count' not in cols:
                 issues.append('conversations.message_count column missing')
@@ -216,6 +226,8 @@ def check_db_schema(db_path: str) -> CheckResult:
                 issues.append('keywords table missing')
             if 'conversation_keywords' not in tables:
                 issues.append('conversation_keywords table missing')
+        finally:
+            conn.close()
     except sqlite3.Error as exc:
         return CheckResult('WARN', f'Could not verify schema: {exc}',
                            remediation="Run 'towit setup' to apply migrations.")
