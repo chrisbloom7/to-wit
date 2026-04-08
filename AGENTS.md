@@ -78,7 +78,9 @@ Resumed conversations are re-indexed when new messages are detected. Previously 
 
 ## Release Process
 
-Always update `CHANGELOG.md` before tagging and pushing a release.
+Use the **`release-towit` skill** (`.claude/skills/release-towit/SKILL.md`) for all releases. Read and follow it with the Read tool when the user asks to cut a release, bump a version, tag a release, or publish a new version. It covers: determining the version, auditing help text and README, updating CHANGELOG, committing with diff approval, tagging, and pushing.
+
+Never bypass the skill — it catches README drift and other issues that ad-hoc releases miss.
 
 ## Directives
 
