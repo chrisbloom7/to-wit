@@ -5,10 +5,14 @@
 #   towit <subcommand> [options]
 #
 # Subcommands:
-#   setup [--full | --hook]       Initialize database (--full also installs hook and runs backfill; --hook also installs hook)
-#   search <terms...> [--or] [--all | --summary] [--all | --title] [--format json|csv] [--folder <path>]
-#   list [--format json|csv] [--folder <path>] [--topic <name>]
-#   resume [--force] <session-id> Resume a session in its original working directory
+#   setup [--full | --hook | --config]
+#                                 Initialize database
+#                                   --full    also generates config, installs hook, and runs backfill
+#                                   --hook    also installs the stop hook
+#                                   --config  generate ~/.towit/config.toml (skips if already exists)
+#   search <terms...> [--or] [--topic] [--all | --summary | --title] [--format json|csv] [--folder <path>]
+#   list [--format json|csv] [--folder <path>] [--topic <name>] [--keyword <name>]
+#   resume <session-id> [--force] Resume a session in its original working directory
 #   prune [--dry-run]             Remove entries whose transcripts no longer exist
 #   export <session-id> [--format md|json] [--summarize]
 #   export --topic <name> [--format md|json] [--summarize]
@@ -18,8 +22,8 @@
 #   teardown [--yes]              Remove hook and delete database
 #   implode [--yes] [--install-dir <dir>]
 #                                 Full uninstall: remove hook, database, and binary symlink
-#   stats
-#   help
+#   stats                         Show catalog statistics
+#   help                          Show this message
 
 set -euo pipefail
 
