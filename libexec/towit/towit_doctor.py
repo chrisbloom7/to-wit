@@ -35,3 +35,29 @@ def summarise(results: list) -> tuple:
         return 'All checks passed.', 0
     parts = [f'{warns} warning(s)', f'{fails} failure(s)']
     return ', '.join(parts) + '.', (1 if fails else 0)
+
+
+def check_python_version() -> CheckResult:
+    """Check that Python version is 3.11 or later."""
+    v = sys.version_info
+    label = f'Python {v.major}.{v.minor}.{v.micro}'
+    if (v.major, v.minor) < (3, 11):
+        return CheckResult(
+            'FAIL',
+            f'{label} (3.11+ required for TOML config support)',
+            remediation='Install Python 3.11 or later and ensure it is the active python3. Then run: towit setup',
+        )
+    return CheckResult('PASS', f'{label} (≥3.11 required for TOML support)')
+
+
+def check_claude_cli() -> CheckResult:
+    """Check that the claude CLI is installed and available on PATH."""
+    import shutil
+    path = shutil.which('claude')
+    if path is None:
+        return CheckResult(
+            'FAIL',
+            'claude CLI not found on PATH',
+            remediation="Install Claude Code and ensure it is available as 'claude' on your PATH.",
+        )
+    return CheckResult('PASS', f'claude CLI found at {path}')
