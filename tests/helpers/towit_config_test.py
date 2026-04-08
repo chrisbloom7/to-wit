@@ -280,8 +280,18 @@ class TestIndexingConfig(unittest.TestCase):
         cfg = Config(path=path)
         with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
             result = cfg.indexing_max_keywords
-            self.assertIn('Warning', mock_err.getvalue())
+            warning = mock_err.getvalue()
+            self.assertIn('Warning', warning)
+            self.assertIn('max_keywords', warning)
         self.assertEqual(result, 30)
+
+    def test_bool_for_int_field_warns_and_uses_default(self):
+        path = write_config(self.tmpdir, '[indexing]\nmin_keywords = true\n')
+        cfg = Config(path=path)
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            result = cfg.indexing_min_keywords
+            self.assertIn('Warning', mock_err.getvalue())
+        self.assertEqual(result, 15)
 
     # --- summary sentences ---
 
