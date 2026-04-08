@@ -104,6 +104,61 @@ Subcommands:
 
 **Auto-indexing:** The stop hook (`towit install-hook`) fires after each Claude Code session and indexes the conversation in the background.
 
+## Configuration
+
+To Wit is configured via `~/.towit/config.toml`. Generate a starter file with all settings commented out:
+
+```bash
+towit setup --config
+```
+
+### `[indexing]` settings
+
+These settings control how To Wit calls the Claude API during indexing and directly affect API spend.
+
+| Key | Default | Description |
+|---|---|---|
+| `model` | `"haiku"` | Model passed to `claude -p`. Use `"default"` to inherit your Claude Code default, or any alias (`"sonnet"`, `"opus"`) or full model ID (`"claude-sonnet-4-6"`). |
+| `reindex_delta` | `2` | Exchanges (user+assistant pairs) that must occur before a resumed session is re-analyzed. The stop hook fires after every response; this prevents re-indexing on every turn. Set to `1` for original behavior. |
+| `min_topics` | `1` | Minimum topic tags Claude should assign per conversation. |
+| `max_topics` | `5` | Maximum topic tags Claude should assign per conversation. |
+| `min_keywords` | `15` | Minimum keywords Claude should extract per conversation. |
+| `max_keywords` | `30` | Maximum keywords Claude should extract per conversation. |
+| `min_summary_sentences` | `3` | Minimum sentences in the generated summary. |
+| `max_summary_sentences` | `6` | Maximum sentences in the generated summary. |
+| `transcript_max_chars` | `8000` | Character cap on the transcript excerpt sent to Claude. The excerpt always keeps the first 30% and last 70% of the conversation. |
+
+**Example:**
+
+```toml
+[indexing]
+model = "haiku"
+reindex_delta = 2
+min_topics = 1
+max_topics = 5
+min_keywords = 10
+max_keywords = 20
+min_summary_sentences = 2
+max_summary_sentences = 4
+transcript_max_chars = 8000
+```
+
+### Cost estimates
+
+Each indexing call sends roughly **2,000–4,000 input tokens** depending on transcript length and content (code-heavy conversations tokenize more densely than prose) plus prompt overhead of ~200 tokens. Output is roughly **300 tokens** (title + summary + keywords + topics JSON). The estimates below use a mid-range of ~2,200 input / 300 output tokens.
+
+The stop hook fires after every Claude response. With `reindex_delta = 2` (default), a 10-exchange conversation triggers ~5 indexing calls instead of 10.
+
+**Estimated cost — 100 conversations, 10 exchanges each:**
+
+| Model | `reindex_delta = 1` (1,000 calls) | `reindex_delta = 2` (~500 calls) |
+|---|---|---|
+| Haiku 4.5 | ~$2.96 | ~$1.48 |
+| Sonnet 4.6 | ~$11.10 | ~$5.55 |
+| Opus 4.6 | ~$55.50 | ~$27.75 |
+
+Pricing based on Anthropic's published rates as of April 2026: Haiku 4.5 at $0.80/$4.00 per million input/output tokens; Sonnet 4.6 at $3.00/$15.00; Opus 4.6 at $15.00/$75.00. Actual costs will vary.
+
 ## Uninstalling
 
 To do a full uninstall in one step — removes the stop hook, database, and binary symlink:
