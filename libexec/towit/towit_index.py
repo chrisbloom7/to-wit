@@ -147,7 +147,13 @@ _ANALYSIS_PROMPT_TEMPLATE = """\
 Analyze the following Claude conversation transcript and return a JSON object with these fields:
 
 - "title": A concise, descriptive title for the conversation (max 80 chars)
-- "summary": A 2-4 sentence summary of what was discussed and accomplished
+- "summary": A 3-6 sentence summary of what was discussed and accomplished. For wide-ranging \
+conversations, capture the key threads rather than just the final outcome. Include notable \
+context, decisions, and domain-specific details.
+- "keywords": A list of 15-30 specific terms drawn from the conversation content: identifiers, \
+class/method/variable names, error messages, domain terminology, proper nouns, formula \
+components, filenames, plan names, and other specific details worth finding later. Prefer \
+specific over generic. Use lowercase with hyphens for multi-word terms.{existing_keywords_instruction}
 - "topics": A list of 1-5 short topic tags (e.g. ["python", "refactoring", "git"]){existing_topics_instruction}
 - "skip": false (set to true only if this is a trivial/test/empty conversation not worth cataloging)
 
@@ -160,11 +166,16 @@ _EXISTING_TOPICS_INSTRUCTION = """
   Previously assigned topics: {topics}. Reuse these if they still accurately describe \
 the conversation; replace any that no longer fit and add new ones for genuinely new content."""
 
+_EXISTING_KEYWORDS_INSTRUCTION = """
+  Previously assigned keywords: {keywords}. Reuse ones that still apply; replace any that \
+no longer fit and add new ones for genuinely new content."""
 
-def analyze_with_claude(transcript: str, existing_topics: list = None) -> dict:
+
+def analyze_with_claude(transcript: str, existing_topics: list = None,
+                        existing_keywords: list = None) -> dict:
     """
-    Call Claude to produce a title, summary, and topics for a conversation.
-    Returns a dict with keys: title, summary, topics, skip.
+    Call Claude to produce a title, summary, keywords, and topics for a conversation.
+    Returns a dict with keys: title, summary, keywords, topics, skip.
     On any error returns {'skip': True}.
     """
     topics_instruction = ''
@@ -172,9 +183,15 @@ def analyze_with_claude(transcript: str, existing_topics: list = None) -> dict:
         topics_instruction = _EXISTING_TOPICS_INSTRUCTION.format(
             topics=json.dumps(existing_topics)
         )
+    keywords_instruction = ''
+    if existing_keywords:
+        keywords_instruction = _EXISTING_KEYWORDS_INSTRUCTION.format(
+            keywords=json.dumps(existing_keywords)
+        )
     prompt = _ANALYSIS_PROMPT_TEMPLATE.format(
         transcript=transcript,
         existing_topics_instruction=topics_instruction,
+        existing_keywords_instruction=keywords_instruction,
     )
 
     # Pass an explicit allowlist rather than the full environment to avoid
@@ -270,7 +287,9 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
 
     transcript = build_transcript(messages)
     existing_topics = existing['topics'] if existing else None
-    analysis = analyze_with_claude(transcript, existing_topics=existing_topics)
+    existing_keywords = existing['keywords'] if existing else None
+    analysis = analyze_with_claude(transcript, existing_topics=existing_topics,
+                                   existing_keywords=existing_keywords)
 
     if analysis.get('skip'):
         return 'skipped'
@@ -290,6 +309,7 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
         'last_active':   last_active,
         'title':         analysis.get('title', ''),
         'summary':       analysis.get('summary', ''),
+        'keywords':      analysis.get('keywords', []),
         'topics':        analysis.get('topics', []),
         'message_count': current_count,
     }

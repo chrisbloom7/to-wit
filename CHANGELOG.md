@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-04-08
+
+### Added
+
+- **Keywords field**: conversations are now indexed with 15–30 specific keywords extracted from the content — identifiers, method/class names, error messages, domain terminology, proper nouns, filenames, plan names, etc. Stored in a normalized `keywords` table with efficient indexed lookups.
+- `towit search --topic`: new flag to include topics in search scope (topics are no longer searched by default).
+- `towit list --keyword <name>`: new filter to list conversations by keyword.
+- Keywords included in all output formats: table (Keywords column), JSON (`keywords` array), CSV (`keywords` column). Topics retained in JSON and CSV.
+
+### Changed
+
+- `towit search` default scope is now **keywords** instead of topics. Use `--topic` to include topics, `--all` to include keywords, topics, summaries, and titles.
+- Analysis prompt expanded: summary now requests 3–6 sentences with emphasis on capturing context for wide-ranging conversations.
+- Table output column renamed from "Topics" to "Keywords" in both `towit search` and `towit list`.
+
 ## [0.5.1] - 2026-04-07
 
 ### Fixed

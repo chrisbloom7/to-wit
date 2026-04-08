@@ -3,7 +3,7 @@
 towit_list — List cataloged Claude conversations.
 
 Usage:
-    python3 towit_list.py [--format json|csv] [--folder <path>] [--topic <name>]
+    python3 towit_list.py [--format json|csv] [--folder <path>] [--topic <name>] [--keyword <name>]
 """
 
 import argparse
@@ -28,7 +28,7 @@ def _print_table(rows, group_by_path=False):
     if not rows:
         return
 
-    headers = ['ID', 'Title', 'Topics', 'Date']
+    headers = ['ID', 'Title', 'Keywords', 'Date']
     sep = '  '
     indent = '  ' if group_by_path else ''
 
@@ -38,7 +38,7 @@ def _print_table(rows, group_by_path=False):
         processed.append((r['cwd'] or '', [
             r['id'] or '',
             r['title'] or '',
-            r['topics'] or '',
+            r['keywords'] or '',
             date,
         ]))
 
@@ -48,11 +48,11 @@ def _print_table(rows, group_by_path=False):
         for i, val in enumerate(row_data):
             col_widths[i] = max(col_widths[i], len(val))
 
-    # Shrink Title and Topics proportionally if table exceeds terminal width
+    # Shrink Title and Keywords proportionally if table exceeds terminal width
     term_width = shutil.get_terminal_size((120, 24)).columns - 4
     total = sum(col_widths) + len(sep) * (len(headers) - 1) + len(indent)
     if total > term_width:
-        shrink_cols = [1, 2]  # Title, Topics
+        shrink_cols = [1, 2]  # Title, Keywords
         shrinkable = sum(col_widths[i] for i in shrink_cols)
         overflow = total - term_width
         for i in shrink_cols:
@@ -95,14 +95,15 @@ def _print_table(rows, group_by_path=False):
 
 
 def _print_csv(rows):
-    """Print results as CSV with header id,title,topics,cwd,date."""
+    """Print results as CSV with header id,title,keywords,topics,cwd,date."""
     writer = csv.writer(sys.stdout)
-    writer.writerow(['id', 'title', 'topics', 'cwd', 'date'])
+    writer.writerow(['id', 'title', 'keywords', 'topics', 'cwd', 'date'])
     for r in rows:
         date = (r['started_at'] or '')[:10]
         writer.writerow([
             r['id'] or '',
             r['title'] or '',
+            r['keywords'] or '',
             r['topics'] or '',
             r['cwd'] or '',
             date,
@@ -115,9 +116,12 @@ def _print_json(rows):
     for r in rows:
         topics_str = r['topics'] or ''
         topics = [t.strip() for t in topics_str.split(',')] if topics_str else []
+        keywords_str = r['keywords'] or ''
+        keywords = [k.strip() for k in keywords_str.split(',')] if keywords_str else []
         out.append({
             'id': r['id'] or '',
             'title': r['title'] or '',
+            'keywords': keywords,
             'topics': topics,
             'cwd': r['cwd'] or '',
             'date': (r['started_at'] or '')[:10],
@@ -135,12 +139,14 @@ def main():
                         help='Restrict to a specific project folder')
     parser.add_argument('--topic', metavar='NAME',
                         help='Filter by topic name')
+    parser.add_argument('--keyword', metavar='NAME',
+                        help='Filter by keyword')
     args = parser.parse_args()
 
     db = Database()
     db.validate()
 
-    results = db.list_conversations(folder=args.folder, topic=args.topic)
+    results = db.list_conversations(folder=args.folder, topic=args.topic, keyword=args.keyword)
 
     if args.format == 'json':
         _print_json(results)

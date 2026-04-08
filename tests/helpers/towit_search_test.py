@@ -56,7 +56,8 @@ class TestTowitSearch(unittest.TestCase):
             'last_active': '2026-01-15T10:30:00Z',
             'title': 'SQLite WAL mode deep dive',
             'summary': 'Deep dive into SQLite WAL mode',
-            'topics': ['SQLite', 'WAL mode']
+            'topics': ['SQLite', 'WAL mode'],
+            'keywords': ['sqlite', 'wal-mode', 'write-ahead-log', 'journal-mode'],
         })
         db.upsert_conversation({
             'id': 'conv-b',
@@ -66,7 +67,9 @@ class TestTowitSearch(unittest.TestCase):
             'last_active': '2026-01-16T09:45:00Z',
             'title': 'Rails migration strategies',
             'summary': 'Rails migration strategies',
-            'topics': ['Rails', 'migrations']
+            'topics': ['Rails', 'migrations', 'activerecord'],
+            # 'activerecord' is topic-only (not in keywords) for default-scope testing
+            'keywords': ['rails', 'schema-changes', 'rollback'],
         })
         db.upsert_conversation({
             'id': 'conv-c',
@@ -76,9 +79,11 @@ class TestTowitSearch(unittest.TestCase):
             'last_active': '2026-01-17T08:30:00Z',
             'title': 'SQLite index optimization',
             'summary': 'SQLite index optimization techniques',
-            'topics': ['SQLite', 'indexes']
+            'topics': ['SQLite', 'indexes'],
+            'keywords': ['sqlite', 'index-optimization', 'query-performance'],
         })
-        # Unique summary/title words; hyphenated topic for stem-match testing
+        # 'burndown' is summary-only (not a keyword) to preserve that test coverage.
+        # 'activerecord' is topic-only on conv-b for default-scope testing.
         db.upsert_conversation({
             'id': 'conv-d',
             'folder': '/home/user/.claude/projects/-Users-alice',
@@ -87,7 +92,8 @@ class TestTowitSearch(unittest.TestCase):
             'last_active': '2026-01-18T07:45:00Z',
             'title': 'Velocity estimation for Q2',
             'summary': 'Reviewed burndown charts and story-point estimation for the quarter.',
-            'topics': ['project-estimation', 'agile']
+            'topics': ['project-estimation', 'agile'],
+            'keywords': ['sprint-planning', 'story-points', 'quarterly-review'],
         })
 
     def tearDown(self):
@@ -197,11 +203,54 @@ class TestTowitSearch(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertNotIn('conv-d', result.stdout)
 
-    def test_stem_matches_hyphenated_topic(self):
-        # "estimate" (stem "estimat") should match topic "project-estimation"
-        result = run_search(self.config_path, ['estimate'])
+    def test_stem_matches_hyphenated_topic_with_topic_flag(self):
+        # "estimate" (stem "estimat") should match topic "project-estimation" when --topic included
+        result = run_search(self.config_path, ['estimate', '--topic'])
         self.assertEqual(result.returncode, 0)
         self.assertIn('conv-d', result.stdout)
+
+    def test_default_does_not_match_topic_only(self):
+        # "activerecord" is a topic on conv-b but not a keyword
+        result = run_search(self.config_path, ['activerecord'])
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn('conv-b', result.stdout)
+
+    def test_topic_flag_finds_topic_only_match(self):
+        result = run_search(self.config_path, ['activerecord', '--topic'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-b', result.stdout)
+
+    def test_all_flag_finds_keyword_match(self):
+        result = run_search(self.config_path, ['journal-mode', '--all'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-a', result.stdout)
+
+    def test_all_flag_finds_topic_only_match(self):
+        result = run_search(self.config_path, ['activerecord', '--all'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-b', result.stdout)
+
+    def test_table_output_shows_keywords_column_header(self):
+        result = run_search(self.config_path, ['sqlite'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('Keywords', result.stdout)
+        self.assertNotIn('Topics', result.stdout)
+
+    def test_format_json_includes_keywords_field(self):
+        import json
+        result = run_search(self.config_path, ['sqlite', '--format', 'json'])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        conv_a = next(r for r in data if r['id'] == 'conv-a')
+        self.assertIn('keywords', conv_a)
+        self.assertIsInstance(conv_a['keywords'], list)
+
+    def test_format_csv_includes_keywords_column(self):
+        import csv, io
+        result = run_search(self.config_path, ['sqlite', '--format', 'csv'])
+        self.assertEqual(result.returncode, 0)
+        reader = csv.DictReader(io.StringIO(result.stdout))
+        self.assertIn('keywords', reader.fieldnames)
 
     def test_all_flag_finds_summary_only_match(self):
         # "burndown" is only in conv-d's summary

@@ -163,15 +163,30 @@ class TestBuildTranscript(unittest.TestCase):
 
 
 class TestAnalyzeWithClaude(unittest.TestCase):
-    def _run_analyze(self, existing_topics=None):
+    def _mock_result(self):
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = json.dumps({
-            'skip': False, 'title': 'T', 'summary': 'S', 'topics': ['a']
+            'skip': False, 'title': 'T', 'summary': 'S',
+            'topics': ['a'], 'keywords': ['x', 'y'],
         })
-        with patch('subprocess.run', return_value=mock_result) as mock_run:
-            analyze_with_claude('some transcript', existing_topics=existing_topics)
+        return mock_result
+
+    def _run_analyze(self, existing_topics=None, existing_keywords=None):
+        with patch('subprocess.run', return_value=self._mock_result()) as mock_run:
+            analyze_with_claude('some transcript', existing_topics=existing_topics,
+                                existing_keywords=existing_keywords)
         return mock_run.call_args[0][0][2]  # the prompt string
+
+    def test_analyze_returns_keywords_in_result(self):
+        with patch('subprocess.run', return_value=self._mock_result()):
+            result = analyze_with_claude('some transcript')
+        self.assertIn('keywords', result)
+        self.assertIsInstance(result['keywords'], list)
+
+    def test_prompt_includes_keywords_field_instruction(self):
+        prompt = self._run_analyze()
+        self.assertIn('keywords', prompt.lower())
 
     def test_analyze_without_existing_topics_omits_instruction(self):
         prompt = self._run_analyze(existing_topics=None)
@@ -186,6 +201,20 @@ class TestAnalyzeWithClaude(unittest.TestCase):
     def test_analyze_with_empty_existing_topics_omits_instruction(self):
         prompt = self._run_analyze(existing_topics=[])
         self.assertNotIn('Previously assigned topics', prompt)
+
+    def test_analyze_without_existing_keywords_omits_keyword_hint(self):
+        prompt = self._run_analyze(existing_keywords=None)
+        self.assertNotIn('Previously assigned keywords', prompt)
+
+    def test_analyze_with_existing_keywords_includes_them_in_prompt(self):
+        prompt = self._run_analyze(existing_keywords=['modal', 'dismiss'])
+        self.assertIn('Previously assigned keywords', prompt)
+        self.assertIn('modal', prompt)
+        self.assertIn('dismiss', prompt)
+
+    def test_analyze_with_empty_existing_keywords_omits_keyword_hint(self):
+        prompt = self._run_analyze(existing_keywords=[])
+        self.assertNotIn('Previously assigned keywords', prompt)
 
 
 class TestIndexConversation(unittest.TestCase):
@@ -374,6 +403,56 @@ class TestIndexConversation(unittest.TestCase):
 
         self.assertEqual(result, 'skipped')
         self.assertFalse(self.db.is_indexed('skip-session-001'))
+
+    def test_index_conversation_stores_keywords_in_db(self):
+        path = self._write_conv('kw-session-001', MINIMAL_MESSAGES)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            'skip': False,
+            'title': 'Test',
+            'summary': 'A test conversation.',
+            'topics': ['testing'],
+            'keywords': ['wal-mode', 'concurrent-reads', 'journal-mode'],
+        })
+
+        with patch('subprocess.run', return_value=mock_result):
+            index_conversation(path, self.db)
+
+        record = self.db.get_for_reindex('kw-session-001')
+        self.assertIn('wal-mode', record['keywords'])
+        self.assertIn('concurrent-reads', record['keywords'])
+
+    def test_index_conversation_passes_existing_keywords_when_reindexing(self):
+        self.db.upsert_conversation({
+            'id': 'grown-kw-session-001',
+            'folder': '/some/folder',
+            'cwd': '/Users/test',
+            'started_at': '2026-01-15T10:00:00Z',
+            'last_active': '2026-01-15T10:30:00Z',
+            'title': 'Old Title',
+            'summary': 'Old summary.',
+            'topics': ['sqlite'],
+            'keywords': ['wal-mode', 'concurrent-reads'],
+            'message_count': 2,
+        })
+        path = self._write_conv('grown-kw-session-001', MINIMAL_MESSAGES)
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = json.dumps({
+            'skip': False, 'title': 'T', 'summary': 'S',
+            'topics': ['sqlite'], 'keywords': ['wal-mode', 'concurrent-reads'],
+        })
+
+        with patch('subprocess.run', return_value=mock_result) as mock_run:
+            index_conversation(path, self.db)
+
+        prompt_arg = mock_run.call_args[0][0][2]
+        self.assertIn('wal-mode', prompt_arg)
+        self.assertIn('concurrent-reads', prompt_arg)
+        self.assertIn('Previously assigned keywords', prompt_arg)
 
 
 if __name__ == '__main__':
