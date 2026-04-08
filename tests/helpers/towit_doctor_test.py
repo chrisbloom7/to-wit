@@ -1,6 +1,8 @@
 # tests/helpers/towit_doctor_test.py
 import unittest
 import sys, os
+import tempfile
+import shutil
 from unittest.mock import patch
 from collections import namedtuple
 
@@ -73,9 +75,6 @@ class TestChecks(unittest.TestCase):
         self.assertEqual(result.status, 'FAIL')
         self.assertIn('not found', result.label)
         self.assertTrue(result.remediation)
-
-
-import tempfile, shutil
 
 
 class TestConfigChecks(unittest.TestCase):

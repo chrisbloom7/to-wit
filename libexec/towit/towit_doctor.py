@@ -13,6 +13,9 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from towit_config import _KNOWN_KEYS
+
 
 @dataclass
 class CheckResult:
@@ -67,17 +70,6 @@ def check_claude_cli() -> CheckResult:
 # ---------------------------------------------------------------------------
 # Config checks
 # ---------------------------------------------------------------------------
-
-_KNOWN_KEYS = {
-    'database': {'path'},
-    'indexing': {
-        'model', 'reindex_delta',
-        'min_topics', 'max_topics',
-        'min_keywords', 'max_keywords',
-        'min_summary_sentences', 'max_summary_sentences',
-        'transcript_max_chars',
-    },
-}
 
 
 def check_config_file(config_path: str) -> CheckResult:
@@ -137,4 +129,4 @@ def check_deprecated_env() -> CheckResult:
             'TOWIT_DB_PATH environment variable is set (deprecated)',
             remediation="Move the path to [database] path in your config file and unset TOWIT_DB_PATH.",
         )
-    return CheckResult('PASS', 'TOWIT_DB_PATH not set (not deprecated)')
+    return CheckResult('PASS', 'TOWIT_DB_PATH not set')
