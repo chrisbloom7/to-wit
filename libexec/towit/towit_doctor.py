@@ -315,7 +315,7 @@ def main():
 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from towit_config import Config, CONFIG_PATH
-    from towit_install_hook import SETTINGS_PATH, HOOK_MARKER
+    from towit_install_hook import SETTINGS_PATH
 
     config_path = os.environ.get('TOWIT_CONFIG_PATH', CONFIG_PATH)
     settings_path = os.environ.get('TOWIT_SETTINGS_PATH', SETTINGS_PATH)
@@ -330,8 +330,9 @@ def main():
     results.append(check_claude_cli())
 
     # --- Configuration ---
-    results.append(check_config_file(config_path))
-    if os.path.isfile(config_path):
+    config_result = check_config_file(config_path)
+    results.append(config_result)
+    if config_result.status != 'FAIL':
         results.append(check_config_unknown_keys(config_path))
     results.append(check_deprecated_env())
 
@@ -340,8 +341,9 @@ def main():
     if os.path.isfile(db_path):
         results.append(check_db_permissions(db_path))
         results.append(check_db_dir_permissions(db_path))
-        results.append(check_db_tables(db_path))
-        if not any(r.status == 'FAIL' and 'Missing tables' in r.label for r in results):
+        db_tables_result = check_db_tables(db_path)
+        results.append(db_tables_result)
+        if db_tables_result.status != 'FAIL':
             results.append(check_db_schema(db_path))
 
     # --- Stop hook ---

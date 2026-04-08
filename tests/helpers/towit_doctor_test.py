@@ -415,6 +415,7 @@ class TestDoctorMain(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn('[FAIL]', result.stdout)
         self.assertIn('Database not found', result.stdout)
+        self.assertIn('failure(s)', result.stdout)
 
     def test_hook_not_installed_prints_fail_and_exits_one(self):
         self._write_config()
@@ -425,6 +426,7 @@ class TestDoctorMain(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn('[FAIL]', result.stdout)
         self.assertIn('stop hook not found', result.stdout.lower())
+        self.assertIn('failure(s)', result.stdout)
 
     def test_all_ok_prints_pass_lines_and_exits_zero(self):
         self._write_config()
