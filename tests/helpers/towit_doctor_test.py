@@ -5,6 +5,7 @@ import tempfile
 import shutil
 import sqlite3
 import json
+import subprocess
 from unittest.mock import patch
 from collections import namedtuple
 
@@ -332,6 +333,111 @@ class TestHookChecks(unittest.TestCase):
         open(self.hook_script, 'w').close()
         result = check_hook_script_exists(f'python3 {self.hook_script}')
         self.assertEqual(result.status, 'PASS')
+
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+HELPERS_DIR = os.path.join(PROJECT_ROOT, 'libexec', 'towit')
+DOCTOR_SCRIPT = os.path.join(HELPERS_DIR, 'towit_doctor.py')
+
+
+class TestDoctorMain(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = os.path.join(self.tmpdir, 'config.toml')
+        self.settings_path = os.path.join(self.tmpdir, 'settings.json')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _run(self, extra_env=None):
+        env = {
+            **os.environ,
+            'TOWIT_CONFIG_PATH': self.config_path,
+            'TOWIT_SETTINGS_PATH': self.settings_path,
+        }
+        if extra_env:
+            env.update(extra_env)
+        env.pop('TOWIT_DB_PATH', None)
+        return subprocess.run(
+            ['python3', DOCTOR_SCRIPT],
+            capture_output=True, text=True, env=env,
+        )
+
+    def _write_config(self):
+        with open(self.config_path, 'w') as f:
+            f.write(f'[database]\npath = "{self.db_path}"\n')
+
+    def _make_db(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.executescript("""
+                CREATE TABLE conversations (id TEXT PRIMARY KEY, folder TEXT NOT NULL,
+                    cwd TEXT, started_at TEXT, last_active TEXT, title TEXT, summary TEXT,
+                    message_count INTEGER, indexed_at TEXT NOT NULL DEFAULT (datetime('now')));
+                CREATE TABLE topics (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL COLLATE NOCASE);
+                CREATE TABLE conversation_topics (
+                    conversation_id TEXT NOT NULL, topic_id INTEGER NOT NULL,
+                    PRIMARY KEY (conversation_id, topic_id));
+                CREATE TABLE keywords (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL COLLATE NOCASE);
+                CREATE TABLE conversation_keywords (
+                    conversation_id TEXT NOT NULL, keyword_id INTEGER NOT NULL,
+                    PRIMARY KEY (conversation_id, keyword_id));
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+        os.chmod(self.db_path, 0o600)
+        os.chmod(self.tmpdir, 0o700)
+
+    def _install_hook(self, hook_script_path):
+        data = {'hooks': {'Stop': [{'matcher': '', 'hooks': [
+            {'type': 'command', 'command': f'python3 {hook_script_path}'}
+        ]}]}}
+        with open(self.settings_path, 'w') as f:
+            json.dump(data, f)
+
+    def test_help_exits_zero(self):
+        result = subprocess.run(
+            ['python3', DOCTOR_SCRIPT, '--help'],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0)
+        combined = result.stdout + result.stderr
+        self.assertIn('usage', combined.lower())
+
+    def test_missing_db_prints_fail_and_exits_one(self):
+        self._write_config()
+        self._install_hook(DOCTOR_SCRIPT)  # any existing file works; hook content not checked here
+        result = self._run()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('[FAIL]', result.stdout)
+        self.assertIn('Database not found', result.stdout)
+
+    def test_hook_not_installed_prints_fail_and_exits_one(self):
+        self._write_config()
+        self._make_db()
+        with open(self.settings_path, 'w') as f:
+            json.dump({}, f)
+        result = self._run()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('[FAIL]', result.stdout)
+        self.assertIn('stop hook not found', result.stdout.lower())
+
+    def test_all_ok_prints_pass_lines_and_exits_zero(self):
+        self._write_config()
+        self._make_db()
+        hook_script = os.path.join(
+            PROJECT_ROOT, 'libexec', 'towit', 'towit_hook.py'
+        )
+        self._install_hook(hook_script)
+        result = self._run()
+        self.assertEqual(result.returncode, 0, f"Expected exit 0, got output:\n{result.stdout}")
+        self.assertNotIn('[FAIL]', result.stdout)
+        self.assertIn('[PASS]', result.stdout)
+        self.assertIn('All checks passed', result.stdout)
 
 if __name__ == '__main__':
     unittest.main()

@@ -300,3 +300,67 @@ def check_hook_script_exists(hook_command: str) -> CheckResult:
             remediation="Reinstall To Wit to restore the hook script, then run 'towit install-hook'.",
         )
     return CheckResult('PASS', f'Hook script exists at {script_path}')
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog='towit doctor',
+        description='Verify that To Wit setup is complete and configuration is valid.',
+    )
+    parser.parse_args()  # only --help is accepted; any other arg is an error
+
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from towit_config import Config, CONFIG_PATH
+    from towit_install_hook import SETTINGS_PATH, HOOK_MARKER
+
+    config_path = os.environ.get('TOWIT_CONFIG_PATH', CONFIG_PATH)
+    settings_path = os.environ.get('TOWIT_SETTINGS_PATH', SETTINGS_PATH)
+
+    cfg = Config(config_path)
+    db_path = cfg.db_path
+
+    results = []
+
+    # --- Python & tooling ---
+    results.append(check_python_version())
+    results.append(check_claude_cli())
+
+    # --- Configuration ---
+    results.append(check_config_file(config_path))
+    if os.path.isfile(config_path):
+        results.append(check_config_unknown_keys(config_path))
+    results.append(check_deprecated_env())
+
+    # --- Database ---
+    results.append(check_db_exists(db_path))
+    if os.path.isfile(db_path):
+        results.append(check_db_permissions(db_path))
+        results.append(check_db_dir_permissions(db_path))
+        results.append(check_db_tables(db_path))
+        if not any(r.status == 'FAIL' and 'Missing tables' in r.label for r in results):
+            results.append(check_db_schema(db_path))
+
+    # --- Stop hook ---
+    results.append(check_hook_settings_file(settings_path))
+    results.append(check_hook_installed(settings_path))
+    hook_cmd = _find_hook_command(settings_path)
+    if hook_cmd:
+        results.append(check_hook_script_exists(hook_cmd))
+
+    # --- Print results ---
+    for result in results:
+        for line in format_result(result):
+            print(line)
+
+    summary, code = summarise(results)
+    print()
+    print(summary)
+    sys.exit(code)
+
+
+if __name__ == '__main__':
+    main()
