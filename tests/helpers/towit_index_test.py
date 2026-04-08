@@ -163,26 +163,6 @@ class TestBuildTranscript(unittest.TestCase):
         )
 
 
-def _make_mock_cfg_early(**overrides):
-    """Return a MagicMock config with sensible indexing defaults, allowing overrides."""
-    defaults = dict(
-        indexing_model='default',
-        indexing_reindex_delta=1,
-        indexing_min_topics=1,
-        indexing_max_topics=5,
-        indexing_min_keywords=15,
-        indexing_max_keywords=30,
-        indexing_min_summary_sentences=3,
-        indexing_max_summary_sentences=6,
-        indexing_transcript_max_chars=8000,
-    )
-    defaults.update(overrides)
-    cfg = MagicMock()
-    for k, v in defaults.items():
-        setattr(cfg, k, v)
-    return cfg
-
-
 class TestAnalyzeWithClaude(unittest.TestCase):
     def _mock_result(self):
         mock_result = MagicMock()
@@ -352,6 +332,7 @@ class TestIndexConversation(unittest.TestCase):
         self.assertEqual(record['topics'], ['sqlite', 'concurrency'])
 
     def test_index_conversation_passes_existing_topics_when_reindexing(self):
+        # First index the conversation to create a record
         self.db.upsert_conversation({
             'id': 'grown-session-001',
             'folder': '/some/folder',
@@ -361,7 +342,7 @@ class TestIndexConversation(unittest.TestCase):
             'title': 'Old Title',
             'summary': 'Old summary.',
             'topics': ['sqlite', 'wal-mode'],
-            'message_count': 2,  # fewer than MINIMAL_MESSAGES
+            'message_count': None,  # Pre-migration record with no message count; should always re-analyze
         })
         path = self._write_conv('grown-session-001', MINIMAL_MESSAGES)
 
@@ -374,7 +355,7 @@ class TestIndexConversation(unittest.TestCase):
             'topics': ['sqlite', 'wal-mode'],
         })
 
-        with patch('towit_index._config', _make_mock_cfg_early()):
+        with patch('towit_index._config', _make_mock_cfg()):
             with patch('subprocess.run', return_value=mock_result) as mock_run:
                 result = index_conversation(path, self.db)
 
@@ -447,6 +428,7 @@ class TestIndexConversation(unittest.TestCase):
         self.assertIn('concurrent-reads', record['keywords'])
 
     def test_index_conversation_passes_existing_keywords_when_reindexing(self):
+        # Pre-migration record with no message count; should always re-analyze
         self.db.upsert_conversation({
             'id': 'grown-kw-session-001',
             'folder': '/some/folder',
@@ -457,7 +439,7 @@ class TestIndexConversation(unittest.TestCase):
             'summary': 'Old summary.',
             'topics': ['sqlite'],
             'keywords': ['wal-mode', 'concurrent-reads'],
-            'message_count': 2,
+            'message_count': None,
         })
         path = self._write_conv('grown-kw-session-001', MINIMAL_MESSAGES)
 
@@ -468,7 +450,7 @@ class TestIndexConversation(unittest.TestCase):
             'topics': ['sqlite'], 'keywords': ['wal-mode', 'concurrent-reads'],
         })
 
-        with patch('towit_index._config', _make_mock_cfg_early()):
+        with patch('towit_index._config', _make_mock_cfg()):
             with patch('subprocess.run', return_value=mock_result) as mock_run:
                 index_conversation(path, self.db)
 
