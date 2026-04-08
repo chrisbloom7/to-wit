@@ -9,9 +9,9 @@ Claude Code conversations are analyzed, filtered for substance, and stored in a 
 ```shell
 towit search hook
 /Users/chrisbloom7
-  ID                                    Title                        Topics    Date
-  ------------------------------------  ---------------------------  --------  ----------
-  350fa22f-10b7-48ff-ac9d-bd9f1081c23b  Debugging non-firing Stop …  hooks     2026-03-31
+  ID                                    Title                        Keywords      Date
+  ------------------------------------  ---------------------------  ------------  ----------
+  350fa22f-10b7-48ff-ac9d-bd9f1081c23b  Debugging non-firing Stop …  stop-hook     2026-03-31
 
 towit resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
 # => switch to `/Users/chrisbloom7` and call `claude --resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b`
@@ -61,9 +61,10 @@ Subcommands:
                                   --full    also generates config, installs hook, and runs backfill
                                   --hook    also installs hook
                                   --config  generate ~/.towit/config.toml (skips if already exists)
-  search <terms...>             Search conversations by topic, summary, or title
+  search <terms...>             Search conversations by keyword (default), topic, summary, or title
     [--or]                        Match any term instead of all (default: AND)
-    [--all]                       Search topics, summaries, and titles
+    [--topic]                     Also search conversation topics
+    [--all]                       Search keywords, topics, summaries, and titles
     [--summary]                   Also search conversation summaries
     [--title]                     Also search conversation titles
     [--format json|csv]           Output format (default: table)
@@ -72,6 +73,7 @@ Subcommands:
     [--format json|csv]           Output format (default: table)
     [--folder <path>]             Scope to a working directory
     [--topic <name>]              Filter by topic
+    [--keyword <name>]            Filter by keyword
   resume <session-id>           Resume a session in its original working directory
     [--force]                     Recreate the working directory if it no longer exists
   export <session-id>           Export a conversation
@@ -96,7 +98,7 @@ Subcommands:
 
 ## How it works
 
-**Indexing:** Each conversation is parsed from Claude Code's JSONL transcript files (`~/.claude/projects/`). Short or purely operational sessions are filtered out. Substantive conversations are analyzed by Claude, which extracts a title, summary, and topic tags. Results are stored in `~/.towit/catalog.db` (SQLite, WAL mode).
+**Indexing:** Each conversation is parsed from Claude Code's JSONL transcript files (`~/.claude/projects/`). Short or purely operational sessions are filtered out. Substantive conversations are analyzed by Claude, which extracts a title, summary, 15–30 specific keywords (identifiers, method names, error messages, domain terms, filenames, etc.), and broad topic tags. Results are stored in `~/.towit/catalog.db` (SQLite, WAL mode).
 
 **What gets indexed:** Deep explorations, research, TIL moments, technical discoveries, documentation writing, theoretical discussions, estimation with depth. Quick one-shots, command execution sessions, and subagent traces are skipped.
 
