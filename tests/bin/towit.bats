@@ -343,3 +343,46 @@ EOF
     echo "Expected settings file at ${settings_file}"; return 1
   }
 }
+
+# ---------------------------------------------------------------------------
+# doctor subcommand
+# ---------------------------------------------------------------------------
+
+@test "towit: doctor --help exits 0 and prints usage" {
+  run "${TOWIT}" doctor --help
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"usage"* ]] || [[ "${output}" == *"Usage"* ]] || {
+    echo "Expected 'usage' in output, got: ${output}"; return 1
+  }
+}
+
+@test "towit: doctor exits non-zero when database is missing" {
+  # DB not set up; TOWIT_CONFIG_PATH points to a config referencing a nonexistent DB
+  run "${TOWIT}" doctor
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"[FAIL]"* ]] || {
+    echo "Expected [FAIL] in output, got: ${output}"; return 1
+  }
+}
+
+@test "towit: doctor prints [PASS] for database after setup" {
+  "${TOWIT}" setup
+  run "${TOWIT}" doctor
+  [[ "${output}" == *"[PASS]"* ]] || {
+    echo "Expected [PASS] lines in output, got: ${output}"; return 1
+  }
+  [[ "${output}" == *"Database"* ]] || {
+    echo "Expected 'Database' in output, got: ${output}"; return 1
+  }
+}
+
+@test "towit: doctor output contains no JSON or CSV" {
+  run "${TOWIT}" doctor
+  [[ "${output}" != *"{"* ]] || { echo "Unexpected JSON in output"; return 1; }
+  [[ "${output}" != *'","'* ]] || { echo "Unexpected CSV in output"; return 1; }
+}
+
+@test "towit: doctor rejects unknown flags" {
+  run "${TOWIT}" doctor --json
+  [ "${status}" -ne 0 ]
+}

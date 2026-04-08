@@ -23,6 +23,7 @@
 #   implode [--yes] [--install-dir <dir>]
 #                                 Full uninstall: remove hook, database, and binary symlink
 #   stats                         Show catalog statistics
+#   doctor                        Verify setup: config, database, and hook
 #   help                          Show this message
 
 set -euo pipefail
@@ -119,6 +120,10 @@ case "${subcommand}" in
   stats)
     shift
     python3 "${HELPERS_DIR}/towit_stats.py" "$@" || exit $?
+    ;;
+  doctor)
+    shift
+    python3 "${HELPERS_DIR}/towit_doctor.py" "$@" || exit $?
     ;;
   help|--help|-h)
     usage
