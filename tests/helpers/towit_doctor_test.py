@@ -1,7 +1,7 @@
 # tests/helpers/towit_doctor_test.py
 import unittest
 import sys, os
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from collections import namedtuple
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit')))

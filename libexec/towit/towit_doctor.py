@@ -8,6 +8,7 @@ warnings), 1 if any check fails.  Never performs automatic remediation.
 
 import argparse
 import os
+import shutil
 import sys
 from dataclasses import dataclass, field
 
@@ -52,7 +53,6 @@ def check_python_version() -> CheckResult:
 
 def check_claude_cli() -> CheckResult:
     """Check that the claude CLI is installed and available on PATH."""
-    import shutil
     path = shutil.which('claude')
     if path is None:
         return CheckResult(
