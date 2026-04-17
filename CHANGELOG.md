@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-04-17
+
+### Fixed
+
+- Add `--no-session-persistence` to `claude -p` analysis calls so towit's indexing sessions are not saved to disk and do not appear in Claude Code's `/resume` picker.
+
 ## [0.8.1] - 2026-04-08
 
 ### Fixed

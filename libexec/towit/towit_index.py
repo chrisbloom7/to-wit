@@ -211,7 +211,7 @@ def analyze_with_claude(transcript: str, existing_topics: list = None,
     }
     safe_env['TOWIT_INDEXING'] = '1'
 
-    cmd = ['claude', '-p', prompt, '--output-format', 'text']
+    cmd = ['claude', '-p', prompt, '--output-format', 'text', '--no-session-persistence']
     model = _config.indexing_model
     if model and model != 'default':
         cmd += ['--model', model]
