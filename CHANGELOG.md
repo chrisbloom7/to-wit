@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `SessionStart` catch-up scan no longer advances its `last_catch_up` stamp when any transcript failed to archive, so the failed files are retried on the next scan instead of being skipped.
+- `towit teardown` and `towit implode` now list and remove leftover `-wal`, `-shm` and `-journal` files even when the database file itself is already gone, instead of reporting that there is nothing to remove.
+- Sessions the LLM skips as trivial (or whose analysis failed) are no longer re-sent to `claude -p` on every hook; they are analyzed again only after they grow by `reindex_delta` exchanges.
+- `towit export --summarize` now passes `--no-session-persistence` to `claude -p`, so the summarization call no longer adds a session to Claude Code's own history.
 - The hook command written by `towit install-hook` now shell-quotes the interpreter and script paths, so a source install under a directory with a space (for example `~/My Projects/to-wit`) no longer registers hooks that silently do nothing. Paths without special characters, including Homebrew's, are written exactly as before. Re-run `towit install-hook` to repair hooks that were registered with an unquoted path. `TOWIT_PYTHON` may now contain spaces, and `towit doctor` reads quoted hook commands correctly.
 
 ## [0.9.3] - 2026-11-11
