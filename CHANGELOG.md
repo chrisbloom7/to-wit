@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `towit` no longer archives or sends to the LLM entries Claude Code marks as meta (such as the `<local-command-caveat>` text). Sessions archived earlier are cleaned the next time they are ingested (an archived session that ends with a meta entry is cleaned once it grows); `towit backfill` re-ingests every session.
+- `towit teardown` and `towit implode` now print `Leftover database files deleted` instead of `Database deleted: <path>` when only leftover `-wal`, `-shm` or `-journal` files existed and the database file itself did not.
+
 ### Changed
 
 - `towit search` ranks message hits without computing snippets for every matching message, and fetches summaries and fallback titles in batches instead of one query per result, so searches over a large archive do less work. Results, ordering and snippets are unchanged.
