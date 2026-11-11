@@ -9,13 +9,12 @@ import shutil
 import sys
 import subprocess
 import tempfile
+import threading
 import unittest
 import unittest.mock
 
 HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
 sys.path.insert(0, HELPERS_DIR)
-
-import threading
 
 import towit_ingest
 from towit_db import Database
@@ -194,7 +193,7 @@ class TestIngestTranscript(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.folder = os.path.join(self.tmp, 'projects', '-work-Robinina')
         os.makedirs(self.folder)
-        self.path = os.path.join(self.folder, 'sess-1.jsonl')
+        self.path = os.path.join(self.folder, 'sess-0001.jsonl')
         self.db = Database(os.path.join(self.tmp, 'catalog.db'))
         self.db.create_schema()
         self._turns = [_entry('user', 'first question'),
@@ -209,13 +208,13 @@ class TestIngestTranscript(unittest.TestCase):
             setattr(self, name, patcher.start())
             self.addCleanup(patcher.stop)
 
-    def _rows(self, conv_id='sess-1'):
+    def _rows(self, conv_id='sess-0001'):
         with self.db.connect() as conn:
             return conn.execute(
                 'SELECT seq, role, text FROM messages WHERE conversation_id = ? ORDER BY seq',
                 (conv_id,)).fetchall()
 
-    def _conv(self, conv_id='sess-1'):
+    def _conv(self, conv_id='sess-0001'):
         with self.db.connect() as conn:
             return conn.execute('SELECT * FROM conversations WHERE id = ?',
                                 (conv_id,)).fetchone()
@@ -255,25 +254,25 @@ class TestIngestTranscript(unittest.TestCase):
         archive.assert_not_called()
 
     def test_subagent_path_skipped_unless_included(self):
-        sub = os.path.join(self.folder, 'sess-1', 'subagents')
+        sub = os.path.join(self.folder, 'sess-0001', 'subagents')
         os.makedirs(sub)
-        sub_path = os.path.join(sub, 'agent-1.jsonl')
+        sub_path = os.path.join(sub, 'agent-0001.jsonl')
         _write_jsonl(sub_path, self._turns)
         self.assertEqual(ingest_transcript(sub_path, self.db), 'skipped')
-        self.assertEqual(self._rows('agent-1'), [])
+        self.assertEqual(self._rows('agent-0001'), [])
         self.ingest_include_subagents.return_value = True
         self.assertEqual(ingest_transcript(sub_path, self.db), 'ingested')
-        self.assertEqual(len(self._rows('agent-1')), 3)
+        self.assertEqual(len(self._rows('agent-0001')), 3)
 
     def test_symlinked_transcript_skipped(self):
-        link = os.path.join(self.folder, 'linked.jsonl')
+        link = os.path.join(self.folder, 'linked-session.jsonl')
         os.symlink(self.path, link)
         self.assertEqual(ingest_transcript(link, self.db), 'skipped')
-        self.assertEqual(self._rows('linked'), [])
+        self.assertEqual(self._rows('linked-session'), [])
 
     def test_forgotten_session_returns_forgotten(self):
         with self.db.connect() as conn:
-            conn.execute('INSERT INTO forgotten (id) VALUES (?)', ('sess-1',))
+            conn.execute('INSERT INTO forgotten (id) VALUES (?)', ('sess-0001',))
         self.assertEqual(ingest_transcript(self.path, self.db), 'forgotten')
         self.assertEqual(self._rows(), [])
 
@@ -285,7 +284,7 @@ class TestIngestTranscript(unittest.TestCase):
         self.assertEqual(ingest_transcript(self.path, self.db), 'ingested')
         self.assertEqual(len(self._rows()), 3)
 
-    def test_secret_redacted_by_default_and_raw_when_disabled(self):
+    def test_secret_redacted_by_default(self):
         secret = 'AKIA' + 'A' * 16
         _write_jsonl(self.path, [_entry('user', f'key {secret}'), _entry('assistant', 'ok'),
                                  _entry('user', 'again')])
@@ -317,6 +316,24 @@ class TestIngestTranscript(unittest.TestCase):
         self.assertIn('bad', self._rows()[0]['text'])
         self.assertEqual(ingest_transcript(self.path, self.db), 'unchanged')
 
+    def test_invalid_session_id_skipped(self):
+        for stem in ('bad id!', 'short'):
+            bad = os.path.join(self.folder, stem + '.jsonl')
+            _write_jsonl(bad, self._turns)
+            with unittest.mock.patch.object(towit_ingest, 'parse_transcript') as parse:
+                self.assertEqual(ingest_transcript(bad, self.db), 'skipped')
+            parse.assert_not_called()
+            self.assertEqual(self._rows(stem), [])
+            self.assertIsNone(self._conv(stem))
+
+    def test_forgotten_race_after_early_check(self):
+        with self.db.connect() as conn:
+            conn.execute('INSERT INTO forgotten (id) VALUES (?)', ('sess-0001',))
+        with unittest.mock.patch.object(Database, 'is_forgotten', return_value=False):
+            self.assertEqual(ingest_transcript(self.path, self.db), 'forgotten')
+        self.assertEqual(self._rows(), [])
+        self.assertIsNone(self._conv())
+
     def test_concurrent_ingest_of_same_file(self):
         dbs = [Database(self.db.db_path), Database(self.db.db_path)]
         results, errors = [], []
@@ -327,11 +344,19 @@ class TestIngestTranscript(unittest.TestCase):
             except Exception as exc:  # surfaced via the assertion below
                 errors.append(exc)
 
+        barrier = threading.Barrier(2)
+        real_archive = Database.archive_session
+
+        def synced(db_self, conv, messages):
+            barrier.wait(timeout=10)  # both threads reach the transaction together
+            return real_archive(db_self, conv, messages)
+
         threads = [threading.Thread(target=run, args=(d,)) for d in dbs]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        with unittest.mock.patch.object(Database, 'archive_session', synced):
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
         self.assertEqual(errors, [])
         self.assertEqual(sorted(results), ['ingested', 'unchanged'])
         self.assertEqual(len(self._rows()), len(parse_transcript(self.path).messages))

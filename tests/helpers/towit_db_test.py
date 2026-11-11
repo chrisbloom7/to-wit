@@ -583,6 +583,13 @@ class TestArchiveSession(unittest.TestCase):
         self.assertEqual(message_hash('user', 'hi'),
                          hashlib.sha256(b'user\x00hi').hexdigest())
 
+    def test_forgotten_session_not_archived(self):
+        with self.db.connect() as conn:
+            conn.execute("INSERT INTO forgotten (id) VALUES (?)", (self.CONV['id'],))
+        self.assertEqual(self.db.archive_session(dict(self.CONV), self._msgs(2)), 'forgotten')
+        self.assertIsNone(self._conv_row())
+        self.assertEqual(self._rows(), [])
+
     def test_first_call_ingests(self):
         msgs = self._msgs(3)
         self.assertEqual(self.db.archive_session(dict(self.CONV), msgs), 'ingested')

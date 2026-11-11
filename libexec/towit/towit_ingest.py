@@ -13,7 +13,7 @@ import os
 import subprocess
 from dataclasses import dataclass, field
 
-from towit_config import config, safe_subprocess_env
+from towit_config import config, is_valid_session_id, safe_subprocess_env
 from towit_db import Database
 from towit_redact import redact
 
@@ -194,8 +194,11 @@ def ingest_transcript(jsonl_path: str, db: Database | None = None) -> str:
     if folders and not any(fnmatch.fnmatch(folder, pat) for pat in folders):
         return 'skipped'
 
-    db = db or Database()
     session_id = os.path.splitext(os.path.basename(path))[0]
+    if not is_valid_session_id(session_id):
+        return 'skipped'
+
+    db = db or Database()
     if db.is_forgotten(session_id):
         return 'forgotten'
 

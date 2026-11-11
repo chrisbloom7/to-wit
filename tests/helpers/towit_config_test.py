@@ -14,7 +14,7 @@ HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'
 sys.path.insert(0, HELPERS_DIR)
 
 import towit_config
-from towit_config import Config, _DEFAULT_DB_PATH
+from towit_config import Config, _DEFAULT_DB_PATH, is_valid_session_id
 
 
 def write_config(tmpdir, content):
@@ -439,6 +439,16 @@ class TestConfigIngest(unittest.TestCase):
         result, err = self._warnings(Config(path=path), 'ingest_extra_patterns')
         self.assertEqual(result, [])
         self.assertIn('Warning', err)
+
+
+class TestIsValidSessionId(unittest.TestCase):
+    def test_valid(self):
+        for sid in ('abc-1234', 'a_b-C9d8e7f6', '0123456789abcdef'):
+            self.assertTrue(is_valid_session_id(sid), sid)
+
+    def test_invalid(self):
+        for sid in ('', 'short', 'bad id!!!', '../../etc/passwd', 'abc-1234\n'):
+            self.assertFalse(is_valid_session_id(sid), repr(sid))
 
 
 class TestSafeSubprocessEnv(unittest.TestCase):
