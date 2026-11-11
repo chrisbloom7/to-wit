@@ -14,6 +14,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from towit_config import safe_subprocess_env
 from towit_db import Database
 
 
@@ -25,7 +26,7 @@ def _call_claude(prompt: str) -> str:
     result = subprocess.run(
         ['claude', '-p', prompt, '--output-format', 'text'],
         capture_output=True, text=True, timeout=120,
-        env={**os.environ, 'TOWIT_INDEXING': '1'}
+        env=safe_subprocess_env({'TOWIT_INDEXING': '1'})
     )
     if result.returncode != 0:
         print(f"Error calling Claude: {result.stderr}", file=sys.stderr)

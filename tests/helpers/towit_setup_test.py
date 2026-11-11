@@ -52,6 +52,20 @@ class TestTowitSetup(unittest.TestCase):
         self.assertIn('include_subagents', content)
         self.assertIn('enabled', content)
 
+    def test_config_dir_created_owner_only(self):
+        fresh_dir = os.path.join(self.tmpdir, 'fresh-towit')
+        result = run_setup(self.db_path, os.path.join(fresh_dir, 'config.toml'), ['--config'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(os.stat(fresh_dir).st_mode & 0o777, 0o700)
+
+    def test_existing_config_dir_mode_is_not_changed(self):
+        existing = os.path.join(self.tmpdir, 'existing-towit')
+        os.mkdir(existing)
+        os.chmod(existing, 0o755)
+        result = run_setup(self.db_path, os.path.join(existing, 'config.toml'), ['--config'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(os.stat(existing).st_mode & 0o777, 0o755)
+
     def test_creates_db_file_at_towit_db_path(self):
         self.assertFalse(os.path.exists(self.db_path))
         result = run_setup(self.db_path, self.config_path)

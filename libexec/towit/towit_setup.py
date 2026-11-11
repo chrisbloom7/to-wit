@@ -33,7 +33,7 @@ _CONFIG_TEMPLATE = """\
 # model = "haiku"
 
 # How many exchanges (user + assistant pairs) must occur before a resumed session
-# is re-analyzed. The stop hook fires after every response; this prevents unnecessary
+# is re-analyzed. The Stop hook fires after every response; this prevents unnecessary
 # API calls mid-conversation. Set to 1 to re-analyze after every exchange.
 # Default: 2
 # reindex_delta = 2
@@ -58,24 +58,30 @@ _CONFIG_TEMPLATE = """\
 # Default: 8000
 # transcript_max_chars = 8000
 
-# Set to false to stop the stop hook from running LLM analysis (title, summary,
-# topics). Archiving of message text continues. Default: true
+# Set to false to stop the hooks from running LLM analysis (title, summary,
+# topics, keywords). Archiving of message text continues, at zero API cost.
+# Default: true
 # enabled = true
 
 [ingest]
 # Redact secrets (API keys, tokens, private keys) from message text before it
-# is archived. Default: true
+# is archived and before it is sent to Claude. Best effort, not a guarantee.
+# Redaction happens at ingest time only: changing this later does not rewrite
+# messages that are already archived. Default: true
 # redact = true
 
 # Extra regex patterns to redact, in addition to the built-in set.
 # Default: []
 # extra_patterns = []
 
-# Also archive sessions found under subagents/ directories. Default: false
+# Also archive sessions found under subagents/ directories (applies to backfill and
+# the SessionStart catch-up scan; subagent sessions are archived only, never sent to
+# Claude for analysis). Default: false
 # include_subagents = false
 
-# Only archive sessions from these folders. An empty list archives all folders.
-# Default: []
+# Only archive sessions from these project folders. Shell-style globs matched against
+# the folder under ~/.claude/projects that holds the transcript, e.g. ["*my-repo*"].
+# An empty list archives all folders. Default: []
 # folders = []
 """
 
@@ -87,7 +93,7 @@ def generate_config():
         print(f"Config file already exists at {config_path}")
         return
     parent = os.path.dirname(config_path)
-    os.makedirs(parent, exist_ok=True)
+    os.makedirs(parent, mode=0o700, exist_ok=True)  # owner-only; an existing dir is left as is
     old_umask = os.umask(0o177)  # 0600 permissions
     try:
         with open(config_path, 'w') as f:
@@ -104,9 +110,9 @@ def main():
     parser.add_argument('--config', action='store_true',
                         help='Generate a starter config.toml')
     parser.add_argument('--full', action='store_true',
-                        help='Also generate config, install hook, and run backfill')
+                        help='Also generate config, install hooks, and run backfill')
     parser.add_argument('--hook', action='store_true',
-                        help='Also install the stop hook after setup')
+                        help='Also install the Claude Code hooks after setup')
     args = parser.parse_args()
 
     if args.full or args.config:

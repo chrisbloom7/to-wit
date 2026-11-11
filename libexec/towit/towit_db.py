@@ -961,6 +961,13 @@ class Database:
             ).fetchone()
             return row is not None
 
+    def get_repo_key(self, conv_id: str) -> str | None:
+        """Stored repo_key for a conversation, or None if unknown or never set."""
+        self.validate()
+        with self.connect() as conn:
+            row = conn.execute("SELECT repo_key FROM conversations WHERE id = ?", (conv_id,)).fetchone()
+        return (row['repo_key'] or None) if row else None
+
     def get_meta(self, key: str) -> str | None:
         """Return the value stored under `key` in the meta table, or None."""
         self.validate()
@@ -1032,7 +1039,7 @@ class Database:
                     ON CONFLICT(id) DO UPDATE SET
                         last_active            = excluded.last_active,
                         cwd                    = excluded.cwd,
-                        repo_key               = excluded.repo_key,
+                        repo_key               = COALESCE(NULLIF(conversations.repo_key, ''), excluded.repo_key),
                         source_path            = excluded.source_path,
                         tail_hash              = excluded.tail_hash,
                         archived               = 1,

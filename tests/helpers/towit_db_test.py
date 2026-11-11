@@ -678,13 +678,13 @@ class TestArchiveSession(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT count(*) FROM conversation_keywords").fetchone()[0], 1)
             conn.close()
 
-    def test_conversation_metadata_updated(self):
+    def test_conversation_metadata_updated_but_repo_key_kept(self):
         self.db.archive_session(dict(self.CONV), self._msgs(2))
         conv = dict(self.CONV, last_active='2026-02-02T00:00:00Z', cwd='/new', repo_key='r2')
         self.db.archive_session(conv, self._msgs(2))
         row = self._conv_row()
         self.assertEqual((row['last_active'], row['cwd'], row['repo_key']),
-                         ('2026-02-02T00:00:00Z', '/new', 'r2'))
+                         ('2026-02-02T00:00:00Z', '/new', self.CONV['repo_key']))  # key resolved once
 
     def test_fts_finds_appended_and_drops_rewritten_text(self):
         self.db.archive_session(dict(self.CONV), self._msgs(2, 'alpha'))
@@ -1244,6 +1244,57 @@ class TestAutoMigration(unittest.TestCase):
             [{'role': 'user', 'ts': None, 'text': 'hello zebra'},
              {'role': 'assistant', 'ts': None, 'text': 'hi'}])
         self.assertEqual(out, 'ingested')
+
+
+class TestRepoKeyKeptOnReingest(unittest.TestCase):
+    """repo_key is resolved once at first ingest; a later ingest must not replace it."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db = Database(os.path.join(self.tmpdir, 'catalog.db'))
+        self.db.create_schema()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _conv(self, repo_key):
+        return {'id': 'rk-session-1', 'folder': '/f', 'cwd': '/wt/feature',
+                'started_at': None, 'last_active': None,
+                'repo_key': repo_key, 'source_path': '/f/rk-session-1.jsonl'}
+
+    def _msgs(self, n=2):
+        return [{'role': 'user', 'ts': None, 'text': f'm{i}'} for i in range(n)]
+
+    def _stored_key(self):
+        with self.db.connect() as conn:
+            return conn.execute("SELECT repo_key FROM conversations WHERE id = 'rk-session-1'"
+                                ).fetchone()['repo_key']
+
+    def test_reingest_keeps_stored_key(self):
+        self.db.archive_session(self._conv('/repo/main'), self._msgs(2))
+        self.db.archive_session(self._conv('/wt/feature'), self._msgs(3))  # worktree gone: fell back to cwd
+        self.assertEqual(self._stored_key(), '/repo/main')
+
+    def test_null_stored_key_is_filled(self):
+        self.db.archive_session(self._conv(None), self._msgs(2))
+        self.assertIsNone(self._stored_key())
+        self.db.archive_session(self._conv('/repo/main'), self._msgs(2))
+        self.assertEqual(self._stored_key(), '/repo/main')
+
+    def test_empty_stored_key_is_filled(self):
+        self.db.archive_session(self._conv(''), self._msgs(2))
+        self.assertEqual(self._stored_key(), '')
+        self.db.archive_session(self._conv('/repo/main'), self._msgs(2))
+        self.assertEqual(self._stored_key(), '/repo/main')
+
+    def test_get_repo_key(self):
+        self.assertIsNone(self.db.get_repo_key('rk-session-1'))
+        self.db.archive_session(self._conv('/repo/main'), self._msgs(2))
+        self.assertEqual(self.db.get_repo_key('rk-session-1'), '/repo/main')
+
+    def test_first_ingest_stores_given_key(self):
+        self.db.archive_session(self._conv('/wt/feature'), self._msgs(2))
+        self.assertEqual(self._stored_key(), '/wt/feature')
 
 
 if __name__ == '__main__':

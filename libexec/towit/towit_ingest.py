@@ -142,7 +142,7 @@ def parse_transcript(path: str) -> ParsedTranscript:
                 ts = entry.get('timestamp') or None
                 messages.append(ArchiveMessage(role=role, ts=ts, text=_truncate(text)))
     except OSError:
-        # Missing/unreadable transcript: never raise (called from the stop hook).
+        # Missing/unreadable transcript: never raise (called from the hooks).
         return ParsedTranscript(session_id=session_id, cwd='', started_at=None,
                                 last_active=None, messages=[])
 
@@ -232,7 +232,9 @@ def ingest_transcript(jsonl_path: str, db: Database | None = None) -> str:
         'cwd': _sanitize(parsed.cwd),
         'started_at': parsed.started_at,
         'last_active': parsed.last_active,
-        'repo_key': _sanitize(resolve_repo_key(parsed.cwd)),
+        # Resolved once: a stored key is kept (the upsert also keeps it), so git runs only
+        # for new sessions or ones whose key was never set.
+        'repo_key': db.get_repo_key(session_id) or _sanitize(resolve_repo_key(parsed.cwd)),
         'source_path': path,
     }
     return db.archive_session(conv, messages)
