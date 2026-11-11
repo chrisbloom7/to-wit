@@ -98,36 +98,41 @@ def parse_transcript(path: str) -> ParsedTranscript:
 
     cwd = ''
     messages: list[ArchiveMessage] = []
-    with open(path, 'r', encoding='utf-8', errors='replace') as fh:
-        for line in fh:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue  # e.g. partial last line from a transcript mid-write
-            if not isinstance(entry, dict):
-                continue
+    try:
+        with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # e.g. partial last line from a transcript mid-write
+                if not isinstance(entry, dict):
+                    continue
 
-            if not cwd and isinstance(entry.get('cwd'), str):
-                cwd = entry['cwd']
+                if not cwd and isinstance(entry.get('cwd'), str):
+                    cwd = entry['cwd']
 
-            entry_type = entry.get('type', '')
-            if entry_type not in ('user', 'assistant'):
-                continue
-            msg = entry.get('message')
-            if not isinstance(msg, dict):
-                continue
-            role = msg.get('role', entry_type)
-            if role not in ('user', 'assistant'):
-                continue
+                entry_type = entry.get('type', '')
+                if entry_type not in ('user', 'assistant'):
+                    continue
+                msg = entry.get('message')
+                if not isinstance(msg, dict):
+                    continue
+                role = msg.get('role', entry_type)
+                if role not in ('user', 'assistant'):
+                    continue
 
-            text = _entry_text(msg.get('content', ''))
-            if not text:
-                continue
-            ts = entry.get('timestamp') or None
-            messages.append(ArchiveMessage(role=role, ts=ts, text=_truncate(text)))
+                text = _entry_text(msg.get('content', ''))
+                if not text:
+                    continue
+                ts = entry.get('timestamp') or None
+                messages.append(ArchiveMessage(role=role, ts=ts, text=_truncate(text)))
+    except OSError:
+        # Missing/unreadable transcript: never raise (called from the stop hook).
+        return ParsedTranscript(session_id=session_id, cwd='', started_at=None,
+                                last_active=None, messages=[])
 
     stamps = [m.ts for m in messages if m.ts]
     return ParsedTranscript(

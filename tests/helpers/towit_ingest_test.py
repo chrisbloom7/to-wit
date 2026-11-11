@@ -109,6 +109,34 @@ class TestParseTranscript(unittest.TestCase):
         self.assertEqual(parsed.started_at, '2026-01-01T00:00:00Z')
         self.assertEqual(parsed.last_active, '2026-01-01T00:05:00Z')
 
+    def test_missing_file_returns_empty_transcript(self):
+        missing = os.path.join(self.tmpdir, 'nope-1.jsonl')
+        parsed = parse_transcript(missing)
+        self.assertEqual(parsed.session_id, 'nope-1')
+        self.assertEqual(parsed.messages, [])
+        self.assertEqual(parsed.cwd, '')
+        self.assertIsNone(parsed.started_at)
+        self.assertIsNone(parsed.last_active)
+
+    def test_directory_path_returns_empty_transcript(self):
+        d = os.path.join(self.tmpdir, 'dir-1.jsonl')
+        os.mkdir(d)
+        parsed = parse_transcript(d)
+        self.assertEqual(parsed.session_id, 'dir-1')
+        self.assertEqual(parsed.messages, [])
+
+    @unittest.skipIf(hasattr(os, 'geteuid') and os.geteuid() == 0,
+                     'root ignores file mode 000')
+    def test_unreadable_file_returns_empty_transcript(self):
+        _write_jsonl(self.path, [_entry('user', 'hello')])
+        os.chmod(self.path, 0)
+        try:
+            parsed = parse_transcript(self.path)
+        finally:
+            os.chmod(self.path, 0o600)
+        self.assertEqual(parsed.session_id, 'abc-123')
+        self.assertEqual(parsed.messages, [])
+
 
 if __name__ == '__main__':
     unittest.main()
