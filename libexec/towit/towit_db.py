@@ -707,6 +707,41 @@ class Database:
                 result['folder'] = folder_row['folder']
             return result
 
+    def get_show_header(self, conv_id: str):
+        """Header fields for `towit show`, or None if the conversation is unknown.
+
+        The title falls back to the first archived user message (80 chars), as in search.
+        """
+        self.validate()
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT id, title, folder, cwd, repo_key, started_at, last_active, archived "
+                "FROM conversations WHERE id = ?", (conv_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            header = dict(row)
+            header['archived'] = bool(header['archived'])
+            self._fill_title_fallback(conn, [header])
+            return header
+
+    def get_messages(self, conv_id: str, around: int = None, context: int = 5) -> list:
+        """
+        Return archived messages (keys seq, role, ts, text) ordered by seq.
+
+        With `around`, only messages whose seq is within [around - context, around + context];
+        the window clamps at both ends and may be empty. Unknown conversations return [].
+        """
+        self.validate()
+        sql = "SELECT seq, role, ts, text FROM messages WHERE conversation_id = ?"
+        params = [conv_id]
+        if around is not None:
+            sql += " AND seq BETWEEN ? AND ?"
+            params += [around - context, around + context]
+        sql += " ORDER BY seq"
+        with self.connect() as conn:
+            return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
     def all_conversation_stubs(self) -> list:
         """Return (id, folder) for every conversation — used by prune."""
         self.validate()
