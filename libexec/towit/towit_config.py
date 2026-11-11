@@ -240,6 +240,12 @@ def validate_jsonl_path(path: str) -> str | None:
     return None
 
 
+def database_sidecar_paths(db_path: str) -> list[str]:
+    """Return the existing -wal, -shm and -journal sidecar files of the database."""
+    return [db_path + suffix for suffix in ('-wal', '-shm', '-journal')
+            if os.path.exists(db_path + suffix)]
+
+
 def remove_database_files(db_path: str) -> None:
     """Delete the database and its -wal, -shm and -journal sidecars.
 

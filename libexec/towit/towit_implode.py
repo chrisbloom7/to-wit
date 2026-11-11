@@ -15,7 +15,7 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
-from towit_config import config, remove_database_files
+from towit_config import config, database_sidecar_paths, remove_database_files
 
 DEFAULT_INSTALL_DIR = os.path.expanduser('~/.local/bin')
 
@@ -43,10 +43,11 @@ def main():
     binary = os.path.join(args.install_dir, 'towit')
     hook_installed = _check_hook_installed()
     db_exists = os.path.exists(db_path)
+    sidecars = database_sidecar_paths(db_path)
     binary_is_symlink = not homebrew and os.path.islink(binary)
     binary_exists = not homebrew and os.path.exists(binary)
 
-    if not hook_installed and not db_exists and not binary_is_symlink:
+    if not hook_installed and not db_exists and not sidecars and not binary_is_symlink:
         if homebrew:
             print("Nothing to remove — hook is not installed and database does not exist.")
         elif binary_exists:
@@ -65,6 +66,8 @@ def main():
         print("  • To Wit hooks from ~/.claude/settings.json")
     if db_exists:
         print(f"  • Database at {db_path}")
+    for sidecar in sidecars:
+        print(f"  • Leftover database file {sidecar}")
     if binary_is_symlink:
         print(f"  • Binary symlink at {binary}")
 
@@ -81,7 +84,7 @@ def main():
     if hook_installed:
         _remove_hook()
 
-    if db_exists:
+    if db_exists or sidecars:
         remove_database_files(db_path)
         print(f"Database deleted: {db_path}")
 
