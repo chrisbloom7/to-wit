@@ -127,6 +127,64 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
+# setup --full / --hook config handling
+# ---------------------------------------------------------------------------
+
+_setup_isolated_home() {
+  # Pin the real python3 first: a shimmed python3 (mise/asdf) breaks under a fake HOME
+  local real_py
+  real_py="$(python3 -c 'import sys; print(sys.executable)')"
+  ln -sf "${real_py}" "${TEST_TMPDIR}/mock_bin/python3"
+  mkdir -p "${TEST_TMPDIR}/home/.claude/projects"
+  export HOME="${TEST_TMPDIR}/home"
+  export TOWIT_SETTINGS_PATH="${TEST_TMPDIR}/settings.json"
+  export TOWIT_CONFIG_PATH="${TEST_TMPDIR}/fresh_config.toml"
+}
+
+@test "towit: setup --full generates the config file" {
+  _setup_isolated_home
+  run "${TOWIT}" setup --full
+  [ "${status}" -eq 0 ] || { echo "status=${status}: ${output}"; return 1; }
+  [ -f "${TOWIT_CONFIG_PATH}" ] || {
+    echo "Expected config at ${TOWIT_CONFIG_PATH}; output: ${output}"; return 1
+  }
+  local mode
+  mode="$(stat -f '%Lp' "${TOWIT_CONFIG_PATH}" 2>/dev/null || stat -c '%a' "${TOWIT_CONFIG_PATH}")"
+  [ "${mode}" = "600" ] || { echo "Expected mode 600, got ${mode}"; return 1; }
+  [[ "${output}" == *"Config file created at"* ]] || { echo "${output}"; return 1; }
+  [[ "${output}" == *"Database initialized"* ]] || { echo "${output}"; return 1; }
+  [[ "${output}" == *"stop hook installed"* ]] || { echo "${output}"; return 1; }
+  [[ "${output}" == *"No JSONL files found"* || "${output}" == *"Backfill"* ]] || {
+    echo "${output}"; return 1
+  }
+}
+
+@test "towit: setup --full leaves an existing config untouched" {
+  _setup_isolated_home
+  printf '# sentinel config\n' > "${TOWIT_CONFIG_PATH}"
+  run "${TOWIT}" setup --full
+  [ "${status}" -eq 0 ] || { echo "status=${status}: ${output}"; return 1; }
+  [ "$(cat "${TOWIT_CONFIG_PATH}")" = "# sentinel config" ] || {
+    echo "Config was modified"; return 1
+  }
+  [[ "${output}" == *"Config file already exists"* ]] || { echo "${output}"; return 1; }
+}
+
+@test "towit: setup --hook does not generate a config file" {
+  _setup_isolated_home
+  run "${TOWIT}" setup --hook
+  [ "${status}" -eq 0 ] || { echo "status=${status}: ${output}"; return 1; }
+  [ ! -e "${TOWIT_CONFIG_PATH}" ] || { echo "Config unexpectedly created"; return 1; }
+}
+
+@test "towit: setup with no flags does not generate a config file" {
+  _setup_isolated_home
+  run "${TOWIT}" setup
+  [ "${status}" -eq 0 ] || { echo "status=${status}: ${output}"; return 1; }
+  [ ! -e "${TOWIT_CONFIG_PATH}" ] || { echo "Config unexpectedly created"; return 1; }
+}
+
+# ---------------------------------------------------------------------------
 # search subcommand
 # ---------------------------------------------------------------------------
 
