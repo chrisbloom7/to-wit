@@ -13,6 +13,47 @@ import sqlite3
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_config import config
 
+# Archive objects shared by SCHEMA (fresh DBs) and run_migrations (existing DBs).
+# External-content FTS5 is kept in sync by triggers so FK cascades from
+# conversations also clean the index.
+ARCHIVE_DDL = """
+CREATE TABLE IF NOT EXISTS messages (
+  id              INTEGER PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  seq             INTEGER NOT NULL,
+  role            TEXT NOT NULL CHECK (role IN ('user','assistant')),
+  ts              TEXT,
+  text            TEXT NOT NULL,
+  UNIQUE (conversation_id, seq)
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+  text, content='messages', content_rowid='id',
+  tokenize="unicode61 tokenchars '_-.'"
+);
+
+CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+  INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.id, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+  INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.id, old.text);
+  INSERT INTO messages_fts(rowid, text) VALUES (new.id, new.text);
+END;
+
+CREATE TABLE IF NOT EXISTS forgotten (
+  id           TEXT PRIMARY KEY,
+  forgotten_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+"""
+
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
@@ -26,7 +67,12 @@ CREATE TABLE IF NOT EXISTS conversations (
   title         TEXT,
   summary       TEXT,
   message_count INTEGER,
-  indexed_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  indexed_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  tail_hash     TEXT,
+  source_path   TEXT,
+  archived      INTEGER NOT NULL DEFAULT 0,
+  archived_message_count INTEGER NOT NULL DEFAULT 0,
+  repo_key      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS topics (
@@ -122,6 +168,21 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_ck_keyword ON conversation_keywords(keyword_id);
                 CREATE INDEX IF NOT EXISTS idx_ck_conv    ON conversation_keywords(conversation_id);
             """)
+            for column in (
+                "tail_hash TEXT",
+                "source_path TEXT",
+                "archived INTEGER NOT NULL DEFAULT 0",
+                "archived_message_count INTEGER NOT NULL DEFAULT 0",
+                "repo_key TEXT",
+            ):
+                try:
+                    conn.execute(f"ALTER TABLE conversations ADD COLUMN {column}")
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+            conn.executescript(
+                "CREATE INDEX IF NOT EXISTS idx_conversations_repo_key ON conversations(repo_key);"
+                + ARCHIVE_DDL
+            )
 
     def upsert_conversation(self, data: dict):
         """

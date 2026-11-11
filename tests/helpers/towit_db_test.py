@@ -421,5 +421,116 @@ class TestDatabaseValidate(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
 
 
+class TestArchiveSchema(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 'catalog.db')
+        self.db = Database(self.db_path)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _names(self, conn):
+        return {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+
+    def _conn(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    def _add_conv(self, conn, cid='c1'):
+        conn.execute("INSERT INTO conversations (id, folder) VALUES (?, ?)", (cid, '/f'))
+
+    def _add_msg(self, conn, text, cid='c1', seq=0):
+        return conn.execute(
+            "INSERT INTO messages (conversation_id, seq, role, text) VALUES (?, ?, 'user', ?)",
+            (cid, seq, text)).lastrowid
+
+    def _match(self, conn, term):
+        return [r[0] for r in conn.execute(
+            "SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?", ('"%s"' % term,))]
+
+    def test_create_schema_adds_archive_objects(self):
+        self.db.create_schema()
+        conn = self._conn()
+        names = self._names(conn)
+        for n in ('messages', 'messages_fts', 'forgotten', 'meta'):
+            self.assertIn(n, names)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(conversations)")}
+        for c in ('tail_hash', 'source_path', 'archived', 'archived_message_count', 'repo_key'):
+            self.assertIn(c, cols)
+        self.assertIn('idx_conversations_repo_key', names)
+        conn.close()
+
+    def test_migration_from_legacy_db_is_idempotent(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.executescript("""
+            CREATE TABLE conversations (
+              id TEXT PRIMARY KEY, folder TEXT NOT NULL, cwd TEXT, started_at TEXT,
+              last_active TEXT, title TEXT, summary TEXT, message_count INTEGER,
+              indexed_at TEXT NOT NULL DEFAULT (datetime('now')));
+            CREATE TABLE topics (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL COLLATE NOCASE);
+            CREATE TABLE conversation_topics (
+              conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+              topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+              PRIMARY KEY (conversation_id, topic_id));
+        """)
+        conn.close()
+        self.db.run_migrations()
+        self.db.run_migrations()
+        conn = self._conn()
+        names = self._names(conn)
+        for n in ('messages', 'messages_fts', 'forgotten', 'meta', 'idx_conversations_repo_key'):
+            self.assertIn(n, names)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(conversations)")}
+        self.assertTrue({'tail_hash', 'source_path', 'archived',
+                         'archived_message_count', 'repo_key'} <= cols)
+        conn.close()
+
+    def test_fts_triggers_track_insert_update_delete(self):
+        self.db.create_schema()
+        conn = self._conn()
+        self._add_conv(conn)
+        mid = self._add_msg(conn, "the TOWIT_INDEXING guard")
+        self.assertEqual(self._match(conn, 'TOWIT_INDEXING'), [mid])
+        conn.execute("UPDATE messages SET text='changed' WHERE id=?", (mid,))
+        self.assertEqual(self._match(conn, 'TOWIT_INDEXING'), [])
+        self.assertEqual(self._match(conn, 'changed'), [mid])
+        conn.execute("DELETE FROM messages WHERE id=?", (mid,))
+        self.assertEqual(self._match(conn, 'changed'), [])
+        conn.close()
+
+    def test_deleting_conversation_cascades_into_fts(self):
+        self.db.create_schema()
+        conn = self._conn()
+        self._add_conv(conn)
+        self._add_msg(conn, "the TOWIT_INDEXING guard")
+        conn.commit()
+        conn.execute("DELETE FROM conversations WHERE id='c1'")
+        self.assertEqual(self._match(conn, 'TOWIT_INDEXING'), [])
+        self.assertEqual(conn.execute("SELECT count(*) FROM messages").fetchone()[0], 0)
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')")
+        conn.close()
+
+    def test_unique_conversation_seq(self):
+        self.db.create_schema()
+        conn = self._conn()
+        self._add_conv(conn)
+        self._add_msg(conn, "a", seq=0)
+        with self.assertRaises(sqlite3.IntegrityError):
+            self._add_msg(conn, "b", seq=0)
+        conn.close()
+
+    def test_identifier_tokenizes_whole(self):
+        self.db.create_schema()
+        conn = self._conn()
+        self._add_conv(conn)
+        mid = self._add_msg(conn, "call reindex_delta then TOWIT_INDEXING now")
+        self.assertEqual(self._match(conn, 'reindex_delta'), [mid])
+        self.assertEqual(self._match(conn, 'TOWIT_INDEXING'), [mid])
+        self.assertEqual(self._match(conn, 'reindex'), [])
+        conn.close()
+
+
 if __name__ == '__main__':
     unittest.main()
