@@ -240,6 +240,11 @@ def validate_jsonl_path(path: str) -> str | None:
     return None
 
 
+def is_subagent_path(path: str) -> bool:
+    """True if the transcript path lies under a `subagents/` directory."""
+    return '/subagents/' in os.path.abspath(path)
+
+
 def database_sidecar_paths(db_path: str) -> list[str]:
     """Return the existing -wal, -shm and -journal sidecar files of the database."""
     return [db_path + suffix for suffix in ('-wal', '-shm', '-journal')

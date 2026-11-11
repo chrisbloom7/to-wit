@@ -15,7 +15,7 @@ import sys
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
-from towit_config import (config, get_error_logger, is_valid_session_id,
+from towit_config import (config, get_error_logger, is_subagent_path, is_valid_session_id,
                           safe_subprocess_env, validate_jsonl_path)
 from towit_db import Database
 from towit_index import index_conversation
@@ -201,7 +201,7 @@ def should_skip_path(jsonl_path: str) -> bool:
     if os.path.islink(jsonl_path):
         return True
     path = os.path.abspath(jsonl_path)
-    if '/subagents/' in path and not config.ingest_include_subagents:
+    if is_subagent_path(path) and not config.ingest_include_subagents:
         return True
     folder = os.path.dirname(path)
     folders = config.ingest_folders
@@ -318,7 +318,7 @@ def main():
         status = ingest_transcript(jsonl_path)
         if status in ('forgotten', 'skipped') or not config.indexing_enabled:
             return
-        if '/subagents/' in jsonl_path:
+        if is_subagent_path(jsonl_path):
             return  # archived only: subagent sessions stay out of the LLM-indexed catalog
         index_conversation(jsonl_path)
     except (Exception, SystemExit):

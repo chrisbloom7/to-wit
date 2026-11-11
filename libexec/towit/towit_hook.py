@@ -20,7 +20,8 @@ import subprocess
 if os.environ.get('TOWIT_INDEXING'):
     sys.exit(0)
 
-from towit_config import get_error_logger, is_valid_session_id, validate_jsonl_path
+from towit_config import (get_error_logger, is_subagent_path, is_valid_session_id,
+                          validate_jsonl_path)
 
 
 def _resolve_transcript(data):
@@ -45,7 +46,7 @@ def _resolve_transcript(data):
     if jsonl_path is None or not os.path.exists(jsonl_path):
         return None
     # Skip subagent sessions — they are not interactive user conversations
-    if '/subagents/' in jsonl_path:
+    if is_subagent_path(jsonl_path):
         return None
     return jsonl_path
 

@@ -71,6 +71,18 @@ class TestHook(unittest.TestCase):
         self.assertEqual(argv[2:], ['--catch-up'])
         self.assertTrue(popen.call_args[1]['start_new_session'])
 
+    def test_subagent_transcript_spawns_nothing(self):
+        # Regression pin: subagent transcripts are ignored by the hook.
+        sub = os.path.join(self.projects, 'session-abc-123', 'subagents')
+        os.makedirs(sub)
+        path = os.path.join(sub, 'agent-abc-123.jsonl')
+        with open(path, 'w') as fh:
+            fh.write('{}\n')
+        for event in ('Stop', 'SessionEnd'):
+            code, popen = self._run_hook({'hook_event_name': event, 'transcript_path': path})
+            self.assertEqual(code, 0, event)
+            popen.assert_not_called()
+
     def test_unknown_event_spawns_nothing(self):
         code, popen = self._run_hook({'hook_event_name': 'PreToolUse',
                                       'transcript_path': self.transcript})

@@ -33,6 +33,36 @@ def _mode(path):
     return os.stat(path).st_mode & 0o777
 
 
+class TestIsSubagentPath(unittest.TestCase):
+    def _fn(self):
+        fn = getattr(towit_config, 'is_subagent_path', None)
+        self.assertIsNotNone(fn, 'towit_config.is_subagent_path does not exist yet')
+        return fn
+
+    def test_true_for_path_under_subagents_dir(self):
+        self.assertIs(self._fn()('/home/u/.claude/projects/-w/sess-1/subagents/agent-1.jsonl'), True)
+
+    def test_false_for_normal_path(self):
+        self.assertIs(self._fn()('/home/u/.claude/projects/-w/sess-1.jsonl'), False)
+
+    def test_false_when_subagents_lacks_surrounding_slashes(self):
+        fn = self._fn()
+        self.assertIs(fn('/x/mysubagents/y.jsonl'), False)
+        self.assertIs(fn('/x/subagentsy/y.jsonl'), False)
+
+    def test_relative_path_is_made_absolute_first(self):
+        fn = self._fn()
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, 'subagents'))
+            old = os.getcwd()
+            os.chdir(tmp)
+            try:
+                self.assertIs(fn(os.path.join('subagents', 'a.jsonl')), True)
+                self.assertIs(fn('a.jsonl'), False)
+            finally:
+                os.chdir(old)
+
+
 class TestErrorLoggerDirectory(unittest.TestCase):
     def test_error_log_dir_created_owner_only(self):
         with tempfile.TemporaryDirectory() as home:
