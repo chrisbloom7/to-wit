@@ -213,6 +213,55 @@ class TestShowCli(ShowTestBase):
         self.assertEqual(json.loads(r.stdout)[0]['text'], evil)
         self.assertNotIn('\x1b', r.stdout)  # json.dumps escapes it
 
+    def test_header_is_fully_sanitized(self):
+        self.archive(make_messages(2), started_at='\x1b[2Jabcdefgh', last_active='\x1b]0;x\x07zzzzzzzzzzzz',
+                     folder='/f\x1b[31m', cwd='/w\x1b[2J', repo_key=None)
+        with self.db.connect() as conn:
+            conn.execute("UPDATE conversations SET title = ? WHERE id = 'conv-show'", ('t\x1b[31mitle\x9b',))
+        r = self.run_show(['conv-show'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        header = r.stdout.splitlines()[0]
+        self.assertNotIn('\x1b', header)
+        self.assertFalse([c for c in header if ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f])
+        self.assertIn('title', header)
+
+    def test_huge_numbers_rejected_cleanly(self):
+        self.archive(make_messages(3))
+        for flag, val in (('--around', '9223372036854775808'), ('--around', '9223372036854775807'),
+                          ('--context', '99999999999999999999')):
+            r = self.run_show(['conv-show', '--around', '1', flag, val] if flag == '--context'
+                              else ['conv-show', flag, val])
+            self.assertEqual(r.returncode, 1, (flag, val))
+            self.assertIn('between 0 and 4611686018427387904', r.stderr)
+            self.assertNotIn('Traceback', r.stderr)
+
+    def test_json_ascii_escapes_dangerous_characters(self):
+        text = 'a\x9bb\x7fc\u202ed'
+        self.archive([{'role': 'user', 'ts': None, 'text': text}, {'role': 'assistant', 'ts': None, 'text': 'x'}])
+        r = self.run_show(['conv-show', '--format', 'json'])
+        for ch in ('\x9b', '\x7f', '\u202e'):
+            self.assertNotIn(ch, r.stdout)
+        self.assertEqual(json.loads(r.stdout)[0]['text'], text)
+
+    def test_text_strips_bidi_controls(self):
+        self.archive([{'role': 'user', 'ts': None, 'text': 'a\u202eb\u2066c\u2069d\u202ae'},
+                      {'role': 'assistant', 'ts': None, 'text': 'x'}])
+        r = self.run_show(['conv-show'])
+        self.assertIn('abcde', r.stdout)
+
+    def test_help_mentions_context_requires_around(self):
+        r = self.run_show(['--help'])
+        self.assertRegex(' '.join(r.stdout.split()), r'only (applies|used|has effect).*--around')
+
+
+class TestGetMessagesHugeInts(ShowTestBase):
+    def test_huge_values_do_not_raise(self):
+        self.archive(make_messages(10))
+        self.assertEqual(len(self.db.get_messages('conv-show', around=2**70, context=2**70)), 10)
+        self.assertEqual([m['seq'] for m in self.db.get_messages('conv-show', around=5, context=2**70)],
+                         list(range(10)))
+        self.assertEqual(self.db.get_messages('conv-show', around=2**70, context=1), [])
+
 
 if __name__ == '__main__':
     unittest.main()

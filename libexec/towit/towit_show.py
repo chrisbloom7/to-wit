@@ -18,15 +18,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_db import Database
 
 DEFAULT_CONTEXT = 5
+MAX_NUMBER = 2**62
 
 # Archived text came from tool output and web content, so strip terminal control
 # sequences before printing it. String-type sequences (OSC, DCS, SOS, PM, APC) go
 # whole, then CSI, then any other two-byte ESC sequence, then stray C0/C1 controls
-# (newline and tab are kept).
+# (newline and tab are kept). Bidi override/isolate characters are stripped too.
 _STRING_SEQ = re.compile(r'(?:\x1b[\]PX^_]|[\x90\x98\x9d\x9e\x9f])[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)?')
 _CSI_SEQ = re.compile(r'(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]?')
 _ESC_SEQ = re.compile(r'\x1b[ -/]*[0-~]?')
-_CONTROLS = re.compile(r'[\x00-\x08\x0b-\x1f\x7f-\x9f]')
+_CONTROLS = re.compile('[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]')
 
 
 def sanitize(text) -> str:
@@ -41,19 +42,20 @@ def _non_negative_int(parser_name: str, value: str) -> int:
         number = int(value)
     except ValueError:
         number = -1
-    if number < 0:
-        print(f"Error: {parser_name} must be a non-negative integer, got '{value}'.", file=sys.stderr)
+    if not 0 <= number <= MAX_NUMBER:
+        print(f"Error: {parser_name} must be an integer between 0 and {MAX_NUMBER}, got '{value}'.",
+              file=sys.stderr)
         sys.exit(1)
     return number
 
 
 def _print_text(header: dict, messages: list, around) -> None:
-    title = ' '.join(sanitize(header['title'] or '(untitled)').split())
-    where = sanitize(header['repo_key'] or header['cwd'] or header['folder'])
+    title = ' '.join((header['title'] or '(untitled)').split())
+    where = header['repo_key'] or header['cwd'] or header['folder']
     start = (header['started_at'] or '')[:10]
     end = (header['last_active'] or '')[:10]
     dates = start if start == end or not end else f"{start} to {end}"
-    print(f"{header['id']}  {title}  [{where}]  {dates}")
+    print(sanitize(f"{header['id']}  {title}  [{where}]  {dates}").replace('\n', ' ').replace('\t', ' '))
     print()
     for msg in messages:
         marker = '>> ' if around is not None and msg['seq'] == around else ''
@@ -69,7 +71,8 @@ def main():
     parser.add_argument('--around', metavar='SEQ',
                         help='Show only messages near this 0-based message number')
     parser.add_argument('--context', metavar='N', default=str(DEFAULT_CONTEXT),
-                        help=f'Messages either side of --around (default: {DEFAULT_CONTEXT})')
+                        help=f'Messages either side of --around (default: {DEFAULT_CONTEXT}); '
+                             'only applies with --around')
     parser.add_argument('--format', dest='format', choices=['text', 'json'], default='text',
                         help='Output format (default: text)')
     args = parser.parse_args()
@@ -101,7 +104,7 @@ def main():
         sys.exit(1)
 
     if args.format == 'json':
-        print(json.dumps(messages, indent=2, ensure_ascii=False))
+        print(json.dumps(messages, indent=2, ensure_ascii=True))
     else:
         _print_text(header, messages, around)
 

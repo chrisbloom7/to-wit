@@ -737,7 +737,9 @@ class Database:
         params = [conv_id]
         if around is not None:
             sql += " AND seq BETWEEN ? AND ?"
-            params += [around - context, around + context]
+            # Clamp so huge Python ints never overflow SQLite's 64-bit integers.
+            top = 2**63 - 1
+            params += [min(max(0, around - context), top), min(around + context, top)]
         sql += " ORDER BY seq"
         with self.connect() as conn:
             return [dict(r) for r in conn.execute(sql, params).fetchall()]

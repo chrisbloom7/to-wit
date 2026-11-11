@@ -17,7 +17,8 @@
 #   resume <session-id> [--force] Resume a session in its original working directory
 #   show <session-id> [--around <seq>] [--context <n>] [--format text|json]
 #                                 Print archived messages (seq numbers are 0-based);
-#                                   --around shows <n> messages either side of <seq> (default 5)
+#                                   --around shows <n> messages either side of <seq> (default 5);
+#                                  --context only applies with --around
 #   prune [--dry-run]             Remove entries whose transcripts no longer exist
 #   export <session-id> [--format md|json] [--summarize]
 #   export --topic <name> [--format md|json] [--summarize]
