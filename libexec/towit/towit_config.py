@@ -240,6 +240,28 @@ def validate_jsonl_path(path: str) -> str | None:
     return None
 
 
+def remove_database_files(db_path: str) -> None:
+    """Delete the database and its -wal, -shm and -journal sidecars.
+
+    A killed process can leave the newest data only in the write-ahead log, so first
+    try to fold and truncate it (best effort), then remove every sidecar that exists.
+    """
+    import sqlite3
+    try:
+        conn = sqlite3.connect(db_path, timeout=2)
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+    for suffix in ('', '-wal', '-shm', '-journal'):
+        try:
+            os.remove(db_path + suffix)
+        except FileNotFoundError:
+            pass
+
+
 def get_error_logger():
     """Return a rotating logger that writes to ~/.towit/errors.log."""
     import logging

@@ -52,6 +52,31 @@ def run_teardown(db_path, config_path, home, args=None, stdin_input=None):
     )
 
 
+def leave_wal_with_marker(db_path, marker):
+    """Create a WAL-mode db whose newest rows live only in catalog-wal, as after a killed ingest."""
+    code = (
+        "import os, sqlite3, sys\n"
+        "c = sqlite3.connect(sys.argv[1], isolation_level=None)\n"
+        "c.execute('PRAGMA journal_mode=WAL')\n"
+        "c.execute('PRAGMA wal_autocheckpoint=0')\n"
+        "c.execute('CREATE TABLE IF NOT EXISTS leftover (t TEXT)')\n"
+        "c.execute('INSERT INTO leftover VALUES (?)', (sys.argv[2],))\n"
+        "os._exit(0)\n"
+    )
+    subprocess.run(['python3', '-c', code, db_path, marker], check=True)
+
+
+def dir_contains(directory, needle):
+    needle = needle.lower().encode()
+    for name in os.listdir(directory):
+        path = os.path.join(directory, name)
+        if os.path.isfile(path):
+            with open(path, 'rb') as fh:
+                if needle in fh.read().lower():
+                    return True
+    return False
+
+
 class TestTowitTeardown(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -149,6 +174,18 @@ class TestTowitTeardown(unittest.TestCase):
                          f"teardown should succeed even without hook: {result.stderr}")
         self.assertFalse(os.path.exists(self.db_path),
                          "Expected DB to be removed even when hook was absent")
+
+    def test_leftover_wal_and_shm_are_removed_with_the_database(self):
+        marker = 'zq' + 'marker' + 'wal7'
+        leave_wal_with_marker(self.db_path, marker)
+        self.assertTrue(os.path.exists(self.db_path + '-wal'), 'precondition: leftover WAL')
+        self.assertTrue(dir_contains(self.tmpdir, marker))
+
+        result = run_teardown(self.db_path, self.config_path, self.tmpdir, args=['--yes'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for suffix in ('', '-wal', '-shm', '-journal'):
+            self.assertFalse(os.path.exists(self.db_path + suffix), suffix or 'db')
+        self.assertFalse(dir_contains(self.tmpdir, marker))
 
 
 if __name__ == '__main__':
