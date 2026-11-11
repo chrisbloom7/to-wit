@@ -183,7 +183,7 @@ class TestTowitSearch(unittest.TestCase):
 
     def test_default_does_not_match_summary_only(self):
         # "burndown" is only in conv-d's summary, not any topic
-        result = run_search(self.config_path, ['burndown'])
+        result = run_search(self.config_path, ['burndown', '--only', 'metadata'])
         self.assertEqual(result.returncode, 0)
         self.assertNotIn('conv-d', result.stdout)
 
@@ -199,9 +199,28 @@ class TestTowitSearch(unittest.TestCase):
         self.assertIn('conv-d', result.stdout)
 
     def test_default_does_not_match_title_only(self):
-        result = run_search(self.config_path, ['Velocity'])
+        result = run_search(self.config_path, ['Velocity', '--only', 'metadata'])
         self.assertEqual(result.returncode, 0)
         self.assertNotIn('conv-d', result.stdout)
+
+    def test_default_scope_matches_summary_only(self):
+        result = run_search(self.config_path, ['burndown'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-d', result.stdout)
+
+    def test_default_scope_matches_title_only(self):
+        result = run_search(self.config_path, ['Velocity'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-d', result.stdout)
+
+    def test_default_scope_still_excludes_topic_only(self):
+        result = run_search(self.config_path, ['activerecord'])
+        self.assertNotIn('conv-b', result.stdout)
+
+    def test_only_text_ignores_title_and_summary(self):
+        for term in ('Velocity', 'burndown'):
+            result = run_search(self.config_path, [term, '--only', 'text'])
+            self.assertNotIn('conv-d', result.stdout)
 
     def test_stem_matches_hyphenated_topic_with_topic_flag(self):
         # "estimate" (stem "estimat") should match topic "project-estimation" when --topic included
@@ -319,6 +338,106 @@ class TestTowitSearch(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
         self.assertEqual(data, [])
+
+
+class TestTowitSearchArchive(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        db = Database(self.db_path)
+        db.create_schema()
+        db.archive_session(
+            {'id': 'arc-1', 'folder': '/f', 'cwd': '/w/app', 'started_at': '2026-02-01T00:00:00Z',
+             'last_active': '2026-02-01T00:00:00Z', 'repo_key': '/src/app', 'source_path': None},
+            [{'role': 'user', 'ts': None, 'text': 'what about the hook?'},
+             {'role': 'assistant', 'ts': None, 'text': 'The recursion guard prevents loops.'}])
+        db.archive_session(
+            {'id': 'arc-2', 'folder': '/f', 'cwd': '/w/other', 'started_at': '2026-02-02T00:00:00Z',
+             'last_active': '2026-02-02T00:00:00Z', 'repo_key': '/src/other', 'source_path': None},
+            [{'role': 'user', 'ts': None, 'text': 'guard rails?'},
+             {'role': 'assistant', 'ts': None, 'text': 'yes'}])
+        db.upsert_conversation({
+            'id': 'meta-1', 'folder': '/f', 'cwd': '/w/app', 'started_at': '2026-01-01T00:00:00Z',
+            'last_active': '2026-01-01T00:00:00Z', 'title': 'Old', 'summary': 's',
+            'topics': [], 'keywords': ['guard-rails']})
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_table_has_turn_and_snippet_columns(self):
+        r = run_search(self.config_path, ['recursion'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('Turn', r.stdout)
+        self.assertIn('Snippet', r.stdout)
+        self.assertIn('[recursion]', r.stdout)
+        self.assertIn('what about the hook?', r.stdout)  # title fallback
+
+    def test_table_metadata_hit_shows_keyword(self):
+        r = run_search(self.config_path, ['guard'])
+        self.assertIn('guard-rails', r.stdout)
+        self.assertIn('arc-1', r.stdout)
+
+    def test_json_entries_include_seq_snippet_score(self):
+        import json
+        r = run_search(self.config_path, ['recursion', '--format', 'json'])
+        data = json.loads(r.stdout)
+        self.assertEqual([d['id'] for d in data], ['arc-1'])
+        self.assertEqual(data[0]['seq'], 1)
+        self.assertIn('[recursion]', data[0]['snippet'])
+        self.assertIsInstance(data[0]['score'], float)
+
+    def test_json_metadata_hit_has_null_seq_and_score(self):
+        import json
+        r = run_search(self.config_path, ['guard-rails', '--format', 'json'])
+        meta = next(d for d in json.loads(r.stdout) if d['id'] == 'meta-1')
+        self.assertIsNone(meta['seq'])
+        self.assertIsNone(meta['score'])
+        self.assertEqual(meta['snippet'], '')
+
+    def test_only_text_ignores_keywords(self):
+        import json
+        r = run_search(self.config_path, ['guard-rails', '--only', 'text', '--format', 'json'])
+        self.assertEqual(json.loads(r.stdout), [])
+
+    def test_only_metadata_ignores_message_text(self):
+        import json
+        r = run_search(self.config_path, ['recursion', '--only', 'metadata', '--format', 'json'])
+        self.assertEqual(json.loads(r.stdout), [])
+        r = run_search(self.config_path, ['guard-rails', '--only', 'metadata'])
+        self.assertNotIn('Snippet', r.stdout)
+        self.assertIn('Keywords', r.stdout)
+
+    def test_only_rejects_bad_value(self):
+        self.assertNotEqual(run_search(self.config_path, ['x', '--only', 'bogus']).returncode, 0)
+
+    def test_repo_by_key_and_name(self):
+        import json
+        for repo in ('/src/other', 'other'):
+            r = run_search(self.config_path, ['guard', '--repo', repo, '--format', 'json'])
+            self.assertEqual([d['id'] for d in json.loads(r.stdout)], ['arc-2'], repo)
+
+    def test_hostile_term_does_not_crash(self):
+        r = run_search(self.config_path, ['"', '--format', 'json'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), '[]')
+
+    def test_default_cli_returns_all_metadata_hits_past_50(self):
+        import json
+        db = Database(self.db_path)
+        for i in range(55):
+            db.upsert_conversation({
+                'id': 'bulk-%02d' % i, 'folder': '/f', 'cwd': '/w/bulk',
+                'started_at': '2026-03-01T00:%02d:00Z' % i, 'last_active': None,
+                'title': 'Bulk %d' % i, 'summary': 's', 'topics': [], 'keywords': ['bulkkw']})
+        r = run_search(self.config_path, ['bulkkw', '--format', 'json'])
+        self.assertEqual(len(json.loads(r.stdout)), 55)
+
+    def test_csv_includes_seq_and_snippet(self):
+        r = run_search(self.config_path, ['recursion', '--format', 'csv'])
+        header = next(csv.reader(io.StringIO(r.stdout)))
+        self.assertIn('seq', header)
+        self.assertIn('snippet', header)
 
 
 if __name__ == '__main__':
