@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-11
+
 > This release changes existing behavior (the default scope of `search`, the default of `prune`, what `backfill` does, and which hook events are installed). To Wit is a 0.x project, so these behavior changes are made in a minor release rather than a major one. The notes under **Changed** and **Upgrading** explain how to get the old behavior back.
 
 ### Added
