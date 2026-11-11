@@ -19,6 +19,7 @@ import sqlite3
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from towit_config import is_valid_session_id
 from towit_db import Database
 
 
@@ -35,6 +36,10 @@ def main():
     selectors = [s for s in (args.session_id, args.repo, args.folder) if s is not None]
     if len(selectors) != 1:
         parser.error('exactly one of <session-id>, --repo or --folder is required')
+
+    if args.session_id is not None and not is_valid_session_id(args.session_id):
+        print(f"Error: invalid session id '{args.session_id}'.", file=sys.stderr)
+        sys.exit(1)
 
     db = Database()
     db.validate()

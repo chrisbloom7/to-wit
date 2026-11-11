@@ -461,6 +461,16 @@ class TestForgetCli(ForgetBase):
             self.assertTrue(self.db.is_forgotten(sid), sid)
         self.assertFalse(self.db.is_forgotten('agent-bbbb1'))
 
+    def test_invalid_session_id_is_rejected_before_any_subagent_lookup(self):
+        self._subagent('abcd-1234', 'sess-0001')  # folder .../sess-0001/subagents
+        self._subagent('agent-aaaa1', 'abcd-1234')
+        r = self.run_forget(['proj/abcd-1234', '--yes'])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('invalid session id', r.stderr)
+        self.assertFalse(self.db.is_forgotten('agent-aaaa1'))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM forgotten"), 0)
+        self.assertEqual(self.remaining(), 4)
+
     def test_prompt_counts_subagent_conversations(self):
         self._subagent('agent-aaaa1', 'sess-0001')
         r = self.run_forget(['sess-0001'], stdin='n\n')
