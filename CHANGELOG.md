@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-11-11
+
 ### Fixed
 
 - The hook command written by `towit install-hook` now shell-quotes the interpreter and script paths, so a source install under a directory with a space (for example `~/My Projects/to-wit`) no longer registers hooks that silently do nothing. Paths without special characters, including Homebrew's, are written exactly as before. Re-run `towit install-hook` to repair hooks that were registered with an unquoted path. `TOWIT_PYTHON` may now contain spaces, and `towit doctor` reads quoted hook commands correctly.
