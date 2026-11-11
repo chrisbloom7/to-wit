@@ -39,8 +39,11 @@ def main():
     db = Database()
     db.validate()
 
+    subagents = []
     if args.session_id is not None:
-        if db.get_conversation(args.session_id) is None:
+        subagents = db.subagent_ids_for_session(args.session_id)
+        parent_exists = db.get_conversation(args.session_id) is not None
+        if not parent_exists and not subagents:
             if db.is_forgotten(args.session_id):
                 # Retry path for an earlier forget whose physical cleanup was incomplete.
                 warning = db.purge_free_space(args.session_id)
@@ -50,7 +53,8 @@ def main():
                 return
             print(f"Error: conversation '{args.session_id}' not found.", file=sys.stderr)
             sys.exit(1)
-        ids = [args.session_id]
+        # A session's subagent conversations hold its tool output and prompts, so they go too.
+        ids = ([args.session_id] if parent_exists else []) + subagents
     else:
         ids = db.conversation_ids_for_scope(repo=args.repo, folder=args.folder)
         if not ids:
@@ -79,7 +83,8 @@ def main():
     except sqlite3.Error as exc:
         print(f"Error: could not forget ({exc}); nothing was deleted.", file=sys.stderr)
         sys.exit(1)
-    print(f"Forgot {count} conversation(s).")
+    extra = f", including {len(subagents)} subagent conversation(s)" if subagents else ""
+    print(f"Forgot {count} conversation(s){extra}.")
     if db.cleanup_warning:
         print(f"Warning: {db.cleanup_warning}", file=sys.stderr)
 

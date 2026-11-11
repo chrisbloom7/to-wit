@@ -804,6 +804,17 @@ class Database:
                 + " ORDER BY started_at DESC, id", params).fetchall()
             return [r['id'] for r in rows]
 
+    def subagent_ids_for_session(self, session_id: str) -> list:
+        """Ids of a session's subagent conversations: rows stored under their own ids in
+        a folder ending `/<session_id>/subagents`."""
+        self.validate()
+        suffix = f"/{session_id}/subagents"
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM conversations WHERE length(folder) >= length(?1) "
+                "AND substr(folder, -length(?1)) = ?1 ORDER BY id", (suffix,)).fetchall()
+            return [r['id'] for r in rows]
+
     def repo_count_for_scope(self, repo: str = None, folder: str = None) -> int:
         """Number of distinct repo_keys among the conversations in a scope (see
         conversation_ids_for_scope); lets a caller show how widely a basename matches."""

@@ -440,6 +440,33 @@ class TestForgetCli(ForgetBase):
         self.assertEqual(self.remaining(), 1)
         self.assertTrue(self.db.is_forgotten('sess-0001'))
 
+    def _subagent(self, sid, parent):
+        folder = os.path.join(self.folder, parent, 'subagents')
+        self.db.archive_session({'id': sid, 'folder': folder, 'cwd': '/work/proj', 'repo_key': None,
+                                 'started_at': None, 'last_active': None, 'source_path': None},
+                                [{'role': 'user', 'ts': None, 'text': 'subagent secret work'}])
+
+    def test_forgetting_a_session_also_forgets_its_subagent_conversations(self):
+        self._subagent('agent-aaaa1', 'sess-0001')
+        self._subagent('agent-aaaa2', 'sess-0001')
+        self._subagent('agent-bbbb1', 'sess-0002')  # another session's subagent stays
+        r = self.run_forget(['sess-0001', '--yes'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('Forgot 3 conversation(s)', r.stdout)
+        self.assertIn('2 subagent', r.stdout)
+        with self.db.connect() as conn:
+            left = sorted(x[0] for x in conn.execute("SELECT id FROM conversations"))
+        self.assertEqual(left, ['agent-bbbb1', 'sess-0002'])
+        for sid in ('sess-0001', 'agent-aaaa1', 'agent-aaaa2'):
+            self.assertTrue(self.db.is_forgotten(sid), sid)
+        self.assertFalse(self.db.is_forgotten('agent-bbbb1'))
+
+    def test_prompt_counts_subagent_conversations(self):
+        self._subagent('agent-aaaa1', 'sess-0001')
+        r = self.run_forget(['sess-0001'], stdin='n\n')
+        self.assertIn('Delete 2 conversation(s)? [y/N]', r.stdout)
+        self.assertEqual(self.remaining(), 3)
+
     def test_prompt_shows_count_and_n_deletes_nothing(self):
         r = self.run_forget(['sess-0001'], stdin='n\n')
         self.assertIn('Delete 1 conversation(s)? [y/N]', r.stdout)
