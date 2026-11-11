@@ -349,6 +349,128 @@ class TestFakeHomebrewLayout(unittest.TestCase):
             self.assertEqual(f.read(), before)
 
 
+def _make_stub_python(directory, name='stub-python'):
+    """Create an executable file (not a real interpreter) and return its path."""
+    path = os.path.join(directory, name)
+    with open(path, 'w') as f:
+        f.write('#!/bin/sh\nexit 0\n')
+    os.chmod(path, 0o755)
+    return path
+
+
+class TestHookInterpreter(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.settings_path = os.path.join(self.tmpdir, 'settings.json')
+        self.stub = _make_stub_python(self.tmpdir)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _interp(self, env):
+        import contextlib
+        import io
+        from towit_install_hook import hook_interpreter
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            value = hook_interpreter(env)
+        return value, err.getvalue()
+
+    def test_valid_absolute_executable_is_returned_without_warning(self):
+        value, err = self._interp({'TOWIT_PYTHON': self.stub})
+        self.assertEqual(value, self.stub)
+        self.assertEqual(err, '')
+
+    def test_unset_returns_python3_without_warning(self):
+        value, err = self._interp({})
+        self.assertEqual(value, 'python3')
+        self.assertEqual(err, '')
+
+    def test_reads_os_environ_when_env_is_none(self):
+        from unittest.mock import patch
+        with patch.dict(os.environ, {'TOWIT_PYTHON': self.stub}):
+            value, _ = self._interp(None)
+        self.assertEqual(value, self.stub)
+
+    def test_relative_path_is_ignored_with_warning(self):
+        value, err = self._interp({'TOWIT_PYTHON': 'bin/python3'})
+        self.assertEqual(value, 'python3')
+        self.assertIn('TOWIT_PYTHON', err)
+
+    def test_missing_path_is_ignored_with_warning(self):
+        value, err = self._interp({'TOWIT_PYTHON': os.path.join(self.tmpdir, 'nope')})
+        self.assertEqual(value, 'python3')
+        self.assertIn('TOWIT_PYTHON', err)
+
+    def test_non_executable_file_is_ignored_with_warning(self):
+        plain = os.path.join(self.tmpdir, 'plain-file')
+        open(plain, 'w').close()
+        os.chmod(plain, 0o644)
+        value, err = self._interp({'TOWIT_PYTHON': plain})
+        self.assertEqual(value, 'python3')
+        self.assertIn('TOWIT_PYTHON', err)
+
+    def test_path_with_whitespace_is_ignored_with_warning(self):
+        spaced_dir = os.path.join(self.tmpdir, 'with space')
+        os.makedirs(spaced_dir)
+        spaced = _make_stub_python(spaced_dir)
+        value, err = self._interp({'TOWIT_PYTHON': spaced})
+        self.assertEqual(value, 'python3')
+        self.assertIn('TOWIT_PYTHON', err)
+
+    def test_importing_module_with_invalid_towit_python_does_not_warn(self):
+        env = {**os.environ, 'TOWIT_PYTHON': 'relative/python'}
+        result = subprocess.run(
+            ['python3', '-c', f"import sys; sys.path.insert(0, {HELPERS_DIR!r}); import towit_install_hook"],
+            env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, '')
+
+    def _run(self, **extra_env):
+        env = {k: v for k, v in os.environ.items() if k != 'TOWIT_PYTHON'}
+        env.update({'TOWIT_SETTINGS_PATH': self.settings_path}, **extra_env)
+        return subprocess.run(['python3', INSTALL_HOOK_SCRIPT], env=env,
+                              capture_output=True, text=True)
+
+    def _commands(self):
+        with open(self.settings_path) as f:
+            data = json.load(f)
+        return {ev: [h['command'] for e in data['hooks'][ev] for h in e['hooks']]
+                for ev in ALL_EVENTS}
+
+    def test_install_with_towit_python_writes_that_interpreter(self):
+        result = self._run(TOWIT_PYTHON=self.stub)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for ev, cmds in self._commands().items():
+            self.assertEqual(len(cmds), 1, ev)
+            self.assertTrue(cmds[0].startswith(f'{self.stub} '), f'{ev}: {cmds[0]}')
+            self.assertTrue(cmds[0].endswith('towit_hook.py'), f'{ev}: {cmds[0]}')
+
+    def test_install_with_invalid_towit_python_falls_back_and_warns(self):
+        result = self._run(TOWIT_PYTHON='relative/python')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('TOWIT_PYTHON', result.stderr)
+        for ev, cmds in self._commands().items():
+            self.assertTrue(cmds[0].startswith('python3 '), f'{ev}: {cmds[0]}')
+
+    def test_rerun_with_towit_python_repairs_plain_python3_commands(self):
+        self.assertEqual(self._run().returncode, 0)
+        result = self._run(TOWIT_PYTHON=self.stub)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('updated', result.stdout.lower())
+        for ev, cmds in self._commands().items():
+            self.assertTrue(cmds[0].startswith(f'{self.stub} '), f'{ev}: {cmds[0]}')
+
+    def test_rerun_without_towit_python_repairs_back_to_python3(self):
+        self.assertEqual(self._run(TOWIT_PYTHON=self.stub).returncode, 0)
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('updated', result.stdout.lower())
+        for ev, cmds in self._commands().items():
+            self.assertTrue(cmds[0].startswith('python3 '), f'{ev}: {cmds[0]}')
+            self.assertNotIn(self.stub, cmds[0])
+
+
 class TestInstallHookRepair(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()

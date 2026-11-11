@@ -205,6 +205,34 @@ _setup_isolated_home() {
 }
 
 # ---------------------------------------------------------------------------
+# TOWIT_PYTHON interpreter override
+# ---------------------------------------------------------------------------
+
+@test "towit: TOWIT_PYTHON interpreter is used for helper invocations" {
+  local stub="${TEST_TMPDIR}/stub-python"
+  local record="${TEST_TMPDIR}/stub-argv"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" > "%s"\nexit 0\n' "${record}" > "${stub}"
+  chmod +x "${stub}"
+  "${TOWIT}" setup
+
+  TOWIT_PYTHON="${stub}" run "${TOWIT}" stats
+  [ "${status}" -eq 0 ]
+  [ -f "${record}" ] || { echo "Stub interpreter was never invoked. Output: ${output}"; return 1; }
+  [[ "$(head -n 1 "${record}")" == */libexec/towit/towit_stats.py ]] || {
+    echo "Expected helper path as first argument, got: $(cat "${record}")"; return 1
+  }
+}
+
+@test "towit: TOWIT_PYTHON pointing at a nonexistent interpreter exits non-zero naming TOWIT_PYTHON" {
+  "${TOWIT}" setup
+  TOWIT_PYTHON="${TEST_TMPDIR}/no-such-python" run "${TOWIT}" stats
+  [ "${status}" -ne 0 ]
+  [[ "${output}" == *"TOWIT_PYTHON"* ]] || {
+    echo "Expected TOWIT_PYTHON in error output, got: ${output}"; return 1
+  }
+}
+
+# ---------------------------------------------------------------------------
 # stats subcommand
 # ---------------------------------------------------------------------------
 

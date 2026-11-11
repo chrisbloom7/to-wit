@@ -45,6 +45,8 @@ Subcommand modules map 1:1 to `bin/towit` cases (`towit_search.py`, `towit_show.
 - `towit_sanitize.py` — Strips terminal control sequences from archived text before it is printed (`show` text output, and the table output of `search` and `list`, which also collapse newlines)
 - `towit_redact.py` — Best-effort, pattern-based secret redaction (`[REDACTED:<kind>]`)
 - `towit_index.py` — LLM indexing: parses JSONL prose, calls `claude -p` to generate title/summary/keywords/topics, filters trivial sessions
+- `towit_install_hook.py` — Registers/repairs hooks; writes `TOWIT_PYTHON` (if valid) as the hook interpreter
+- `towit_implode.py` — Full uninstall; under a Homebrew Cellar it skips the binary symlink and prints `brew uninstall towit`
 - `towit_hook.py` — Hook entry point for the Stop, SessionEnd, and SessionStart events; dispatches on the payload's `hook_event_name`, validates the transcript path, and spawns a detached `towit_ingest.py`. Guarded by `TOWIT_INDEXING=1` env var to prevent recursion
 - `towit_backfill.py` (a subcommand) archives and indexes existing `~/.claude/projects/` sessions in batch; `towit_setup.py` creates the schema and runs migrations
 
@@ -70,6 +72,7 @@ The archive is append-only: each ingest compares the stored tail hash to the tra
 | `TOWIT_CONFIG_PATH` | Override `~/.towit/config.toml` path (used in tests) |
 | `TOWIT_DB_PATH` | Override database path (deprecated in favor of `[database] path`; used in tests) |
 | `TOWIT_SETTINGS_PATH` | Override `~/.claude/settings.json` path (used in tests) |
+| `TOWIT_PYTHON` | Interpreter used by `bin/towit` and written into the hook command (absolute path; set by the Homebrew wrapper; defaults to `python3`) |
 | `TOWIT_INDEXING=1` | Set on towit's own `claude -p` calls so the hooks do not recurse |
 | `TOWIT_RELEASE_CHECK=1` | Test-only: enables the release-gate check that `CHANGELOG.md` has `[Unreleased]` content |
 

@@ -243,5 +243,92 @@ class TestTowitImplode(unittest.TestCase):
         self.assertFalse(dir_contains(self.tmpdir, marker))
 
 
+class TestIsHomebrewInstall(unittest.TestCase):
+    def test_cellar_path_is_homebrew(self):
+        from towit_implode import is_homebrew_install
+        self.assertTrue(is_homebrew_install(
+            '/opt/homebrew/Cellar/towit/0.9.2/libexec/towit/towit_implode.py'))
+
+    def test_clone_path_is_not_homebrew(self):
+        from towit_implode import is_homebrew_install
+        self.assertFalse(is_homebrew_install('/Users/me/src/to-wit/libexec/towit/towit_implode.py'))
+
+    def test_opt_path_is_not_homebrew(self):
+        from towit_implode import is_homebrew_install
+        self.assertFalse(is_homebrew_install(
+            '/opt/homebrew/opt/towit/libexec/towit/towit_implode.py'))
+
+    def test_cellar_must_be_a_whole_path_component(self):
+        from towit_implode import is_homebrew_install
+        self.assertFalse(is_homebrew_install('/src/MyCellar/towit/libexec/towit_implode.py'))
+        self.assertFalse(is_homebrew_install('/src/Cellar-notes/towit/libexec/towit_implode.py'))
+
+
+class TestImplodeUnderHomebrew(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 'data', 'test.db')
+        os.makedirs(os.path.dirname(self.db_path))
+        self.settings_path = os.path.join(self.tmpdir, SETTINGS_REL_PATH)
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        self.install_dir = os.path.join(self.tmpdir, 'bin')
+        os.makedirs(self.install_dir)
+        libexec = os.path.join(self.tmpdir, 'Cellar', 'towit', '0.9.2', 'libexec', 'towit')
+        shutil.copytree(HELPERS_DIR, libexec, ignore=shutil.ignore_patterns('__pycache__'))
+        self.cellar_implode = os.path.join(libexec, 'towit_implode.py')
+        self.cellar_install_hook = os.path.join(libexec, 'towit_install_hook.py')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _env(self):
+        return {**os.environ, 'TOWIT_CONFIG_PATH': self.config_path, 'HOME': self.tmpdir,
+                'TOWIT_SETTINGS_PATH': self.settings_path}
+
+    def _run_implode(self, args=None):
+        return subprocess.run(['python3', self.cellar_implode, '--yes'] + (args or []),
+                              env=self._env(), capture_output=True, text=True)
+
+    def test_removes_hooks_and_db_and_prints_brew_uninstall_hint(self):
+        run_setup(self.db_path, self.config_path, self.tmpdir)
+        subprocess.run(['python3', self.cellar_install_hook], env=self._env(),
+                       capture_output=True, text=True, check=True)
+        self.assertTrue(os.path.exists(self.db_path))
+        with open(self.settings_path) as f:
+            self.assertIn('towit_hook.py', f.read())
+
+        result = self._run_implode(['--install-dir', self.install_dir])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(os.path.exists(self.db_path), 'Expected DB removed')
+        with open(self.settings_path) as f:
+            self.assertNotIn('towit_hook.py', f.read())
+        self.assertIn('brew uninstall towit', result.stdout)
+        self.assertNotIn('Nothing to remove', result.stdout)
+
+    def test_skips_binary_symlink_lookup(self):
+        run_setup(self.db_path, self.config_path, self.tmpdir)
+        target = os.path.join(self.tmpdir, 'fake_towit')
+        open(target, 'w').close()
+        binary = os.path.join(self.install_dir, 'towit')
+        os.symlink(target, binary)
+
+        result = self._run_implode(['--install-dir', self.install_dir])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(os.path.islink(binary), 'Homebrew-managed symlink must be left alone')
+        self.assertFalse(os.path.exists(self.db_path))
+        self.assertIn('brew uninstall towit', result.stdout)
+
+    def test_nothing_to_remove_still_exits_0_and_prints_hint(self):
+        result = self._run_implode(['--install-dir', self.install_dir])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('brew uninstall towit', result.stdout)
+
+    def test_clone_install_does_not_print_brew_hint(self):
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
+                             args=['--yes', '--install-dir', self.install_dir])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('brew uninstall', result.stdout)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -62,9 +62,16 @@ SCRIPT_DIR="$(cd -P "$(dirname "${_source}")" && pwd)"
 unset _source _dir
 HELPERS_DIR="$(cd "${SCRIPT_DIR}/../libexec/towit" && pwd)"
 
-if ! command -v python3 &>/dev/null; then
-  echo "Error: python3 is required but was not found in PATH." >&2
-  echo "Install Python 3 and ensure it is available as 'python3'." >&2
+PYTHON="${TOWIT_PYTHON:-python3}"
+
+if ! command -v "${PYTHON}" &>/dev/null; then
+  if [ -n "${TOWIT_PYTHON:-}" ]; then
+    echo "Error: TOWIT_PYTHON is set to '${TOWIT_PYTHON}' but that interpreter was not found." >&2
+    echo "Unset TOWIT_PYTHON or point it at a working Python 3." >&2
+  else
+    echo "Error: python3 is required but was not found in PATH." >&2
+    echo "Install Python 3 and ensure it is available as 'python3'." >&2
+  fi
   exit 1
 fi
 
@@ -88,74 +95,74 @@ case "${subcommand}" in
         *) _setup_args+=("$1"); shift ;;
       esac
     done
-    python3 "${HELPERS_DIR}/towit_setup.py" "${_setup_args[@]+"${_setup_args[@]}"}" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_setup.py" "${_setup_args[@]+"${_setup_args[@]}"}" || exit $?
     if [[ "${_full}" == true || "${_hook}" == true ]]; then
-      python3 "${HELPERS_DIR}/towit_install_hook.py" || exit $?
+      "${PYTHON}" "${HELPERS_DIR}/towit_install_hook.py" || exit $?
     fi
     if [[ "${_full}" == true ]]; then
-      python3 "${HELPERS_DIR}/towit_backfill.py" || exit $?
+      "${PYTHON}" "${HELPERS_DIR}/towit_backfill.py" || exit $?
     fi
     ;;
   search)
     shift
-    python3 "${HELPERS_DIR}/towit_search.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_search.py" "$@" || exit $?
     ;;
   list)
     shift
-    python3 "${HELPERS_DIR}/towit_list.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_list.py" "$@" || exit $?
     ;;
   resume)
     shift
-    python3 "${HELPERS_DIR}/towit_resume.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_resume.py" "$@" || exit $?
     ;;
   open)
     shift
     echo "Warning: 'open' is deprecated; use 'resume' instead." >&2
-    python3 "${HELPERS_DIR}/towit_resume.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_resume.py" "$@" || exit $?
     ;;
   show)
     shift
-    python3 "${HELPERS_DIR}/towit_show.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_show.py" "$@" || exit $?
     ;;
   prune)
     shift
-    python3 "${HELPERS_DIR}/towit_prune.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_prune.py" "$@" || exit $?
     ;;
   forget)
     shift
-    python3 "${HELPERS_DIR}/towit_forget.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_forget.py" "$@" || exit $?
     ;;
   export)
     shift
-    python3 "${HELPERS_DIR}/towit_export.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_export.py" "$@" || exit $?
     ;;
   backfill)
     shift
-    python3 "${HELPERS_DIR}/towit_backfill.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_backfill.py" "$@" || exit $?
     ;;
   install-hook)
     shift
-    python3 "${HELPERS_DIR}/towit_install_hook.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_install_hook.py" "$@" || exit $?
     ;;
   uninstall-hook)
     shift
-    python3 "${HELPERS_DIR}/towit_uninstall_hook.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_uninstall_hook.py" "$@" || exit $?
     ;;
   teardown)
     shift
-    python3 "${HELPERS_DIR}/towit_teardown.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_teardown.py" "$@" || exit $?
     ;;
   implode)
     shift
-    python3 "${HELPERS_DIR}/towit_implode.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_implode.py" "$@" || exit $?
     ;;
   stats)
     shift
-    python3 "${HELPERS_DIR}/towit_stats.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_stats.py" "$@" || exit $?
     ;;
   doctor)
     shift
-    python3 "${HELPERS_DIR}/towit_doctor.py" "$@" || exit $?
+    "${PYTHON}" "${HELPERS_DIR}/towit_doctor.py" "$@" || exit $?
     ;;
   help|--help|-h)
     usage

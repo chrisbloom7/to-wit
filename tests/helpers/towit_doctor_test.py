@@ -539,6 +539,68 @@ class TestHookChecks(unittest.TestCase):
         self.assertIn('SessionEnd', result.label)
         self.assertNotIn('SessionStart', result.label)
 
+    def _hooks_with_interpreter(self, events, interpreter):
+        self._write_settings({'hooks': {ev: [{'matcher': '', 'hooks': [
+            {'type': 'command', 'command': f'{interpreter} {self.hook_script}'}]}]
+            for ev in events}})
+
+    def test_missing_absolute_interpreter_on_all_events_is_fail_naming_it(self):
+        from towit_doctor import check_hook_commands
+        open(self.hook_script, 'w').close()
+        self._hooks_with_interpreter(['Stop', 'SessionEnd', 'SessionStart'], '/no/such/python3')
+        result = check_hook_commands(self.settings_path)
+        self.assertEqual(result.status, 'FAIL')
+        self.assertIn('/no/such/python3', result.label)
+
+    def test_missing_absolute_interpreter_on_some_events_is_warn_naming_it(self):
+        from towit_doctor import check_hook_commands
+        open(self.hook_script, 'w').close()
+        self._hooks(['Stop', 'SessionStart'])
+        with open(self.settings_path) as f:
+            data = json.load(f)
+        data['hooks']['SessionEnd'] = [{'matcher': '', 'hooks': [
+            {'type': 'command', 'command': f'/no/such/python3 {self.hook_script}'}]}]
+        self._write_settings(data)
+        result = check_hook_commands(self.settings_path)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('/no/such/python3', result.label)
+        self.assertIn('SessionEnd', result.label)
+
+    def test_non_executable_absolute_interpreter_is_flagged(self):
+        from towit_doctor import check_hook_commands
+        open(self.hook_script, 'w').close()
+        plain = os.path.join(self.tmpdir, 'not-executable-python')
+        open(plain, 'w').close()
+        os.chmod(plain, 0o644)
+        self._hooks_with_interpreter(['Stop', 'SessionEnd', 'SessionStart'], plain)
+        result = check_hook_commands(self.settings_path)
+        self.assertIn(result.status, ('WARN', 'FAIL'))
+        self.assertIn(plain, result.label)
+
+    def test_existing_executable_absolute_interpreter_is_pass(self):
+        from towit_doctor import check_hook_commands
+        open(self.hook_script, 'w').close()
+        interp = os.path.join(self.tmpdir, 'good-python')
+        with open(interp, 'w') as f:
+            f.write('#!/bin/sh\nexit 0\n')
+        os.chmod(interp, 0o755)
+        self._hooks_with_interpreter(['Stop', 'SessionEnd', 'SessionStart'], interp)
+        self.assertEqual(check_hook_commands(self.settings_path).status, 'PASS')
+
+    def test_missing_interpreter_and_missing_script_are_both_reported(self):
+        from towit_doctor import check_hook_commands
+        self._hooks_with_interpreter(['Stop', 'SessionEnd', 'SessionStart'], '/no/such/python3')
+        result = check_hook_commands(self.settings_path)
+        self.assertEqual(result.status, 'FAIL')
+        self.assertIn('/no/such/python3', result.label)
+        self.assertIn(self.hook_script, result.label)
+
+    def test_bare_python3_interpreter_is_never_flagged(self):
+        from towit_doctor import check_hook_commands
+        open(self.hook_script, 'w').close()
+        self._hooks_with_interpreter(['Stop', 'SessionEnd', 'SessionStart'], 'python3')
+        self.assertEqual(check_hook_commands(self.settings_path).status, 'PASS')
+
     def test_install_hook_repairs_stale_paths_so_hook_commands_check_passes(self):
         from towit_doctor import check_hook_commands
         stale = 'python3 /old/clone/towit_hook.py'
