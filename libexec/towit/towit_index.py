@@ -265,8 +265,14 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
     try:
         if db.is_forgotten(session_id):
             return 'skipped'
-    except sqlite3.OperationalError:
-        pass  # DB not yet initialized (no forgotten table)
+    except SystemExit:
+        return 'skipped'  # DB file missing: nothing to index into
+    except sqlite3.OperationalError as exc:
+        # Only an un-migrated DB (nothing can be forgotten yet) is safe to ignore;
+        # anything else (locked, I/O) must stop indexing rather than risk enriching
+        # a forgotten session.
+        if 'no such table: forgotten' not in str(exc):
+            raise
 
     # Parse first so we can compare message count for staleness detection
     messages = parse_jsonl(jsonl_path)
@@ -307,6 +313,12 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
     transcript = build_transcript(sendable, max_chars=_config.indexing_transcript_max_chars)
     existing_topics = existing['topics'] if existing else None
     existing_keywords = existing['keywords'] if existing else None
+    if _config.ingest_redact:
+        extra = _config.ingest_extra_patterns
+        if existing_topics:
+            existing_topics = [redact(t, extra) for t in existing_topics]
+        if existing_keywords:
+            existing_keywords = [redact(k, extra) for k in existing_keywords]
     analysis = analyze_with_claude(transcript, existing_topics=existing_topics,
                                    existing_keywords=existing_keywords)
 
@@ -333,7 +345,8 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
         'message_count': current_count,
     }
 
-    db.upsert_conversation(data)
+    if not db.upsert_conversation(data):
+        return 'skipped'  # forgotten while Claude was analyzing
 
     return 'indexed'
 

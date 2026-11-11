@@ -725,7 +725,8 @@ class TestIndexConversationArchiveInteraction(unittest.TestCase):
         msgs = [dict(m) for m in MINIMAL_MESSAGES]
         msgs[0]['content'] = f'My key is {secret} please help with SQLite WAL mode'
         path = self._write('red-2', msgs)
-        with patch.object(towit_index._config, '_get', side_effect=lambda s, k, d, t=None: False if (s, k) == ('ingest', 'redact') else d), \
+        with patch.object(type(towit_index._config), 'ingest_redact',
+                          new_callable=lambda: property(lambda self: False)), \
              patch('towit_index.analyze_with_claude', return_value=self.ANALYSIS) as mock_an:
             index_conversation(path, self.db)
         self.assertIn(secret, mock_an.call_args[0][0])
@@ -777,6 +778,76 @@ class TestIndexConversationArchiveInteraction(unittest.TestCase):
         self.assertEqual(n_after, 2)
         self.assertEqual(before[0], 1)
         self.assertTrue(self.db.is_indexed('arc-1'))
+
+    def test_locked_db_on_forgotten_check_fails_closed(self):
+        path = self._write('lock-1', MINIMAL_MESSAGES)
+        with patch.object(self.db, 'is_forgotten',
+                          side_effect=sqlite3.OperationalError('database is locked')), \
+             patch('towit_index.analyze_with_claude') as mock_an:
+            with self.assertRaises(sqlite3.OperationalError):
+                index_conversation(path, self.db)
+        mock_an.assert_not_called()
+        conn = sqlite3.connect(self.db_path)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0], 0)
+        conn.close()
+
+    def test_missing_forgotten_table_is_treated_as_not_forgotten(self):
+        path = self._write('old-1', MINIMAL_MESSAGES)
+        with patch.object(self.db, 'is_forgotten',
+                          side_effect=sqlite3.OperationalError('no such table: forgotten')), \
+             patch('towit_index.analyze_with_claude', return_value=self.ANALYSIS):
+            self.assertEqual(index_conversation(path, self.db), 'indexed')
+
+    def test_missing_db_file_is_skipped_and_not_created(self):
+        missing = os.path.join(self.tmpdir, 'nodb', 'catalog.db')
+        os.makedirs(os.path.dirname(missing))
+        path = self._write('nodb-1', [])
+        with patch('towit_index.analyze_with_claude') as mock_an:
+            self.assertEqual(index_conversation(path, Database(missing)), 'skipped')
+        mock_an.assert_not_called()
+        self.assertFalse(os.path.exists(missing))
+
+    def test_forget_during_llm_call_writes_nothing(self):
+        path = self._write('race-1', MINIMAL_MESSAGES)
+        def forget_then_return(*a, **kw):
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("INSERT INTO forgotten (id) VALUES ('race-1')")
+            conn.commit()
+            conn.close()
+            return self.ANALYSIS
+        with patch('towit_index.analyze_with_claude', side_effect=forget_then_return):
+            self.assertEqual(index_conversation(path, self.db), 'skipped')
+        conn = sqlite3.connect(self.db_path)
+        for table in ('conversations', 'conversation_topics', 'conversation_keywords'):
+            self.assertEqual(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0, table)
+        conn.close()
+
+    def test_existing_topic_and_keyword_hints_are_redacted(self):
+        secret = self._fake_secret()
+        path = self._write('hint-1', MINIMAL_MESSAGES)
+        self.db.upsert_conversation({'id': 'hint-1', 'folder': '/f', 'cwd': '/w', 'started_at': None,
+                                     'last_active': None, 'title': 'T', 'summary': 'S',
+                                     'topics': [secret], 'keywords': [secret], 'message_count': 0})
+        with patch('towit_index.analyze_with_claude', return_value=self.ANALYSIS) as mock_an:
+            index_conversation(path, self.db)
+        kw = mock_an.call_args[1]
+        self.assertNotIn(secret, json.dumps(kw))
+        self.assertIn('[REDACTED:', json.dumps(kw))
+
+    def test_secret_straddling_truncation_boundary_is_redacted(self):
+        secret = self._fake_secret()
+        msgs = [dict(m) for m in MINIMAL_MESSAGES]
+        # Place the secret so a raw-text cut at 30% of max_chars would land inside it.
+        msgs[0]['content'] = 'x' * 40 + ' ' + secret + ' ' + 'y' * 400
+        path = self._write('trunc-1', msgs)
+        for max_chars in range(100, 400, 7):
+            with patch.object(type(towit_index._config), 'indexing_transcript_max_chars',
+                              new_callable=lambda: property(lambda self: max_chars)), \
+                 patch('towit_index.analyze_with_claude', return_value=self.ANALYSIS) as mock_an:
+                index_conversation(path, self.db, force=True)
+            sent = mock_an.call_args[0][0]
+            self.assertNotIn(secret, sent)
+            self.assertNotIn('AKIAAAAA', sent)
 
     def test_index_conversation_writes_no_messages_or_forgotten_rows(self):
         path = self._write('plain-1', MINIMAL_MESSAGES)

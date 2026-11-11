@@ -192,7 +192,10 @@ class Database:
 
     def upsert_conversation(self, data: dict):
         """
-        Insert or replace a conversation record and its topic associations.
+        Insert or update a conversation record and its topic/keyword associations.
+
+        Returns False (writing nothing) if the id is in the forgotten table,
+        checked under the write lock so a concurrent `towit forget` wins; else True.
 
         Expected keys in data:
             id, folder, cwd, started_at, last_active, title, summary,
@@ -202,6 +205,10 @@ class Database:
         keywords = data.get('keywords', [])
 
         with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM forgotten WHERE id = ?", (data['id'],)).fetchone():
+                conn.rollback()
+                return False
             conn.execute(
                 """
                 INSERT INTO conversations
@@ -279,6 +286,7 @@ class Database:
                         "(conversation_id, keyword_id) VALUES (?, ?)",
                         (data['id'], row['id'])
                     )
+        return True
 
     # ------------------------------------------------------------------
     # Private helper — builds the base query and returns (sql, params)
@@ -537,6 +545,7 @@ class Database:
 
     def is_forgotten(self, conv_id: str) -> bool:
         """Return True if the session ID is in the forgotten tombstone table."""
+        self.validate()
         with self.connect() as conn:
             row = conn.execute(
                 "SELECT 1 FROM forgotten WHERE id = ?", (conv_id,)
