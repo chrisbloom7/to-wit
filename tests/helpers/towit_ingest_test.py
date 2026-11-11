@@ -20,6 +20,7 @@ sys.path.insert(0, HELPERS_DIR)
 
 import towit_ingest
 from towit_db import Database
+from towit_db_test import build_old_schema_db
 from towit_ingest import (MAX_MESSAGE_CHARS, ingest_transcript, parse_transcript,
                           resolve_repo_key)
 
@@ -187,6 +188,27 @@ class TestResolveRepoKey(unittest.TestCase):
 
     def test_empty_cwd_returns_empty(self):
         self.assertEqual(resolve_repo_key(''), '')
+
+
+class TestIngestOnOldDatabase(unittest.TestCase):
+    """An install upgraded in place: the first hook run must migrate, not fail."""
+
+    def test_ingest_migrates_old_db_and_messages_are_searchable(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        folder = os.path.join(tmp, 'projects', '-work-Robinina')
+        os.makedirs(folder)
+        path = os.path.join(folder, 'sess-0002.jsonl')
+        _write_jsonl(path, [_entry('user', 'tell me about quokkas'),
+                            _entry('assistant', 'they are marsupials'),
+                            _entry('user', 'thanks')])
+        db_path = os.path.join(tmp, 'catalog.db')
+        build_old_schema_db(db_path)
+        db = Database(db_path)
+        self.assertEqual(ingest_transcript(path, db), 'ingested')
+        hits = db.search_archive(['quokkas'], scope='text')
+        self.assertEqual([h['id'] for h in hits], ['sess-0002'])
+        self.assertEqual(os.stat(db_path).st_mode & 0o777, 0o600)
 
 
 class TestIngestTranscript(unittest.TestCase):
