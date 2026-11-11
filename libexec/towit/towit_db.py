@@ -749,13 +749,14 @@ class Database:
             return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
     def all_conversation_stubs(self) -> list:
-        """Return (id, folder, archived) for every conversation — used by prune and stats."""
+        """Return (id, folder, cwd, archived) for every conversation — used by prune and stats."""
         self.validate()
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT id, folder, archived FROM conversations ORDER BY started_at DESC"
+                "SELECT id, folder, cwd, archived FROM conversations ORDER BY started_at DESC"
             ).fetchall()
-            return [{'id': r['id'], 'folder': r['folder'], 'archived': bool(r['archived'])}
+            return [{'id': r['id'], 'folder': r['folder'], 'cwd': r['cwd'],
+                     'archived': bool(r['archived'])}
                     for r in rows]
 
     def archive_stats(self) -> dict:

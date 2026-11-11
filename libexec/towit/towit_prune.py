@@ -61,7 +61,12 @@ def main():
         return
 
     removable = [s for s in missing if args.archive or not s['archived']]
-    kept = [s for s in missing if s not in removable]
+    removable_ids = {s['id'] for s in removable}
+    purged = [s for s in stubs
+              if s['archived'] and not os.path.isdir(s['folder']) and s['id'] not in removable_ids]
+    purged_ids = {s['id'] for s in purged}
+    # a purged-folder row is listed in the purge section only, not twice
+    kept = [s for s in missing if s['id'] not in removable_ids and s['id'] not in purged_ids]
     archived_removable = sum(1 for s in removable if s['archived'])
 
     if (removable and archived_removable and args.archive
@@ -101,15 +106,13 @@ def main():
             print(f"  kept (archived): {s['id']}")
 
     # Report-only: a whole project folder missing usually means `claude purge`.
-    purged = [s for s in stubs
-              if s['archived'] and not os.path.isdir(s['folder']) and s not in removable]
     if purged:
         print(f"\nLikely removed by claude purge: {len(purged)} archived conversations "
               f"whose project folder no longer exists")
         for s in purged:
-            print(f"  {s['id']}  ({s['folder']})")
+            print(f"  {s['id']}  (cwd: {s['cwd']})")
         print("  (kept; a manually deleted folder looks identical. "
-              "Use --archive to remove them, or `towit forget --folder`.)")
+              "Use --archive to remove them, or `towit forget --folder <cwd>`.)")
 
 
 if __name__ == '__main__':

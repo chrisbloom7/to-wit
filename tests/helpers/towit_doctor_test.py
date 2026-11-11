@@ -380,6 +380,30 @@ class TestArchiveSchemaChecks(unittest.TestCase):
         self.assertIn('integrity', result.label.lower())
         self.assertIn('rebuild', result.remediation.lower())
 
+    def test_archive_schema_warns_not_fails_when_db_is_locked_by_writer(self):
+        from towit_doctor import check_archive_schema
+        self._migrated_db()
+        writer = sqlite3.connect(self.db_path, timeout=0.1)
+        writer.execute("BEGIN IMMEDIATE")
+        try:
+            with patch('towit_doctor._INTEGRITY_TIMEOUT', 0.1):
+                result = check_archive_schema(self.db_path)
+        finally:
+            writer.rollback()
+            writer.close()
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('Could not run FTS integrity check', result.label)
+        self.assertNotIn('rebuild', result.remediation.lower())
+
+    def test_archive_schema_warns_not_fails_on_read_only_file(self):
+        from towit_doctor import check_archive_schema
+        self._migrated_db()
+        os.chmod(self.db_path, 0o400)
+        result = check_archive_schema(self.db_path)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('Could not run FTS integrity check', result.label)
+        self.assertNotIn('rebuild', result.remediation.lower())
+
     def test_archive_schema_check_does_not_modify_db(self):
         from towit_doctor import check_archive_schema
         self._migrated_db()
@@ -493,16 +517,15 @@ class TestHookChecks(unittest.TestCase):
         self._hooks(['Stop', 'SessionEnd', 'SessionStart'])
         self.assertEqual(check_hook_commands(self.settings_path).status, 'PASS')
 
-    def test_hook_command_path_missing_is_warn_naming_event(self):
+    def test_all_hook_scripts_missing_is_fail_naming_path(self):
         from towit_doctor import check_hook_commands
-        self._hooks(['Stop'], script='/no/such/towit_hook.py')
+        self._hooks(['Stop', 'SessionEnd'], script='/no/such/towit_hook.py')
         result = check_hook_commands(self.settings_path)
-        self.assertEqual(result.status, 'WARN')
-        self.assertIn('Stop', result.label)
+        self.assertEqual(result.status, 'FAIL')
         self.assertIn('/no/such/towit_hook.py', result.label)
         self.assertIn('towit install-hook', result.remediation)
 
-    def test_one_event_pointing_at_a_missing_path_is_warn(self):
+    def test_some_events_pointing_at_a_missing_path_is_warn_not_fail(self):
         from towit_doctor import check_hook_commands
         open(self.hook_script, 'w').close()
         self._hooks(['Stop', 'SessionStart'])
@@ -515,6 +538,16 @@ class TestHookChecks(unittest.TestCase):
         self.assertEqual(result.status, 'WARN')
         self.assertIn('SessionEnd', result.label)
         self.assertNotIn('SessionStart', result.label)
+
+    def test_malformed_hook_settings_do_not_crash(self):
+        from towit_doctor import check_hook_events, check_hook_installed, check_hook_commands
+        self._write_settings({'hooks': {'Stop': 'oops', 'SessionEnd': [None, 5, {'hooks': 'x'}],
+                                        'SessionStart': [{'hooks': [None, {'command': 7}]}]}})
+        self.assertEqual(check_hook_installed(self.settings_path).status, 'FAIL')
+        self.assertEqual(check_hook_events(self.settings_path).status, 'WARN')
+        self.assertEqual(check_hook_commands(self.settings_path).status, 'PASS')
+        self._write_settings({'hooks': ['not', 'a', 'dict']})
+        self.assertEqual(check_hook_events(self.settings_path).status, 'WARN')
 
     def test_mixed_existing_hook_paths_is_warn(self):
         from towit_doctor import check_hook_commands

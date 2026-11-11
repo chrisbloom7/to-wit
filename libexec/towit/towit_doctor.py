@@ -290,6 +290,14 @@ def check_fts5_available() -> CheckResult:
     return CheckResult('PASS', 'SQLite FTS5 is available')
 
 
+_INTEGRITY_TIMEOUT = 5.0
+
+
+def _is_corruption(exc: sqlite3.Error) -> bool:
+    name = getattr(exc, 'sqlite_errorname', '') or ''
+    return name.startswith('SQLITE_CORRUPT') or 'malformed' in str(exc).lower()
+
+
 def _fts_integrity_check(db_path: str) -> None:
     """Run the FTS5 integrity-check; raises sqlite3.Error if the index is inconsistent.
 
@@ -297,7 +305,7 @@ def _fts_integrity_check(db_path: str) -> None:
     INSERT command, which SQLite refuses on a read-only handle, so
     it runs on a rw handle inside a transaction that is always rolled back.
     """
-    conn = sqlite3.connect(f'file:{quote(db_path)}?mode=rw', uri=True, timeout=5.0)
+    conn = sqlite3.connect(f'file:{quote(db_path)}?mode=rw', uri=True, timeout=_INTEGRITY_TIMEOUT)
     try:
         conn.execute("BEGIN")
         try:
@@ -338,6 +346,13 @@ def check_archive_schema(db_path: str) -> CheckResult:
     try:
         _fts_integrity_check(db_path)
     except sqlite3.Error as exc:
+        if not _is_corruption(exc):
+            # busy/locked (live writer), read-only file, cannot open...: not evidence of damage
+            return CheckResult(
+                'WARN',
+                f'Could not run FTS integrity check: {exc}',
+                remediation='Retry later, or check that the database is writable and not in use.',
+            )
         return CheckResult(
             'FAIL',
             f'FTS index integrity check failed: {exc}',
@@ -365,12 +380,16 @@ def _load_settings(settings_path: str) -> dict:
 def _find_hook_commands(settings_path: str) -> dict:
     """Return {event: first towit hook command} for each event where our hook is registered."""
     hooks = _load_settings(settings_path).get('hooks', {})
+    if not isinstance(hooks, dict):
+        return {}
     found = {}
     for event in HOOK_EVENTS:
-        for entry in hooks.get(event, []) if isinstance(hooks, dict) else []:
-            for hook in entry.get('hooks', []):
-                cmd = hook.get('command', '')
-                if _HOOK_MARKER in cmd:
+        entries = hooks.get(event, [])
+        for entry in entries if isinstance(entries, list) else []:
+            inner = entry.get('hooks', []) if isinstance(entry, dict) else []
+            for hook in inner if isinstance(inner, list) else []:
+                cmd = hook.get('command', '') if isinstance(hook, dict) else ''
+                if isinstance(cmd, str) and _HOOK_MARKER in cmd:
                     found.setdefault(event, cmd)
     return found
 
@@ -419,12 +438,18 @@ def check_hook_events(settings_path: str) -> CheckResult:
 
 
 def check_hook_commands(settings_path: str) -> CheckResult:
-    """WARN when a registered hook's script is missing on disk or events point at different scripts."""
+    """FAIL when no registered hook script exists; WARN when only some do or events point at different scripts."""
     found = _find_hook_commands(settings_path)
     if not found:
         return CheckResult('PASS', 'No To Wit hook commands to verify')
     paths = {ev: _script_path(cmd) for ev, cmd in found.items()}
     missing = [f'{ev} ({p})' for ev, p in paths.items() if p is None or not os.path.isfile(p)]
+    if len(missing) == len(paths):  # nothing can run: capture is dead
+        return CheckResult(
+            'FAIL',
+            f'Hook script not found on disk for: {", ".join(missing)}',
+            remediation="Reinstall To Wit to restore the hook script, then run 'towit install-hook'.",
+        )
     if missing:
         return CheckResult(
             'WARN',

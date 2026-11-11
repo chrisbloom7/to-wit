@@ -195,6 +195,15 @@ class TestTowitPruneArchive(unittest.TestCase):
             self.assertNotIn('arch-kept', purge_section)
             self.assertTrue(self._exists('arch-purged'))
 
+    def test_purged_row_is_listed_once_and_hint_uses_cwd(self):
+        # forget --folder matches cwd, so the purge section must show cwd, not the folder
+        result = run_prune(self.config_path)
+        self.assertEqual(result.stdout.count('arch-purged'), 1)
+        purge_section = result.stdout.split('Likely removed by claude purge')[1]
+        self.assertIn(self.tmpdir, purge_section)
+        self.assertNotIn(self.gone_dir, purge_section)
+        self.assertIn('towit forget --folder', purge_section)
+
     def test_report_absent_when_every_folder_exists(self):
         self.db.delete_conversation('arch-purged')
         result = run_prune(self.config_path)
@@ -218,8 +227,7 @@ class TestTowitPruneArchive(unittest.TestCase):
     def test_archive_flag_prompts_with_count_and_declining_removes_nothing(self):
         result = run_prune(self.config_path, ['--archive'], input_text='n\n')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn('2', result.stdout)  # count of archived rows at stake
-        self.assertIn('archived conversation', result.stdout)
+        self.assertIn('2 archived conversations', result.stdout)
         for cid in ('arch-kept', 'arch-purged', 'meta-only'):
             self.assertTrue(self._exists(cid), cid)
 

@@ -73,12 +73,13 @@ def main():
     print(f"Conversations indexed : {total}")
     print(f"Date range            : {oldest or 'n/a'} — {newest or 'n/a'}")
     print(f"Unique projects       : {unique_projects}")
+    if pruneable:
+        print(f"Pruneable entries     : {pruneable}  (run: towit prune)")
+    print()
     print(f"Archived conversations      : {archive['archived']}")
     print(f"Metadata-only conversations : {archive['metadata_only']}")
     print(f"Archived messages           : {archive['messages']}")
     print(f"Database size               : {_format_bytes(archive['db_bytes'])}")
-    if pruneable:
-        print(f"Pruneable entries     : {pruneable}  (run: towit prune)")
     print()
 
     if top_topics:
