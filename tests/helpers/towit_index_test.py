@@ -61,6 +61,22 @@ class TestParseJsonl(unittest.TestCase):
         self.assertIn('user', roles)
         self.assertIn('assistant', roles)
 
+    def test_parse_jsonl_drops_is_meta_true_entries_only(self):
+        path = os.path.join(self.tmpdir, 'conv.jsonl')
+        entries = []
+        for i, (text, flag) in enumerate([('real one', None), ('caveat', True), ('real two', False),
+                                          ('str true', 'true'), ('int one', 1), ('real three', None)]):
+            e = {'type': 'user', 'message': {'role': 'user', 'content': text},
+                 'sessionId': 's', 'cwd': '/x', 'timestamp': f'2026-01-15T10:0{i}:00Z'}
+            if flag is not None:
+                e['isMeta'] = flag
+            entries.append(e)
+        with open(path, 'w') as f:
+            for e in entries:
+                f.write(json.dumps(e) + '\n')
+        self.assertEqual([m['content'] for m in parse_jsonl(path)],
+                         ['real one', 'real two', 'str true', 'int one', 'real three'])
+
     def test_parse_jsonl_skips_file_history_snapshot_lines(self):
         path = os.path.join(self.tmpdir, 'conv.jsonl')
         lines = []
