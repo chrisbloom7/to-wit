@@ -346,21 +346,32 @@ class TestDoctorMain(unittest.TestCase):
         self.db_path = os.path.join(self.tmpdir, 'test.db')
         self.config_path = os.path.join(self.tmpdir, 'config.toml')
         self.settings_path = os.path.join(self.tmpdir, 'settings.json')
+        # PATH for the doctor subprocess holds only a stand-in `claude`, so the
+        # result does not depend on whether Claude Code is installed here
+        self.fake_bin = os.path.join(self.tmpdir, 'bin')
+        os.mkdir(self.fake_bin)
+        fake_claude = os.path.join(self.fake_bin, 'claude')
+        with open(fake_claude, 'w') as f:
+            f.write('#!/bin/sh\n')
+        os.chmod(fake_claude, 0o755)
+        self.empty_bin = os.path.join(self.tmpdir, 'empty-bin')
+        os.mkdir(self.empty_bin)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _run(self, extra_env=None):
+    def _run(self, extra_env=None, bin_dir=None):
         env = {
             **os.environ,
             'TOWIT_CONFIG_PATH': self.config_path,
             'TOWIT_SETTINGS_PATH': self.settings_path,
+            'PATH': bin_dir or self.fake_bin,
         }
         if extra_env:
             env.update(extra_env)
         env.pop('TOWIT_DB_PATH', None)
         return subprocess.run(
-            ['python3', DOCTOR_SCRIPT],
+            [sys.executable, DOCTOR_SCRIPT],
             capture_output=True, text=True, env=env,
         )
 
@@ -440,6 +451,18 @@ class TestDoctorMain(unittest.TestCase):
         self.assertNotIn('[FAIL]', result.stdout)
         self.assertIn('[PASS]', result.stdout)
         self.assertIn('All checks passed', result.stdout)
+
+    def test_missing_claude_cli_prints_fail_and_exits_one(self):
+        self._write_config()
+        self._make_db()
+        hook_script = os.path.join(
+            PROJECT_ROOT, 'libexec', 'towit', 'towit_hook.py'
+        )
+        self._install_hook(hook_script)
+        result = self._run(bin_dir=self.empty_bin)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('[FAIL] claude CLI not found on PATH', result.stdout)
+        self.assertIn('1 failure(s)', result.stdout)
 
 if __name__ == '__main__':
     unittest.main()
