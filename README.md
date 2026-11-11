@@ -221,7 +221,7 @@ These settings control what is archived. Searching and archiving make no API cal
 
 | Key | Default | Description |
 |---|---|---|
-| `redact` | `true` | Redact secret-shaped strings before archiving and before sending text to Claude. Best effort; applies at ingest time only (see above). |
+| `redact` | `true` | Redact secret-shaped strings before archiving and before sending the indexing transcript to Claude. Best effort; applies at ingest time only (see above). |
 | `extra_patterns` | `[]` | Extra regular expressions to redact, in addition to the built-in set. Invalid or empty-matching patterns are ignored with a warning. |
 | `include_subagents` | `false` | Also archive subagent sessions. Applies to `backfill` and the `SessionStart` catch-up scan; the `Stop` and `SessionEnd` hooks never archive them. Subagent sessions are archived only, never analyzed by Claude. |
 | `folders` | `[]` | Only archive sessions from matching project folders. Shell-style globs matched against the folder under `~/.claude/projects` that holds the transcript, for example `["*my-repo*"]`. Empty means all folders. |

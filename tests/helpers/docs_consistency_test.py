@@ -88,14 +88,19 @@ class TestReadmeAndHelp(DocTestCase):
     def test_every_config_key_documented(self):
         readme, template = _read('README.md'), towit_setup._CONFIG_TEMPLATE
         for section, key in _flattened_config_keys():
-            self.assertContains(readme, f'`{key}`', f"[{section}] {key} missing from README")
+            self.assertMatches(readme, rf'(?m)^\| `{key}` \|', f"[{section}] {key} missing from the README config tables")
             self.assertMatches(template, rf'(?m)^#? ?{re.escape(key)} =',
                                f"[{section}] {key} missing from _CONFIG_TEMPLATE")
 
     def test_every_hook_event_documented(self):
-        for event in towit_install_hook.HOOK_EVENTS:
-            for doc in ('README.md', 'AGENTS.md'):
-                self.assertContains(_read(doc), event, f"{event} missing from {doc}")
+        events = list(towit_install_hook.HOOK_EVENTS)
+        self.assertEqual(len(events), 3)
+        readme, agents = _read('README.md'), _read('AGENTS.md')
+        for event in events:  # a row of the README hooks table, not a stray substring
+            self.assertMatches(readme, rf'(?m)^\| `{event}`', f"{event} has no row in the README hooks table")
+        # AGENTS.md must name all the events together, in one sentence about registration
+        self.assertTrue(any(all(f'`{e}`' in line for e in events) for line in agents.splitlines()),
+                        "AGENTS.md has no line naming all hook events")
 
 
 def _libexec_modules() -> list:
@@ -137,6 +142,24 @@ class TestAgentsMd(DocTestCase):
 
     def test_claude_md_imports_agents_md(self):
         self.assertMatches(_read('CLAUDE.md'), r'(?m)^@AGENTS\.md\s*$', "CLAUDE.md must import @AGENTS.md")
+
+
+class TestWording(DocTestCase):
+    # Lines that are genuinely about the Claude Code `Stop` hook event, not the old
+    # single-hook design: towit_setup's reindex_delta comment says the Stop hook fires
+    # after every response, which is still true.
+    ALLOWED = ('The Stop hook fires after every response',)
+
+    def test_no_stale_stop_hook_wording_in_user_facing_code(self):
+        paths = [os.path.join('bin', f) for f in os.listdir(os.path.join(ROOT, 'bin'))]
+        paths += ['install', 'uninstall']
+        paths += [f'libexec/towit/{m}.py' for m in _libexec_modules()]
+        offenders = []
+        for rel in paths:
+            for n, line in enumerate(_read(rel).splitlines(), 1):
+                if re.search(r'\bstop hook\b', line, re.I) and not any(a in line for a in self.ALLOWED):
+                    offenders.append(f'{rel}:{n}')
+        self.assertEqual(offenders, [], 'stale "stop hook" wording (the hooks are Stop, SessionEnd, SessionStart)')
 
 
 class TestSecurityMd(DocTestCase):

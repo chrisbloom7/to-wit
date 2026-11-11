@@ -232,6 +232,21 @@ class TestIngestTranscript(unittest.TestCase):
             setattr(self, name, patcher.start())
             self.addCleanup(patcher.stop)
 
+    def test_reingest_does_not_re_resolve_a_stored_repo_key(self):
+        with unittest.mock.patch.object(towit_ingest, 'resolve_repo_key', return_value='/repo/main'):
+            ingest_transcript(self.path, self.db)
+        _write_jsonl(self.path, self._turns + [_entry('assistant', 'more')])
+        with unittest.mock.patch.object(towit_ingest, 'resolve_repo_key') as resolve:
+            self.assertEqual(ingest_transcript(self.path, self.db), 'appended')
+        resolve.assert_not_called()
+        self.assertEqual(self.db.get_repo_key('sess-0001'), '/repo/main')
+
+    def test_first_ingest_resolves_repo_key(self):
+        with unittest.mock.patch.object(towit_ingest, 'resolve_repo_key', return_value='/k') as resolve:
+            ingest_transcript(self.path, self.db)
+        resolve.assert_called_once()
+        self.assertEqual(self.db.get_repo_key('sess-0001'), '/k')
+
     def _rows(self, conv_id='sess-0001'):
         with self.db.connect() as conn:
             return conn.execute(
@@ -522,7 +537,7 @@ class TestCatchUpMain(unittest.TestCase):
 
 
 class TestIngestMain(unittest.TestCase):
-    """towit_ingest.main(): the detached process spawned by the stop hook."""
+    """towit_ingest.main(): the detached process spawned by the hooks."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()

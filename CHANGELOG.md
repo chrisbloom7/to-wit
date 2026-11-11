@@ -15,10 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Three hook events.** `towit install-hook` now registers `Stop`, `SessionEnd`, and `SessionStart` (matcher `startup`). `SessionEnd` captures the final state of a session; `SessionStart` runs a catch-up scan that archives (without any LLM calls) transcripts modified since the last scan, recovering sessions that ended without a hook. All work runs in a detached background process.
 - `towit show <session-id> [--around <seq>] [--context <n>] [--format text|json]`: print archived messages (the **Turn** number in search results is the 0-based `seq`). Works after the transcript is gone.
 - `towit forget <session-id> | --repo <path|name> | --folder <path> [--yes]`: permanently delete conversations (messages, FTS entries, topics, keywords) and tombstone the id so backfill, hooks, and the catch-up scan never re-ingest it. Cleanup is physical (`secure_delete`, FTS `optimize`, `VACUUM`, WAL truncate); re-running `forget <id>` on an already-forgotten id retries it.
-- `towit search --only text|metadata` and `--repo <path|name>` (matches a repo key exactly or by its final path component). Results gain a Turn and Snippet column in the table, and `seq`, `snippet`, and `score` fields in JSON and CSV.
+- `towit search --only text|metadata` and `--repo <path|name>` (matches a repo key exactly or by its final path component; the key is the git common directory of the session's working directory, resolved once at first archive and kept on re-ingest, so sessions first archived after their worktree was deleted do not group under the main repo). Results gain a Turn and Snippet column in the table, and `seq`, `snippet`, and `score` fields in JSON and CSV.
 - `towit prune --archive` and `--yes`, and a "Likely removed by claude purge" report listing archived conversations whose whole project folder is gone.
 - **Configuration:** `[ingest]` section (`redact`, `extra_patterns`, `include_subagents`, `folders`) and `[indexing] enabled` (set `false` for archive-only operation with zero API spend).
-- **Secret redaction.** Secret-shaped strings are replaced with `[REDACTED:<kind>]` before text is archived and before it is sent to `claude -p`. Best effort and ingest-time only.
+- **Secret redaction.** Secret-shaped strings are replaced with `[REDACTED:<kind>]` before text is archived and before the indexing transcript is sent to `claude -p`. Best effort and ingest-time only. `towit export --summarize` still sends the original, unredacted transcript, and `export --topic --summarize` sends stored titles and summaries, which for conversations indexed by 0.8.2 or earlier may derive from unredacted transcripts.
 - `towit doctor` (now up to 17 checks): SQLite FTS5 availability; archive schema (tables, `PRAGMA user_version`) and an FTS5 integrity check that fails only on real corruption and warns if the database is locked or read-only; all three hook events registered; hook command paths exist (fail if none resolve, warn if only some do); a warning when `disableAllHooks` is true in the settings file it reads.
 - `towit stats` prints archived and metadata-only conversation counts, archived message count, and database size in their own block.
 - The schema migrates automatically on first use: databases created by earlier versions are upgraded in place (tracked with `PRAGMA user_version`), and `towit setup` still works as before.
@@ -41,12 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A conversation's repo key is resolved once, at first archive, and kept on re-ingest (a NULL key is still filled in), so `towit backfill` after deleting a worktree no longer breaks `--repo` grouping.
 - `towit setup --full` now generates `~/.towit/config.toml` as documented.
 
 ### Security
 
-- Secret redaction before archiving and before text is sent to Claude (best effort; see SECURITY.md).
+- Secret redaction before archiving and before the indexing transcript is sent to Claude (best effort; see SECURITY.md). The `export --summarize` paths are not redacted (see Added).
 - `towit forget` provides permanent, physical deletion of archived conversations, with a tombstone so they are not re-ingested.
 - `towit show` strips terminal control sequences from archived text before printing it.
 - `towit export --summarize` now runs `claude` with the scoped environment allowlist (as indexing already did) instead of the full environment.

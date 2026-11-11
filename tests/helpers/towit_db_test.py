@@ -1281,6 +1281,17 @@ class TestRepoKeyKeptOnReingest(unittest.TestCase):
         self.db.archive_session(self._conv('/repo/main'), self._msgs(2))
         self.assertEqual(self._stored_key(), '/repo/main')
 
+    def test_empty_stored_key_is_filled(self):
+        self.db.archive_session(self._conv(''), self._msgs(2))
+        self.assertEqual(self._stored_key(), '')
+        self.db.archive_session(self._conv('/repo/main'), self._msgs(2))
+        self.assertEqual(self._stored_key(), '/repo/main')
+
+    def test_get_repo_key(self):
+        self.assertIsNone(self.db.get_repo_key('rk-session-1'))
+        self.db.archive_session(self._conv('/repo/main'), self._msgs(2))
+        self.assertEqual(self.db.get_repo_key('rk-session-1'), '/repo/main')
+
     def test_first_ingest_stores_given_key(self):
         self.db.archive_session(self._conv('/wt/feature'), self._msgs(2))
         self.assertEqual(self._stored_key(), '/wt/feature')

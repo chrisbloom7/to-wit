@@ -93,7 +93,7 @@ def generate_config():
         print(f"Config file already exists at {config_path}")
         return
     parent = os.path.dirname(config_path)
-    os.makedirs(parent, exist_ok=True)
+    os.makedirs(parent, mode=0o700, exist_ok=True)  # owner-only; an existing dir is left as is
     old_umask = os.umask(0o177)  # 0600 permissions
     try:
         with open(config_path, 'w') as f:
@@ -110,7 +110,7 @@ def main():
     parser.add_argument('--config', action='store_true',
                         help='Generate a starter config.toml')
     parser.add_argument('--full', action='store_true',
-                        help='Also generate config, install hook, and run backfill')
+                        help='Also generate config, install hooks, and run backfill')
     parser.add_argument('--hook', action='store_true',
                         help='Also install the Claude Code hooks after setup')
     args = parser.parse_args()

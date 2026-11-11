@@ -16,6 +16,6 @@ else
   echo "Warning: towit not found in PATH — cannot run implode." >&2
   echo "You may need to manually remove:" >&2
   echo "  • The towit binary symlink from ${INSTALL_DIR}/" >&2
-  echo "  • The stop hook from ~/.claude/settings.json" >&2
+  echo "  • The To Wit hooks (Stop, SessionEnd, SessionStart) from ~/.claude/settings.json" >&2
   echo "  • The data directory at ~/.towit/" >&2
 fi

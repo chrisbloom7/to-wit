@@ -245,7 +245,7 @@ def get_error_logger():
     import logging
     import logging.handlers
     log_dir = os.path.expanduser('~/.towit')
-    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(log_dir, mode=0o700, exist_ok=True)  # owner-only; an existing dir is left as is
     logger = logging.getLogger('towit.hook')
     if not logger.handlers:
         handler = logging.handlers.RotatingFileHandler(

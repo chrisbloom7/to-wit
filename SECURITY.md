@@ -60,8 +60,9 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 ### Subprocess Safety
 
 - The `claude` subprocess is invoked with a list (never `shell=True`)
-- The subprocess environment is scoped to an explicit prefix allowlist (`HOME`, `PATH`, `USER`, `TMPDIR`, `TERM`, `LANG`, `LC_*`, `CLAUDE_*`, `ANTHROPIC_*`) to avoid leaking unrelated credentials
-- `towit export --summarize` sends the original transcript (not the redacted archive) to the `claude` CLI at your request, with the same scoped environment as indexing
+- The subprocess environment for indexing and export (the claude calls) is scoped to an explicit prefix allowlist (`HOME`, `PATH`, `USER`, `TMPDIR`, `TERM`, `LANG`, `LC_*`, `CLAUDE_*`, `ANTHROPIC_*`) to avoid leaking unrelated credentials.
+- `towit resume` replaces itself with an interactive `claude --resume` and keeps your full environment by design; it is not a scoped subprocess
+- `towit export --summarize` sends the original transcript (not the redacted archive) to the `claude` CLI at your request, with the same scoped environment as indexing. `towit export --topic <name> --summarize` sends stored titles and summaries, which for conversations indexed by 0.8.2 or earlier may have been generated from unredacted transcripts
 - Ingest runs `git -C <cwd> rev-parse --git-common-dir` to group worktrees of one repo. It is invoked with a list (never `shell=True`), with the same scoped environment, a 5-second timeout, and any failure falls back to the working directory
 
 ### Settings File Writes

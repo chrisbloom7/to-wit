@@ -17,6 +17,19 @@ import towit_config
 from towit_config import Config, _DEFAULT_DB_PATH, is_valid_session_id
 
 
+class TestErrorLoggerDirectory(unittest.TestCase):
+    def test_error_log_dir_created_owner_only(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as home:
+            code = ("import towit_config; towit_config.get_error_logger()")
+            result = subprocess.run(
+                [sys.executable, '-c', code], cwd=HELPERS_DIR, capture_output=True, text=True,
+                env={'HOME': home, 'PATH': os.environ.get('PATH', ''),
+                     'TOWIT_CONFIG_PATH': os.path.join(home, 'none.toml')})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(os.stat(os.path.join(home, '.towit')).st_mode & 0o777, 0o700)
+
+
 def write_config(tmpdir, content):
     """Write content to a temp config.toml and return its path."""
     path = os.path.join(tmpdir, 'config.toml')

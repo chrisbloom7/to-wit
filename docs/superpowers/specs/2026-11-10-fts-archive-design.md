@@ -275,7 +275,6 @@ What shipped differs from the text above in these ways. The first five were plan
 | JSON output includes `conversation_id` | JSON keeps the existing `id` key and adds `seq`, `snippet`, `score` (`show --format json` is an array of `seq`, `role`, `ts`, `text`) | Avoids breaking existing consumers |
 | (silent) | `Database.is_indexed` means "has a non-null title" | Ingest creates rows with no title; backfill's dry run must not call them indexed |
 | Search output example (`ID` truncated to 8 characters, Date before Title) | Table columns are ID (full), Title, Keywords, Turn, Snippet, Date, grouped by working directory; "Turn" is the 0-based `seq` | Kept the existing table layout and added columns |
-| `repo_key` is "resolved once at first ingest and never recomputed" | Matches the spec: the stored key is kept on re-ingest (`COALESCE`), and a NULL key (legacy rows) is filled on the next archive. A first ingest after the worktree was deleted falls back to `cwd` and stays that way | The final audit found the upsert originally overwrote the key on every ingest; fixed. Sessions first archived after their worktree was deleted (live trial: `studio-app.phase-2a-payments`) do not group under the main repo; documented in the README |
 | (silent) | `include_subagents` affects `backfill` and the `SessionStart` catch-up scan only. The `Stop` and `SessionEnd` hooks never ingest subagent transcripts, and subagent sessions are never LLM-indexed | Subagent sessions are not interactive conversations |
 | (silent) | Text-only search results are capped at 50 conversations; metadata results are never capped; search arguments with no letter or digit are dropped | Bounded output; FTS5 cannot tokenize them |
 | Schema "added by migrations" | `PRAGMA user_version` / `SCHEMA_VERSION`; `Database.validate()` migrates an older database in place on first use | Existing catalogs upgrade without running `towit setup` |
@@ -283,6 +282,8 @@ What shipped differs from the text above in these ways. The first five were plan
 | `doctor` gains FTS5 and integrity checks | Also checks all three hook events, that hook command paths exist (fail if none resolve, warn if partial), and `disableAllHooks` in the settings file it is given; the integrity check fails only on corruption and warns if the database is locked or read-only. Up to 17 checks in total | Hook coverage is the main way capture silently fails |
 | `prune` reports "Likely removed by `claude purge`" | Subagent conversations have folder `<project>/<session>/subagents`, so a purged subagent session directory also appears in that report | Follows from how folders are stored |
 | One LLM call per hook | `Stop` and `SessionEnd` are separate processes; if both run before the first finishes, both may call the LLM for the same session | Cost only; not worth a lock |
+
+**Note on `repo_key` (not a deviation):** the first implementation overwrote the key on every ingest; that was fixed before release. The shipped behavior matches Decision 2: the key is resolved once and kept (git is skipped when a non-empty key is stored; a NULL or empty key is filled on the next ingest). A session first archived after its worktree was deleted falls back to `cwd` and does not group under the main repo; the README documents this.
 
 ## Live Trial Results
 
