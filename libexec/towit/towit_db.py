@@ -6,6 +6,7 @@ This module is imported by other towit scripts; it is not run directly.
 """
 
 import contextlib
+import hashlib
 import os
 import sys
 import sqlite3
@@ -104,6 +105,11 @@ CREATE INDEX IF NOT EXISTS idx_ct_conv               ON conversation_topics(conv
 CREATE INDEX IF NOT EXISTS idx_ck_keyword            ON conversation_keywords(keyword_id);
 CREATE INDEX IF NOT EXISTS idx_ck_conv               ON conversation_keywords(conversation_id);
 """
+
+
+def message_hash(role: str, text: str) -> str:
+    """sha256 hex digest of a message, used to detect whether an archive is a prefix of a transcript."""
+    return hashlib.sha256((role + "\0" + text).encode('utf-8')).hexdigest()
 
 
 class Database:
@@ -528,3 +534,82 @@ class Database:
                 "SELECT 1 FROM conversations WHERE id = ?", (conv_id,)
             ).fetchone()
             return row is not None
+
+    def is_forgotten(self, conv_id: str) -> bool:
+        """Return True if the session ID is in the forgotten tombstone table."""
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM forgotten WHERE id = ?", (conv_id,)
+            ).fetchone()
+            return row is not None
+
+    def archive_session(self, conv: dict, messages: list) -> str:
+        """
+        Atomically sync a session's messages into the archive.
+
+        conv keys: id, folder, cwd, started_at, last_active, repo_key, source_path.
+        Each message: role, ts, text (stored verbatim).
+
+        Returns 'ingested' (not previously archived), 'appended' (stored messages
+        are a prefix of messages), 'rewritten' (stored messages diverged), or
+        'unchanged'. LLM metadata (title, summary, message_count, topics,
+        keywords) is never touched. One BEGIN IMMEDIATE transaction; any
+        exception rolls everything back.
+        """
+        conv_id = conv['id']
+        tail_hash = message_hash(messages[-1]['role'], messages[-1]['text']) if messages else None
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT archived, archived_message_count, tail_hash FROM conversations WHERE id = ?",
+                    (conv_id,)
+                ).fetchone()
+                stored = row['archived_message_count'] if row else 0
+                if row is None or not row['archived']:
+                    outcome, start = 'ingested', 0
+                elif (0 < stored <= len(messages) and row['tail_hash'] == message_hash(
+                        messages[stored - 1]['role'], messages[stored - 1]['text'])):
+                    outcome = 'unchanged' if stored == len(messages) else 'appended'
+                    start = stored
+                else:
+                    outcome, start = 'rewritten', 0
+
+                params = {
+                    'id': conv_id, 'folder': conv.get('folder'), 'cwd': conv.get('cwd'),
+                    'started_at': conv.get('started_at'), 'last_active': conv.get('last_active'),
+                    'repo_key': conv.get('repo_key'), 'source_path': conv.get('source_path'),
+                    'tail_hash': tail_hash, 'count': len(messages),
+                }
+                conn.execute(
+                    """
+                    INSERT INTO conversations
+                        (id, folder, cwd, started_at, last_active, repo_key, source_path,
+                         tail_hash, archived, archived_message_count)
+                    VALUES
+                        (:id, :folder, :cwd, :started_at, :last_active, :repo_key, :source_path,
+                         :tail_hash, 1, :count)
+                    ON CONFLICT(id) DO UPDATE SET
+                        last_active            = excluded.last_active,
+                        cwd                    = excluded.cwd,
+                        repo_key               = excluded.repo_key,
+                        source_path            = excluded.source_path,
+                        tail_hash              = excluded.tail_hash,
+                        archived               = 1,
+                        archived_message_count = excluded.archived_message_count
+                    """,
+                    params
+                )
+
+                if start == 0:
+                    conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
+                conn.executemany(
+                    "INSERT INTO messages (conversation_id, seq, role, ts, text) VALUES (?, ?, ?, ?, ?)",
+                    [(conv_id, seq, m['role'], m.get('ts'), m['text'])
+                     for seq, m in enumerate(messages) if seq >= start]
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return outcome
