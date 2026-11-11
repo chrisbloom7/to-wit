@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Homebrew installation: `brew install chrisbloom7/tap/towit` (formula in the `chrisbloom7/homebrew-tap` repository). The README documents installing, upgrading, switching from a source install, and uninstalling with Homebrew.
 
+### Fixed
+
+- `errors.log` is now written next to the config file (the default is still `~/.towit/errors.log`) instead of always under `~/.towit`, so runs with `TOWIT_CONFIG_PATH` set (sandboxes, tests) no longer write to your real log. The log directory is derived from the config path alone, so logging keeps working when the config or database is broken.
+
 ## [0.9.2] - 2026-11-11
 
 ### Added
