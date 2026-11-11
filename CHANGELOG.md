@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `towit install-hook` now repairs hooks whose command points at a script that has moved or been removed (for example after moving your clone), instead of reporting "already installed" and leaving them broken; it rewrites only To Wit's own hook commands in place. This is the fix `towit doctor` suggests for a stale hook path.
+- When To Wit is installed under Homebrew's `Cellar`, `install-hook` writes the version-independent `opt/` path, so the hooks keep working after an upgrade.
+
 ## [0.9.0] - 2026-11-11
 
 > This release changes existing behavior (the default scope of `search`, the default of `prune`, what `backfill` does, and which hook events are installed). To Wit is a 0.x project, so these behavior changes are made in a minor release rather than a major one. The notes under **Changed** and **Upgrading** explain how to get the old behavior back.
