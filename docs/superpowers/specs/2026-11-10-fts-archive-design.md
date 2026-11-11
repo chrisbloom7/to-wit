@@ -256,7 +256,7 @@ The first attempt used a string the model failed to produce (it mis-reversed the
 
 ## Open Questions
 
-None blocking. Items 1–3 under "Not covered by the prototype" in Evidence (compaction/rewind, ranking at scale, backfill at scale) remain to be measured during the live trial.
+None blocking. Ranking quality on a large corpus, subagent transcripts, and backfill at scale (from "Not covered by the prototype" in Evidence) were measured in the live trial; see Live Trial Results (known-answer queries, both subagent modes, backfill times, database sizes). Compaction/rewind was not exercised by the trial and remains covered by the `tail_hash` guard.
 
 ## Follow-Up Specs
 
@@ -297,7 +297,8 @@ Run 2026-11-10 against `../../Robinina-LLC` with an isolated database, scope `fo
 | Backfill time | 2.8 s (2 skipped) | 8.3 s (3 skipped) |
 
 - **Disk:** about 0.68 MB per top-level session without subagents (16.4 MB / 24); the 568 subagent transcripts add about 11 MB (about 20 KB each). The README states this, not the prototype's 0.5 MB.
-- **Query latency:** 50-100 ms per search.
+- **Query latency:** 60-100 ms per search on the 597-conversation database.
+- **Snippets:** readable, with the matched terms bracketed (maintainer trial).
 - **Hygiene scan:** 0 unredacted secret-pattern hits in either database (counts only; no values printed).
 - **Worktree grouping:** sessions whose worktree had already been deleted when first archived keep their `cwd` as `repo_key` (for example `studio-app.phase-2a-payments` is its own key). `--repo studio-app` now matches them by the `studio-app.` prefix. See Deviations and Notes.
 
@@ -307,27 +308,27 @@ The maintainer picked 7 sessions and wrote a query for each; some queries were r
 
 | Session | Final query | Rank | Outcome |
 |---|---|---|---|
-| (id not recorded) | `robinina.art retail` | 2 | found in top 3 |
-| (id not recorded) | `pre-push hook` | 1 | found in top 3 |
-| (id not recorded) | `package.json sets overrides` | 1 | found in top 3 |
+| d1d7170f | `robinina.art retail` | 2 | found in top 3 |
+| 6f3073ec | `pre-push hook` | 1 | found in top 3 |
+| a98cd804 | `package.json sets overrides` | 1 | found in top 3 |
 | c22b7b45 | `tangerine` | 3 (4 hits) | found in top 3 |
-| e7ded4ae | `show password` / `toggle` | 8 of 10 / 8 of 9 | miss: ranking bias |
+| e7ded4ae | `show password` / `toggle` | rank 8 (10 hits) / rank 8 (9 hits) | miss: ranking bias |
 | 86db7390 | `openssl` | none | miss: vocabulary |
-| (id not recorded) | `notification versus email` | none | miss: vocabulary |
+| 7f6c9148 | `notification versus email` | none | miss: vocabulary |
 
 - **Ranking bias (e7ded4ae).** `bm25` scores each message independently and rewards the shortest message containing the term, so short passing mentions in large sessions outrank the long, substantive message the query was about.
-- **Vocabulary (86db7390).** `openssl` is absent from the stored text; it is most likely in tool output, which is stored only as stubs of at most 200 characters. A first attempt, `railsway openssl`, also had a typo.
-- **Vocabulary (24).** `versus` is absent from the stored text, so the all-terms search finds nothing. `notification email` ranks 4; the any-term (OR) fallback added in this release rescues the original query only at rank 8 of 18.
+- **Vocabulary (86db7390).** `openssl` is absent from the stored text; it is most likely in tool output; tool calls are stored only as stubs of at most 200 characters and tool results are not stored (failures only, as `[error]` lines of at most 300 characters). A first attempt, `railsway openssl`, also had a typo.
+- **Vocabulary (7f6c9148).** `versus` is absent from the stored text, so the all-terms search finds nothing. `notification email` ranks 4; the any-term (OR) fallback added in this release rescues the original query only at rank 8 of 18.
 - With subagents on, ranks were the same or worse on every query, with more noise.
 
 **Acceptance bar not met.** The bar was the intended session in the top 3 for at least 8 of 10 queries; the result is 4 of 7 sessions. The shortfall is understood: 3 sessions missed, one from the ranking bias and two from vocabulary.
 
-**Decision:** ship with the limitation documented (the README says tool output is stored only as short stubs and that ranking favors short matching messages). `include_subagents` stays `false`: archiving subagents multiplies the conversation count about 25x for about 1.7x the disk, mostly transcripts that are not interactive conversations, and gave no ranking benefit. A ranking redesign is tracked for 0.9.x.
+**Decision:** ship with the limitation documented (the README says tool calls are stored only as short stubs, results are not stored, and that ranking favors short matching messages). `include_subagents` stays `false`: archiving subagents multiplies the conversation count about 25x for about 1.7x the disk, mostly transcripts that are not interactive conversations, and gave no ranking benefit. A ranking redesign is tracked for 0.9.x.
 
 ### Follow-ups for 0.9.x
 
-- Per-conversation ranking (match count plus best score) instead of the best single message.
-- Tool-output searchability (stubs are capped at 200 characters today).
+- Per-conversation ranking (match count plus best score) instead of the best single message. Text AND matching is per message, so terms spread across different messages of one conversation trigger the OR retry, and OR ranking does not favor conversations that contain both terms.
+- Tool-output searchability: tool calls are stored as stubs of at most 200 characters and tool results are not stored, except failures as `[error]` lines of at most 300 characters.
 - `export --summarize` should pass `--no-session-persistence` to `claude -p` as indexing does (the flag exists; indexing already uses it).
 - Sidechain and meta messages are archived: `isSidechain`, `isMeta` and `isCompactSummary` are ignored.
 - `abspath` versus `realpath` for the stored `folder` and `source_path`.
