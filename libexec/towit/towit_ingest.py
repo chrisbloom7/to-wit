@@ -142,7 +142,7 @@ def parse_transcript(path: str) -> ParsedTranscript:
                 ts = entry.get('timestamp') or None
                 messages.append(ArchiveMessage(role=role, ts=ts, text=_truncate(text)))
     except OSError:
-        # Missing/unreadable transcript: never raise (called from the stop hook).
+        # Missing/unreadable transcript: never raise (called from the hooks).
         return ParsedTranscript(session_id=session_id, cwd='', started_at=None,
                                 last_active=None, messages=[])
 

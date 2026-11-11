@@ -41,7 +41,7 @@ No build step required — it's a bash/Python CLI tool.
 - `towit_setup.py` — Schema creation and migrations (adds columns if missing)
 - `towit_index.py` — Core indexing: parses JSONL transcripts, calls `claude -p` to generate title/summary/topics, filters trivial sessions
 - `towit_backfill.py` — Batch indexes existing `~/.claude/projects/` sessions
-- `towit_hook.py` — Stop hook entry point; guarded by `TOWIT_INDEXING=1` env var to prevent recursion
+- `towit_hook.py` — Hook entry point for the Stop, SessionEnd, and SessionStart events; guarded by `TOWIT_INDEXING=1` env var to prevent recursion
 - All other modules map 1:1 to subcommands
 
 ### Database Schema

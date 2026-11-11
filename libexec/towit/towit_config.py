@@ -166,7 +166,7 @@ class Config:
 
     @property
     def indexing_enabled(self) -> bool:
-        """Whether the stop hook runs LLM indexing. False leaves only archiving."""
+        """Whether the hooks run LLM indexing. False leaves only archiving."""
         return self._get('indexing', 'enabled', True, bool)
 
     @property

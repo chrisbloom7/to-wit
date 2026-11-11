@@ -2,7 +2,7 @@
 """
 towit_implode — remove the To Wit hook, database, and binary symlink.
 
-Performs a full uninstall: removes the stop hook from ~/.claude/settings.json,
+Performs a full uninstall: removes the To Wit hooks from ~/.claude/settings.json,
 deletes the database, and removes the towit binary symlink. After completing,
 prints the data directory path so the user can verify or manually remove any
 remaining files.
@@ -51,7 +51,7 @@ def main():
 
     print("The following will be removed:")
     if hook_installed:
-        print("  • To Wit stop hook from ~/.claude/settings.json")
+        print("  • To Wit hooks from ~/.claude/settings.json")
     if db_exists:
         print(f"  • Database at {db_path}")
     if binary_is_symlink:

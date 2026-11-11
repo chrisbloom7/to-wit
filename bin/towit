@@ -7,19 +7,23 @@
 # Subcommands:
 #   setup [--full | --hook | --config]
 #                                 Initialize database
-#                                   --full    also generates config, installs hook, and runs backfill
-#                                   --hook    also installs the stop hook
+#                                   --full    also generates config, installs hooks, and runs backfill
+#                                   --hook    also installs the Claude Code hooks
 #                                   --config  generate ~/.towit/config.toml (skips if already exists)
 #   search <terms...> [--or] [--topic] [--all | --summary | --title] [--only text|metadata]
 #                 [--format json|csv] [--folder <path>] [--repo <path|name>]
-#                                 Default: message text plus keywords, titles, summaries
+#                                 Default: message text plus keywords, titles, summaries;
+#                                   --only metadata restores the keywords-only scope
 #   list [--format json|csv] [--folder <path>] [--topic <name>] [--keyword <name>]
 #   resume <session-id> [--force] Resume a session in its original working directory
 #   show <session-id> [--around <seq>] [--context <n>] [--format text|json]
 #                                 Print archived messages (seq numbers are 0-based);
 #                                   --around shows <n> messages either side of <seq> (default 5);
-#                                  --context only applies with --around
-#   prune [--dry-run]             Remove entries whose transcripts no longer exist
+#                                   --context only applies with --around
+#   prune [--archive] [--yes] [--dry-run]
+#                                 Remove entries whose transcripts no longer exist; archived
+#                                   conversations are kept unless --archive is given
+#                                   (--yes skips its confirmation)
 #   forget <session-id> | --repo <path|name> | --folder <path> [--yes]
 #                                 Permanently delete conversations (messages, search index,
 #                                   topics, keywords) and block re-ingestion; exactly one
@@ -28,13 +32,16 @@
 #   export <session-id> [--format md|json] [--summarize]
 #   export --topic <name> [--format md|json] [--summarize]
 #   backfill [--dry-run] [--force] [--folder <path>]
-#   install-hook                  Add To Wit stop hook to ~/.claude/settings.json
-#   uninstall-hook                Remove To Wit stop hook from ~/.claude/settings.json
-#   teardown [--yes]              Remove hook and delete database
+#                                 Archive and index existing transcripts
+#   install-hook                  Add the To Wit hooks (Stop, SessionEnd, SessionStart)
+#                                   to ~/.claude/settings.json
+#   uninstall-hook                Remove the To Wit hooks from ~/.claude/settings.json
+#   teardown [--yes]              Remove hooks and delete database (including the archive)
 #   implode [--yes] [--install-dir <dir>]
-#                                 Full uninstall: remove hook, database, and binary symlink
+#                                 Full uninstall: remove hooks, database (including the
+#                                   archive), and binary symlink
 #   stats                         Show catalog statistics
-#   doctor                        Verify setup: config, database, and hook
+#   doctor                        Verify setup: config, database (FTS5, archive schema), and hooks
 #   help                          Show this message
 
 set -euo pipefail

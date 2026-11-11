@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-towit_teardown — remove the To Wit stop hook and delete the database.
+towit_teardown — remove the To Wit hooks and delete the database.
 
 Use before uninstalling To Wit to clean up all artifacts.
 """
@@ -32,7 +32,7 @@ def main():
     # Describe what will be removed
     print("The following will be removed:")
     if hook_installed:
-        print("  • To Wit stop hook from ~/.claude/settings.json")
+        print("  • To Wit hooks from ~/.claude/settings.json")
     if db_exists:
         print(f"  • Database at {db_path}")
 
