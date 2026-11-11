@@ -25,11 +25,30 @@ def write_config(tmpdir, db_path):
     return config_path
 
 
+def marker_path(config_path):
+    return os.path.join(os.path.dirname(config_path), 'claude-calls.txt')
+
+
 def run_resume(config_path, args=None):
-    """Run towit_resume.py as a subprocess."""
+    """Run towit_resume.py as a subprocess that can only reach a stub `claude`.
+
+    The stub is first on PATH, records its working directory and argv to a marker
+    file in the test's temp dir, and exits 0. HOME is a temp dir, so the real
+    ~/.claude is never touched.
+    """
+    tmpdir = os.path.dirname(config_path)
+    stub_dir = os.path.join(tmpdir, 'stubbin')
+    home = os.path.join(tmpdir, 'home')
+    os.makedirs(stub_dir, exist_ok=True)
+    os.makedirs(home, exist_ok=True)
+    stub = os.path.join(stub_dir, 'claude')
+    with open(stub, 'w') as f:
+        f.write('#!/bin/sh\nprintf \'%s\\n\' "$PWD $*" >> "' + marker_path(config_path) + '"\nexit 0\n')
+    os.chmod(stub, 0o755)
     return subprocess.run(
         ['python3', RESUME_SCRIPT] + (args or []),
-        env={**os.environ, 'TOWIT_CONFIG_PATH': config_path},
+        env={**os.environ, 'TOWIT_CONFIG_PATH': config_path, 'HOME': home,
+             'PATH': stub_dir + os.pathsep + os.environ.get('PATH', '')},
         capture_output=True,
         text=True
     )
@@ -111,7 +130,6 @@ class TestTowitResume(unittest.TestCase):
 
     def test_cwd_missing_with_force_recreates_directory(self):
         shutil.rmtree(self.cwd_dir)
-        # Will fail trying to exec claude, but the directory should be created first
         run_resume(self.config_path, ['--force', 'conv-a'])
         self.assertTrue(os.path.isdir(self.cwd_dir))
 
@@ -120,14 +138,31 @@ class TestTowitResume(unittest.TestCase):
         result = run_resume(self.config_path, ['--force', 'conv-a'])
         self.assertIn('recreated missing directory', result.stderr)
 
-    def test_valid_session_attempts_exec(self):
-        # With a valid session and existing cwd, the script will try to exec
-        # claude --resume conv-a. Since claude may not be installed in the
-        # test environment, we just verify it does NOT fail with our own errors.
+    def calls(self):
+        try:
+            with open(marker_path(self.config_path)) as f:
+                return f.read().splitlines()
+        except FileNotFoundError:
+            return []
+
+    def test_valid_session_execs_claude_resume_in_the_session_cwd(self):
         result = run_resume(self.config_path, ['conv-a'])
-        self.assertNotIn('session not found', result.stderr)
-        self.assertNotIn('working directory no longer exists', result.stderr)
-        self.assertNotIn('no longer resumable', result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls(),
+                         [os.path.realpath(self.cwd_dir) + ' --resume conv-a'])
+
+    def test_force_execs_claude_resume_after_recreating_the_cwd(self):
+        shutil.rmtree(self.cwd_dir)
+        result = run_resume(self.config_path, ['--force', 'conv-a'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.calls(),
+                         [os.path.realpath(self.cwd_dir) + ' --resume conv-a'])
+
+    def test_failures_never_reach_claude(self):
+        shutil.rmtree(self.cwd_dir)
+        run_resume(self.config_path, ['conv-a'])
+        run_resume(self.config_path, ['nonexistent-id'])
+        self.assertEqual(self.calls(), [])
 
 
 if __name__ == '__main__':

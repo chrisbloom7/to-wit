@@ -132,7 +132,7 @@ class TestTowitSearch(unittest.TestCase):
         self.assertIn('conv-c', ids)
 
     def test_search_sqlite_rails_and_mode_returns_nothing(self):
-        result = run_search(self.config_path, ['SQLite', 'Rails'])
+        result = run_search(self.config_path, ['SQLite', 'Rails', '--only', 'metadata'])
         # exit 0 with no results is acceptable; no conv IDs in output
         ids = self._ids_in_output(result.stdout)
         self.assertEqual(ids, set())
@@ -432,6 +432,19 @@ class TestTowitSearchArchive(unittest.TestCase):
             r = run_search(self.config_path, ['guard', '--repo', repo, '--format', 'json'])
             self.assertEqual([d['id'] for d in json.loads(r.stdout)], ['arc-2'], repo)
 
+    def test_repo_name_matches_worktree_key_by_prefix(self):
+        import json
+        db = Database(self.db_path)
+        for sid, key in (('wt-1', '/src/app.phase-2a'), ('wt-2', '/src/app2'),
+                         ('wt-3', '/src/otherapp.x')):
+            db.archive_session(
+                {'id': sid, 'folder': '/f', 'cwd': '/w/wt', 'started_at': '2026-02-03T00:00:00Z',
+                 'last_active': None, 'repo_key': key, 'source_path': None},
+                [{'role': 'user', 'ts': None, 'text': 'prefixprobe here'},
+                 {'role': 'assistant', 'ts': None, 'text': 'ok'}])
+        r = run_search(self.config_path, ['prefixprobe', '--repo', 'app', '--format', 'json'])
+        self.assertEqual([d['id'] for d in json.loads(r.stdout)], ['wt-1'])
+
     def test_hostile_term_does_not_crash(self):
         r = run_search(self.config_path, ['"', '--format', 'json'])
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -454,6 +467,59 @@ class TestTowitSearchArchive(unittest.TestCase):
         self.assertIn('seq', header)
         self.assertIn('snippet', header)
 
+
+    NOTICE = 'No results for all terms; showing results matching any term.'
+
+    def test_or_fallback_when_all_terms_find_nothing(self):
+        import json
+        r = run_search(self.config_path, ['recursion', 'yes', '--format', 'json'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(sorted(d['id'] for d in json.loads(r.stdout)), ['arc-1', 'arc-2'])
+        self.assertIn(self.NOTICE, r.stderr)
+        self.assertNotIn(self.NOTICE, r.stdout)  # stdout stays parseable
+
+    def test_or_fallback_notice_is_on_stderr_for_table_and_csv(self):
+        for extra in ([], ['--format', 'csv']):
+            r = run_search(self.config_path, ['recursion', 'yes'] + extra)
+            self.assertIn(self.NOTICE, r.stderr, extra)
+            self.assertNotIn(self.NOTICE, r.stdout, extra)
+            self.assertIn('arc-1', r.stdout, extra)
+        header = next(csv.reader(io.StringIO(r.stdout)))
+        self.assertEqual(header[0], 'id')
+
+    def test_or_fallback_applies_to_only_text(self):
+        import json
+        r = run_search(self.config_path, ['recursion', 'yes', '--only', 'text', '--format', 'json'])
+        self.assertEqual(sorted(d['id'] for d in json.loads(r.stdout)), ['arc-1', 'arc-2'])
+        self.assertIn(self.NOTICE, r.stderr)
+
+    def test_no_fallback_when_all_terms_match(self):
+        import json
+        r = run_search(self.config_path, ['recursion', 'guard', '--format', 'json'])
+        self.assertEqual([d['id'] for d in json.loads(r.stdout)], ['arc-1'])
+        self.assertNotIn(self.NOTICE, r.stderr)
+
+    def test_no_fallback_with_explicit_or(self):
+        r = run_search(self.config_path, ['recursion', 'zzzmissing', '--or', '--format', 'json'])
+        self.assertNotIn(self.NOTICE, r.stderr)
+        self.assertIn('arc-1', r.stdout)
+
+    def test_no_fallback_for_only_metadata(self):
+        import json
+        r = run_search(self.config_path, ['guard-rails', 'zzzmissing', '--only', 'metadata',
+                                          '--format', 'json'])
+        self.assertEqual(json.loads(r.stdout), [])
+        self.assertNotIn(self.NOTICE, r.stderr)
+
+    def test_no_fallback_for_a_single_term(self):
+        r = run_search(self.config_path, ['zzzmissing'])
+        self.assertNotIn(self.NOTICE, r.stderr)
+        self.assertIn('No conversations found', r.stderr)
+
+    def test_fallback_with_no_any_term_hits_prints_only_no_conversations(self):
+        r = run_search(self.config_path, ['zzzmissing', 'qqqmissing'])
+        self.assertNotIn(self.NOTICE, r.stderr)
+        self.assertIn('No conversations found', r.stderr)
 
 class TestTowitSearchSanitizesTable(unittest.TestCase):
     """Archived text can carry terminal escapes and newlines; table output must not."""

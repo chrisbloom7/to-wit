@@ -63,7 +63,7 @@ Subcommands:
                                   --hook    also installs the Claude Code hooks
                                   --config  generate ~/.towit/config.toml (skips if already exists)
   search <terms...>             Search message text, keywords, titles, and summaries
-    [--or]                        Match any term instead of all (default: AND)
+    [--or]                        Match any term instead of all (default: AND, with an automatic OR retry)
     [--topic]                     Also search conversation topics
     [--all]                       Search topics too (and, with --only metadata, summaries and titles)
     [--summary]                   Also search conversation summaries
@@ -71,7 +71,7 @@ Subcommands:
     [--only text|metadata]        Search only message text, or only metadata (the old scope)
     [--format json|csv]           Output format (default: table)
     [--folder <path>]             Scope to a working directory
-    [--repo <path|name>]          Scope to a repo (matches its key exactly or by directory name)
+    [--repo <path|name>]          Scope to a repo (its key, directory name, or `name.<branch>` worktrees)
   show <session-id>             Print the archived messages of a conversation
     [--around <seq>]              Only messages near this 0-based message number
     [--context <n>]               Messages either side of --around (default: 5)
@@ -115,7 +115,7 @@ Subcommands:
 
 **Archiving.** Each conversation is parsed from Claude Code's JSONL transcript files (`~/.claude/projects/`). The text of every user and assistant message is stored in `~/.towit/catalog.db` (SQLite, WAL mode) and indexed with FTS5, so searching needs no API calls and takes milliseconds. Tool calls are kept as one-line stubs inside the assistant turn that made them (`[Bash] <description or command>`, `[Edit] <file path>`, each capped at 200 characters), and failed tool results as `[error] <first 300 characters>`. Tool results and file contents are not stored. A single message is capped at 50,000 characters, so a pasted log cannot bloat the archive. Sessions with fewer than two user messages are not archived, and subagent sessions are skipped unless you set `include_subagents`. Archiving is incremental and append-only: each run stores only the messages added since the last one.
 
-**Redaction.** Before text is stored, secret-shaped strings (AWS keys, GitHub, Anthropic, OpenAI, Stripe, and Slack tokens, JWTs, private-key blocks, `Bearer` tokens, credentials in URLs, and long values assigned to `*_KEY`, `*_SECRET`, `*_TOKEN`, or `*_PASSWORD` names) are replaced with `[REDACTED:<kind>]`. The same redaction is applied to the transcript sent to Claude for analysis. It is best effort and pattern based, **not a guarantee**: treat the archive as sensitive. Redaction happens at ingest time only. Turning `ingest.redact` off or on later does not rewrite rows that are already archived (use `towit forget` to remove them), and a redacted value cannot be searched by its original text. Add your own patterns with `ingest.extra_patterns`.
+**Redaction.** Before text is stored, secret-shaped strings (AWS keys, GitHub, Anthropic, OpenAI, Stripe, and Slack tokens, JWTs, private-key blocks, `Bearer` tokens, credentials in URLs, and long values assigned to `*_KEY`, `*_SECRET`, `*_TOKEN`, or `*_PASSWORD` names) are replaced with `[REDACTED:<kind>]`. The same redaction is applied to the transcript sent to Claude for analysis, and to what `towit export --summarize` and `export --topic --summarize` send (at send time, so stored summaries from older versions are covered too). It is best effort and pattern based, **not a guarantee**: treat the archive as sensitive. Stored rows are redacted once, at ingest, and never rewritten; export prompts are redacted at send time. Turning `ingest.redact` off or on later does not rewrite rows that are already archived (use `towit forget` to remove them), and a redacted value cannot be searched by its original text. Add your own patterns with `ingest.extra_patterns`.
 
 **LLM metadata (optional).** After archiving, Claude analyzes substantive conversations and extracts a title, summary, 15-30 specific keywords (identifiers, method names, error messages, domain terms, filenames, etc.), and broad topic tags. Claude may decide a session is trivial (a quick one-shot or a command-execution session); the session is still archived and searchable by its text, it just has no title, summary, or keywords, and search results fall back to its first user message as the title. Set `[indexing] enabled = false` to archive only, with no API calls at all.
 
@@ -143,13 +143,14 @@ towit search recursion
 towit show aaaaaaaa-1111-2222-3333-444444444444 --around 1 --context 1
 ```
 
-- Every argument is a term and terms are combined with AND (`--or` for OR). An argument that contains a space is an exact phrase: `towit search "stop hook"`. Punctuation and FTS5 operators in your input are treated literally.
+- Every argument is a term and terms are combined with AND (`--or` for OR). If an AND search finds nothing and there are two or more terms, it is retried with OR and `No results for all terms; showing results matching any term.` is printed to stderr (so `--format json` and `csv` output on stdout stays parseable). The retry does not apply with `--or` or `--only metadata`. An argument that contains a space is an exact phrase: `towit search "stop hook"`. Punctuation and FTS5 operators in your input are treated literally.
 - `--only text` searches message text alone. `--only metadata` restores the pre-archive scope: keywords only, plus titles, summaries, and topics when you add `--title`, `--summary`, `--all`, or `--topic`. `--topic` adds topics to any scope.
+- Tool calls are stored only as short stubs (at most 200 characters) and tool results are not stored, except failures as `[error]` lines of at most 300 characters, so the output of commands is not searchable. Ranking favors short matching messages: a brief passing mention can outrank the long message that is really about the term, so scan past the top few results.
 - Text matches are capped at 50 conversations. Metadata matches are never capped.
-- `--folder` matches a conversation's working directory exactly. `--repo` matches a repo by its key (the exact path) or by its final path component, e.g. `--repo to-wit`.
+- `--folder` matches a conversation's working directory exactly. `--repo` matches a repo by its key (the exact path) or by its final path component, e.g. `--repo to-wit`. The name also matches keys whose final component starts with `name.`, so `--repo studio-app` finds `studio-app.phase-2a-payments` (the worktree of a repo whose directory had already been deleted). It does not match `studio-app2`, `other-studio-app.x`, or a `studio-app.x` that is only a parent directory. `towit forget --repo` lists the matched repo keys (up to 10, then `+N more`) before it asks you to confirm (and before deleting, even with `--yes`), so check them when a name matches more than you expect.
 - `--format json` and `--format csv` add `seq`, `snippet`, and `score` to each result (the conversation's id stays in `id`).
 
-**Repo grouping limitation.** A conversation's repo key is the git common directory of its working directory, so all the worktrees of a repo group under the main checkout. The key is resolved once, when the session is first archived, and kept on later ingests (a resumed session, a `towit backfill`), so deleting a worktree afterwards does not change it. If the working directory no longer exists (or is not a git checkout) at that first archive, the working directory itself becomes the key. Sessions from worktrees that were already deleted before they were first archived therefore do not group under the main repo; for example `studio-app.phase-2a-payments` is its own key. Use `--folder`, or `--repo` with the worktree's directory name, to find them.
+**Repo grouping.** A conversation's repo key is the git common directory of its working directory, so all the worktrees of a repo group under the main checkout. The key is resolved once, when the session is first archived, and kept on later ingests (a resumed session, a `towit backfill`), so deleting a worktree afterwards does not change it. If the working directory no longer exists (or is not a git checkout) at that first archive, the working directory itself becomes the key; for example `studio-app.phase-2a-payments` is its own stored key. Only the `--repo` match widens: `--repo studio-app` matches that key by its `studio-app.` prefix, so such sessions are found without having to name the worktree.
 
 `towit show <session-id>` prints the stored messages (`--around <seq> --context <n>` narrows it to the messages near a search hit; `--format json` prints an array of `seq`, `role`, `ts`, and `text`). It works after Claude Code has deleted the transcript. The text is archive content (including tool output and web content), so `show` strips terminal control sequences before printing it. The table output of `search` and `list` (titles, keywords, snippets, working directories) is sanitized the same way and kept on one line per row; `--format json` escapes non-ASCII characters and `--format csv` is printed as stored.
 
@@ -221,7 +222,7 @@ These settings control what is archived. Searching and archiving make no API cal
 
 | Key | Default | Description |
 |---|---|---|
-| `redact` | `true` | Redact secret-shaped strings before archiving and before sending the indexing transcript to Claude. Best effort; applies at ingest time only (see above). |
+| `redact` | `true` | Redact secret-shaped strings before archiving and before sending the indexing transcript to Claude. Best effort. Stored rows are redacted at ingest and never rewritten; export prompts are redacted at send time (see above). |
 | `extra_patterns` | `[]` | Extra regular expressions to redact, in addition to the built-in set. Invalid or empty-matching patterns are ignored with a warning. |
 | `include_subagents` | `false` | Also archive subagent sessions. Applies to `backfill` and the `SessionStart` catch-up scan; the `Stop` and `SessionEnd` hooks never archive them. Subagent sessions are archived only, never analyzed by Claude. |
 | `folders` | `[]` | Only archive sessions from matching project folders. Shell-style globs matched against the folder under `~/.claude/projects` that holds the transcript, for example `["*my-repo*"]`. Empty means all folders. |

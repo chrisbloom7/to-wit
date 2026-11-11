@@ -72,9 +72,9 @@ done
 bats_exit=0
 
 if [[ "${has_path_arg}" == false ]]; then
-  "${BATS}" --recursive tests/ "${bats_args[@]+"${bats_args[@]}"}" || bats_exit=$?
+  "${BATS}" --recursive tests/ "${bats_args[@]+"${bats_args[@]}"}" </dev/null || bats_exit=$?
 elif [[ ${#bats_args[@]} -gt 0 ]]; then
-  "${BATS}" "${bats_args[@]}" || bats_exit=$?
+  "${BATS}" "${bats_args[@]}" </dev/null || bats_exit=$?
 fi
 
 # ---------------------------------------------------------------------------
@@ -87,18 +87,18 @@ if [[ -n "${RUBY_BIN}" ]]; then
     # Explicit spec files passed on command line
     for spec in "${ruby_files[@]}"; do
       if [[ -n "${filter_pattern}" ]]; then
-        "${RUBY_BIN}" "${spec}" --name "/${filter_pattern}/" || ruby_exit=$?
+        "${RUBY_BIN}" "${spec}" --name "/${filter_pattern}/" </dev/null || ruby_exit=$?
       else
-        "${RUBY_BIN}" "${spec}" || ruby_exit=$?
+        "${RUBY_BIN}" "${spec}" </dev/null || ruby_exit=$?
       fi
     done
   elif [[ "${has_path_arg}" == false ]]; then
     # Discovery mode: run all *_spec.rb under tests/
     while IFS= read -r -d '' spec; do
       if [[ -n "${filter_pattern}" ]]; then
-        "${RUBY_BIN}" "${spec}" --name "/${filter_pattern}/" || ruby_exit=$?
+        "${RUBY_BIN}" "${spec}" --name "/${filter_pattern}/" </dev/null || ruby_exit=$?
       else
-        "${RUBY_BIN}" "${spec}" || ruby_exit=$?
+        "${RUBY_BIN}" "${spec}" </dev/null || ruby_exit=$?
       fi
     done < <(find tests/ -name '*_spec.rb' -print0 | sort -z)
   fi
@@ -114,18 +114,18 @@ if [[ -n "${PYTHON_BIN}" ]]; then
     # Explicit test files passed on command line
     for spec in "${python_files[@]}"; do
       if [[ -n "${filter_pattern}" ]]; then
-        "${PYTHON_BIN}" "${spec}" -k "${filter_pattern}" || python_exit=$?
+        "${PYTHON_BIN}" "${spec}" -k "${filter_pattern}" </dev/null || python_exit=$?
       else
-        "${PYTHON_BIN}" "${spec}" || python_exit=$?
+        "${PYTHON_BIN}" "${spec}" </dev/null || python_exit=$?
       fi
     done
   elif [[ "${has_path_arg}" == false ]]; then
     # Discovery mode: run all *_test.py under tests/
     while IFS= read -r -d '' spec; do
       if [[ -n "${filter_pattern}" ]]; then
-        "${PYTHON_BIN}" "${spec}" -k "${filter_pattern}" || python_exit=$?
+        "${PYTHON_BIN}" "${spec}" -k "${filter_pattern}" </dev/null || python_exit=$?
       else
-        "${PYTHON_BIN}" "${spec}" || python_exit=$?
+        "${PYTHON_BIN}" "${spec}" </dev/null || python_exit=$?
       fi
     done < <(find tests/ -name '*_test.py' -print0 | sort -z)
   fi

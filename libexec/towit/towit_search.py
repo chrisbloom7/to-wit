@@ -175,7 +175,8 @@ def main():
     parser.add_argument('terms', nargs='+', metavar='TERM',
                         help='Search terms')
     parser.add_argument('--or', dest='or_', action='store_true',
-                        help='Match any term instead of all terms')
+                        help='Match any term instead of all terms (without it, a search that finds '
+                             'nothing for all terms is retried with any term, unless --only metadata)')
     parser.add_argument('--topic', action='store_true',
                         help='Also search conversation topics')
     scope = parser.add_mutually_exclusive_group()
@@ -195,7 +196,8 @@ def main():
                              'plus keywords, titles and summaries. Text-only results are '
                              'capped at 50; metadata results are never capped')
     parser.add_argument('--repo', metavar='PATH|NAME',
-                        help='Restrict search to a repo (its key, or its directory name)')
+                        help='Restrict search to a repo: its key, its directory name, or a worktree of it '
+                             '(a directory named NAME.<branch>)')
     args = parser.parse_args()
 
     db = Database()
@@ -211,10 +213,19 @@ def main():
         # Default scope: message text plus keywords, titles and summaries.
         include_title = include_summary = True
     # --only metadata keeps the pre-archive behavior, including no result cap.
-    results = db.search_archive(args.terms, mode=mode, folder=args.folder, repo=args.repo,
-                                scope=scope, include_topics=include_topics,
-                                include_summary=include_summary, include_title=include_title,
-                                limit=50 if show_text else None)
+    def run(search_mode):
+        return db.search_archive(args.terms, mode=search_mode, folder=args.folder, repo=args.repo,
+                                 scope=scope, include_topics=include_topics,
+                                 include_summary=include_summary, include_title=include_title,
+                                 limit=50 if show_text else None)
+
+    results = run(mode)
+    if not results and mode == 'and' and show_text and len(args.terms) >= 2:
+        # All-terms search found nothing: retry matching any term. The notice goes to
+        # stderr for every format so stdout stays parseable.
+        results = run('or')
+        if results:
+            print("No results for all terms; showing results matching any term.", file=sys.stderr)
 
     if args.format == 'json':
         _print_json(results, show_text)

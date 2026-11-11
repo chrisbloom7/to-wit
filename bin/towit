@@ -12,8 +12,11 @@
 #                                   --config  generate ~/.towit/config.toml (skips if already exists)
 #   search <terms...> [--or] [--topic] [--all | --summary | --title] [--only text|metadata]
 #                 [--format json|csv] [--folder <path>] [--repo <path|name>]
+#                                 --repo NAME also matches worktree directories named NAME.<branch>
 #                                 Default: message text plus keywords, titles, summaries;
 #                                   --only metadata restores the keywords-only scope
+#                                 If all terms find nothing, retries matching any term
+#                                   (not with --or or --only metadata); notice on stderr
 #   list [--format json|csv] [--folder <path>] [--topic <name>] [--keyword <name>]
 #   resume <session-id> [--force] Resume a session in its original working directory
 #   show <session-id> [--around <seq>] [--context <n>] [--format text|json]
@@ -28,7 +31,9 @@
 #                                 Permanently delete conversations (messages, search index,
 #                                   topics, keywords) and block re-ingestion; exactly one
 #                                   selector is required; --folder matches the working
-#                                   directory exactly; prompts unless --yes
+#                                   directory exactly; --repo NAME also matches NAME.<branch>
+#                                   directories and the matched repo keys are listed first;
+#                                   prompts unless --yes
 #   export <session-id> [--format md|json] [--summarize]
 #   export --topic <name> [--format md|json] [--summarize]
 #   backfill [--dry-run] [--force] [--folder <path>]

@@ -819,6 +819,68 @@ class TestRepoFilter(unittest.TestCase):
         self.assertEqual(sql.count('?'), len(params))
 
 
+class TestRepoFilterPrefix(unittest.TestCase):
+    """--repo NAME also matches repo keys whose final component starts with 'NAME.'."""
+    KEYS = ['/src/studio-app', '/src/studio-app.phase-2a-payments', '/src/studio-app.fix/x.y',
+            '/src/studio-app2', '/src/other-studio-app.x', '/src/studio-app.d/inner',
+            '/src/w_p.one', '/src/wxp.two', '/src/50%.a', '/src/500.b', '/src/a.b.c', None]
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db = Database(os.path.join(self.tmpdir, 't.db'))
+        self.db.create_schema()
+        for i, key in enumerate(self.KEYS):
+            self.db.archive_session({'id': 'c%02d' % i, 'folder': '/f', 'cwd': '/w',
+                                     'started_at': None, 'last_active': None,
+                                     'repo_key': key, 'source_path': None}, [])
+
+    def _match(self, repo, col='c.repo_key'):
+        sql, params = self.db._repo_filter(repo, col)
+        with self.db.connect() as conn:
+            rows = conn.execute("SELECT c.repo_key FROM conversations c WHERE " + sql
+                                + " ORDER BY c.repo_key", params).fetchall()
+        return [r[0] for r in rows]
+
+    def test_name_matches_exact_and_dot_prefixed_final_component(self):
+        self.assertEqual(self._match('studio-app'),
+                         ['/src/studio-app', '/src/studio-app.phase-2a-payments'])
+
+    def test_does_not_match_longer_name_other_prefix_or_mid_path(self):
+        got = self._match('studio-app')
+        for bad in ('/src/studio-app2', '/src/other-studio-app.x', '/src/studio-app.d/inner',
+                    '/src/studio-app.fix/x.y'):
+            self.assertNotIn(bad, got)
+
+    def test_final_component_is_taken_after_the_last_slash(self):
+        self.assertEqual(self._match('x'), ['/src/studio-app.fix/x.y'])
+
+    def test_wildcards_stay_literal_in_the_prefix_test(self):
+        self.assertEqual(self._match('w_p'), ['/src/w_p.one'])
+        self.assertEqual(self._match('50%'), ['/src/50%.a'])
+        self.assertEqual(self._match('5%'), [])
+        self.assertEqual(self._match('%'), [])
+
+    def test_name_with_dot_matches_by_prefix_only_up_to_its_own_dot(self):
+        self.assertEqual(self._match('a'), ['/src/a.b.c'])
+        self.assertEqual(self._match('a.b'), ['/src/a.b.c'])
+
+    def test_path_argument_does_not_prefix_match(self):
+        self.assertEqual(self._match('/src/studio-app'), ['/src/studio-app'])
+
+    def test_custom_column_and_parameterization(self):
+        sql, params = self.db._repo_filter('webapp', 'x.k')
+        self.assertIn('x.k', sql)
+        self.assertNotIn('c.repo_key', sql)
+        self.assertEqual(sql.count('?'), len(params))
+
+    def test_repo_keys_for_scope_lists_distinct_matching_keys(self):
+        self.assertEqual(self.db.repo_keys_for_scope(repo='studio-app'),
+                         ['/src/studio-app', '/src/studio-app.phase-2a-payments'])
+        self.assertEqual(self.db.repo_keys_for_scope(), [])
+        self.assertEqual(self.db.repo_count_for_scope(repo='studio-app'), 2)
+
+
 class _FailingMatchConn:
     """Connection proxy that raises a chosen OperationalError for FTS MATCH queries."""
     def __init__(self, conn, message):

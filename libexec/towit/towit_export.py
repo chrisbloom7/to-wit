@@ -14,8 +14,9 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from towit_config import safe_subprocess_env
+from towit_config import config, safe_subprocess_env
 from towit_db import Database
+from towit_redact import redact
 
 
 # ---------------------------------------------------------------------------
@@ -23,6 +24,10 @@ from towit_db import Database
 # ---------------------------------------------------------------------------
 
 def _call_claude(prompt: str) -> str:
+    # Everything sent to claude passes through the ingest redaction settings (the
+    # transcript or the stored summaries, whichever the prompt carries).
+    if config.ingest_redact:
+        prompt = redact(prompt, config.ingest_extra_patterns)
     result = subprocess.run(
         ['claude', '-p', prompt, '--output-format', 'text'],
         capture_output=True, text=True, timeout=120,

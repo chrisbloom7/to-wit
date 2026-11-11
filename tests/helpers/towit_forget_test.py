@@ -526,6 +526,64 @@ class TestForgetCli(ForgetBase):
         self.assertIn("Delete 2 conversation(s) across 2 repo(s) matching 'api'? [y/N]", r.stdout)
         self.assertEqual(self.remaining(), 2)
 
+    def set_repos(self, pairs):
+        for sid, repo in pairs:
+            with self.db.connect() as conn:
+                conn.execute('UPDATE conversations SET repo_key=? WHERE id=?', (repo, sid))
+
+    def test_repo_prefix_matches_worktree_key(self):
+        self.set_repos([('sess-0001', '/home/a/studio-app.phase-2a'), ('sess-0002', '/home/a/studio-app2')])
+        r = self.run_forget(['--repo', 'studio-app', '--yes'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(self.db.is_forgotten('sess-0001'))
+        self.assertFalse(self.db.is_forgotten('sess-0002'))
+
+    def test_repo_prompt_lists_matched_keys(self):
+        self.set_repos([('sess-0001', '/home/a/studio-app'), ('sess-0002', '/home/a/studio-app.phase-2a')])
+        r = self.run_forget(['--repo', 'studio-app'], stdin='n\n')
+        self.assertIn("Delete 2 conversation(s) across 2 repo(s) matching 'studio-app'", r.stdout)
+        self.assertIn('/home/a/studio-app', r.stdout)
+        self.assertIn('/home/a/studio-app.phase-2a', r.stdout)
+        self.assertEqual(self.remaining(), 2)
+
+    def test_repo_prompt_sanitizes_and_caps_keys(self):
+        for i in range(12):
+            self.ingest('many-%04d' % i, ['hello there', 'an answer', 'again'])
+            self.set_repos([('many-%04d' % i, '/r/api.x%02d' % i)])
+        self.set_repos([('sess-0001', '/r/api.\x1b[31mred\x07')])
+        r = self.run_forget(['--repo', 'api'], stdin='n\n')
+        self.assertIn('across 13 repo(s)', r.stdout)
+        self.assertIn('+3 more', r.stdout)
+        self.assertEqual(r.stdout.count('/r/api.'), 10)
+        self.assertIn('/r/api.', r.stdout)
+        for bad in ('\x1b', '\x07', '[31m'):
+            self.assertNotIn(bad, r.stdout)
+        self.assertEqual(self.remaining(), 14)
+
+    def test_repo_yes_skips_prompt_but_still_lists_matched_keys(self):
+        self.set_repos([('sess-0001', '/home/a/studio-app.x')])
+        r = self.run_forget(['--repo', 'studio-app', '--yes'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn('[y/N]', r.stdout)
+        self.assertIn('Matched repo keys:', r.stdout)
+        self.assertIn('/home/a/studio-app.x', r.stdout)
+        self.assertLess(r.stdout.index('/home/a/studio-app.x'), r.stdout.index('Forgot'))
+        self.assertTrue(self.db.is_forgotten('sess-0001'))
+
+    def test_repo_yes_caps_and_sanitizes_listed_keys(self):
+        for i in range(12):
+            self.ingest('many-%04d' % i, ['hello there', 'an answer', 'again'])
+            self.set_repos([('many-%04d' % i, '/r/api.x%02d' % i)])
+        self.set_repos([('sess-0001', '/r/api.\x1b[31mred\x07')])
+        r = self.run_forget(['--repo', 'api', '--yes'])
+        self.assertIn('+3 more', r.stdout)
+        self.assertEqual(r.stdout.count('/r/api.'), 10)
+        self.assertNotIn('\x1b', r.stdout)
+
+    def test_folder_and_id_yes_print_no_key_list(self):
+        r = self.run_forget(['--folder', '/work/proj', '--yes'])
+        self.assertNotIn('Matched repo keys', r.stdout)
+
     def test_bulk_prompt_n_deletes_nothing(self):
         r = self.run_forget(['--folder', '/work/proj'], stdin='n\n')
         self.assertIn('Delete 1 conversation(s)? [y/N]', r.stdout)

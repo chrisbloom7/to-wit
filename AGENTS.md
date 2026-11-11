@@ -40,7 +40,7 @@ No build step required — it's a bash/Python CLI tool.
 Subcommand modules map 1:1 to `bin/towit` cases (`towit_search.py`, `towit_show.py`, `towit_forget.py`, `towit_prune.py`, `towit_stats.py`, `towit_doctor.py`, ...). The modules below are not subcommands:
 
 - `towit_config.py` — Loads `~/.towit/config.toml` (typed accessors, warnings for unknown keys), `safe_subprocess_env()`, session-id and transcript-path validation, the rotating error logger
-- `towit_db.py` — Database abstraction layer; all SQL lives here (schema, migrations, search, forget, archive writes)
+- `towit_db.py` — Database abstraction layer; all SQL lives here (schema, migrations, search, forget, archive writes). `_repo_filter` implements `--repo NAME` for search and forget: exact key, final path component equal to `NAME`, or final component starting with `NAME.` (worktree dirs); it uses `substr()`, never `LIKE`, so wildcards stay literal. `towit_forget` prints `repo_keys_for_scope` before the prompt (also with `--yes`)
 - `towit_ingest.py` — Archive ingest: parses JSONL into messages plus tool stubs, redacts, stores append-only, resolves `repo_key` (git common dir, else the cwd) once at first ingest (the stored key is kept afterwards unless it is NULL), runs the `SessionStart` catch-up scan. Its `main()` is the detached process the hook spawns (archive, then LLM indexing)
 - `towit_sanitize.py` — Strips terminal control sequences from archived text before it is printed (`show` text output, and the table output of `search` and `list`, which also collapse newlines)
 - `towit_redact.py` — Best-effort, pattern-based secret redaction (`[REDACTED:<kind>]`)
@@ -87,7 +87,7 @@ The archive is append-only: each ingest compares the stored tail hash to the tra
 - Path validation on all transcript paths and session IDs
 - SQL uses parameterized queries only (no string interpolation in WHERE clauses); FTS5 queries are built from quoted phrases (`build_match_expression`) bound as a parameter
 - Subprocess environments (the `claude` calls and the `git rev-parse` in `resolve_repo_key`) are scoped to an allowlist of env var prefixes via `safe_subprocess_env()`; subprocesses use list form, never `shell=True`
-- Secrets are redacted (`towit_redact`) before text is stored and before the indexing transcript is sent to `claude -p`; redaction is best effort and ingest-time only. `towit export --summarize` sends the original, unredacted transcript, and `export --topic --summarize` sends stored titles and summaries (which rows indexed by 0.8.2 or earlier may have derived from unredacted transcripts)
+- Secrets are redacted (`towit_redact`) before text is stored and before the indexing transcript is sent to `claude -p`; redaction is best effort; stored rows are redacted at ingest and never rewritten, export prompts are redacted at send time. `towit export --summarize` (single and `--topic`) also redacts the prompt at send time when `ingest.redact` is on, so transcripts and stored summaries (including rows indexed by 0.8.2 or earlier) are covered
 - `towit forget` tombstones ids in `forgotten`, and physically removes data (`secure_delete`, FTS `optimize`, `VACUUM`, WAL truncate)
 - Symlinked JSONL files excluded from backfill, the catch-up scan, and ingest
 
