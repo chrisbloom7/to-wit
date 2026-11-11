@@ -560,11 +560,29 @@ class TestForgetCli(ForgetBase):
             self.assertNotIn(bad, r.stdout)
         self.assertEqual(self.remaining(), 14)
 
-    def test_repo_yes_skips_prompt(self):
+    def test_repo_yes_skips_prompt_but_still_lists_matched_keys(self):
         self.set_repos([('sess-0001', '/home/a/studio-app.x')])
         r = self.run_forget(['--repo', 'studio-app', '--yes'])
+        self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn('[y/N]', r.stdout)
-        self.assertNotIn('/home/a/studio-app.x', r.stdout)
+        self.assertIn('Matched repo keys:', r.stdout)
+        self.assertIn('/home/a/studio-app.x', r.stdout)
+        self.assertLess(r.stdout.index('/home/a/studio-app.x'), r.stdout.index('Forgot'))
+        self.assertTrue(self.db.is_forgotten('sess-0001'))
+
+    def test_repo_yes_caps_and_sanitizes_listed_keys(self):
+        for i in range(12):
+            self.ingest('many-%04d' % i, ['hello there', 'an answer', 'again'])
+            self.set_repos([('many-%04d' % i, '/r/api.x%02d' % i)])
+        self.set_repos([('sess-0001', '/r/api.\x1b[31mred\x07')])
+        r = self.run_forget(['--repo', 'api', '--yes'])
+        self.assertIn('+3 more', r.stdout)
+        self.assertEqual(r.stdout.count('/r/api.'), 10)
+        self.assertNotIn('\x1b', r.stdout)
+
+    def test_folder_and_id_yes_print_no_key_list(self):
+        r = self.run_forget(['--folder', '/work/proj', '--yes'])
+        self.assertNotIn('Matched repo keys', r.stdout)
 
     def test_bulk_prompt_n_deletes_nothing(self):
         r = self.run_forget(['--folder', '/work/proj'], stdin='n\n')

@@ -30,7 +30,7 @@
 #                                   topics, keywords) and block re-ingestion; exactly one
 #                                   selector is required; --folder matches the working
 #                                   directory exactly; --repo NAME also matches NAME.<branch>
-#                                   directories and the prompt lists the matched repo keys;
+#                                   directories and the matched repo keys are listed first;
 #                                   prompts unless --yes
 #   export <session-id> [--format md|json] [--summarize]
 #   export --topic <name> [--format md|json] [--summarize]

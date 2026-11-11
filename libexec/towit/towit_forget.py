@@ -33,7 +33,7 @@ def main():
     )
     parser.add_argument('session_id', nargs='?', help='Session ID to forget')
     parser.add_argument('--repo', help='Forget every conversation in this repo (its key, its directory name, '
-                        'or a worktree directory named NAME.<branch>); lists the matched keys at the prompt')
+                        'or a worktree directory named NAME.<branch>); lists the matched keys before deleting')
     parser.add_argument('--folder', help='Forget every conversation whose working directory is exactly this path')
     parser.add_argument('--yes', '-y', action='store_true', help='Skip confirmation prompt')
     args = parser.parse_args()
@@ -78,15 +78,17 @@ def main():
     else:
         prompt = f"Delete {len(ids)} conversation(s)? [y/N] "
 
+    if args.repo is not None:
+        # A name also matches worktree keys such as <name>.<branch>; show what matched,
+        # even with --yes, before anything is deleted.
+        keys = db.repo_keys_for_scope(repo=args.repo)
+        print("Matched repo keys:")
+        for key in keys[:MAX_LISTED_KEYS]:
+            print(f"  {sanitize_cell(key)}")
+        if len(keys) > MAX_LISTED_KEYS:
+            print(f"  +{len(keys) - MAX_LISTED_KEYS} more")
+
     if not args.yes:
-        if args.repo is not None:
-            # A name also matches worktree keys such as <name>.<branch>; show what matched.
-            keys = db.repo_keys_for_scope(repo=args.repo)
-            print("Matched repo keys:")
-            for key in keys[:MAX_LISTED_KEYS]:
-                print(f"  {sanitize_cell(key)}")
-            if len(keys) > MAX_LISTED_KEYS:
-                print(f"  +{len(keys) - MAX_LISTED_KEYS} more")
         try:
             answer = input(prompt).strip().lower()
         except (EOFError, KeyboardInterrupt):
