@@ -798,6 +798,29 @@ class TestIndexConversationArchiveInteraction(unittest.TestCase):
              patch('towit_index.analyze_with_claude', return_value=self.ANALYSIS):
             self.assertEqual(index_conversation(path, self.db), 'indexed')
 
+    def test_pre_archive_db_without_forgotten_table_is_enriched(self):
+        old_path = os.path.join(self.tmpdir, 'old.db')
+        conn = sqlite3.connect(old_path)
+        conn.executescript("""
+            CREATE TABLE conversations (id TEXT PRIMARY KEY, folder TEXT, cwd TEXT,
+                started_at TEXT, last_active TEXT, title TEXT, summary TEXT,
+                message_count INTEGER, indexed_at TEXT);
+            CREATE TABLE topics (id INTEGER PRIMARY KEY, name TEXT UNIQUE COLLATE NOCASE);
+            CREATE TABLE conversation_topics (conversation_id TEXT, topic_id INTEGER,
+                PRIMARY KEY (conversation_id, topic_id));
+            CREATE TABLE keywords (id INTEGER PRIMARY KEY, name TEXT UNIQUE COLLATE NOCASE);
+            CREATE TABLE conversation_keywords (conversation_id TEXT, keyword_id INTEGER,
+                PRIMARY KEY (conversation_id, keyword_id));
+        """)
+        conn.commit()
+        conn.close()
+        path = self._write('old-2', MINIMAL_MESSAGES)
+        with patch('towit_index.analyze_with_claude', return_value=self.ANALYSIS):
+            self.assertEqual(index_conversation(path, Database(old_path)), 'indexed')
+        conn = sqlite3.connect(old_path)
+        self.assertEqual(conn.execute("SELECT title FROM conversations WHERE id='old-2'").fetchone()[0], 'T')
+        conn.close()
+
     def test_missing_db_file_is_skipped_and_not_created(self):
         missing = os.path.join(self.tmpdir, 'nodb', 'catalog.db')
         os.makedirs(os.path.dirname(missing))

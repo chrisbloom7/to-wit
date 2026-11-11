@@ -14,7 +14,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from towit_db import Database
+from towit_db import Database, is_missing_forgotten_table
 from towit_redact import redact
 from towit_config import config as _config, safe_subprocess_env
 
@@ -271,7 +271,7 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
         # Only an un-migrated DB (nothing can be forgotten yet) is safe to ignore;
         # anything else (locked, I/O) must stop indexing rather than risk enriching
         # a forgotten session.
-        if 'no such table: forgotten' not in str(exc):
+        if not is_missing_forgotten_table(exc):
             raise
 
     # Parse first so we can compare message count for staleness detection

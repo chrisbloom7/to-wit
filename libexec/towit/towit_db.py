@@ -107,6 +107,15 @@ CREATE INDEX IF NOT EXISTS idx_ck_conv               ON conversation_keywords(co
 """
 
 
+def is_missing_forgotten_table(exc: Exception) -> bool:
+    """True if exc is the error from an un-migrated DB lacking the forgotten table.
+
+    Nothing can be forgotten there, so callers treat it as not-forgotten; every
+    other OperationalError (locked, I/O) must still fail closed.
+    """
+    return isinstance(exc, sqlite3.OperationalError) and 'no such table: forgotten' in str(exc)
+
+
 def message_hash(role: str, text: str) -> str:
     """sha256 hex digest of a message, used to detect whether an archive is a prefix of a transcript."""
     return hashlib.sha256((role + "\0" + text).encode('utf-8')).hexdigest()
@@ -206,7 +215,14 @@ class Database:
 
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            if conn.execute("SELECT 1 FROM forgotten WHERE id = ?", (data['id'],)).fetchone():
+            try:
+                forgotten = conn.execute(
+                    "SELECT 1 FROM forgotten WHERE id = ?", (data['id'],)).fetchone()
+            except sqlite3.OperationalError as exc:
+                if not is_missing_forgotten_table(exc):
+                    raise
+                forgotten = None  # un-migrated DB: nothing can be forgotten
+            if forgotten:
                 conn.rollback()
                 return False
             conn.execute(
