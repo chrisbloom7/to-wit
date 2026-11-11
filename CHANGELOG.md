@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `towit setup --full` now generates `~/.towit/config.toml` as documented.
+- `towit list` shows the first user message as the title of archive-only conversations (as `search` and `show` already did), in table, JSON and CSV output. `towit stats` labels its total "Total conversations" (was "Conversations indexed"), since it counts archive-only rows too.
+- `towit forget <session-id>` now also forgets the session's subagent conversations (and tombstones them), and reports how many.
+- An older, shorter snapshot of a transcript no longer truncates a longer stored archive; only a genuinely different tail rewrites it.
 
 ### Security
 
@@ -49,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `towit forget` provides permanent, physical deletion of archived conversations, with a tombstone so they are not re-ingested.
 - `towit show` strips terminal control sequences from archived text before printing it.
 - `towit export --summarize` now runs `claude` with the scoped environment allowlist (as indexing already did) instead of the full environment.
+- `towit teardown` and `towit implode` now also remove `catalog.db-wal`, `-shm` and `-journal` (a killed ingest could leave message text in the write-ahead log).
+- `towit prune --archive` now deletes archived text physically (FTS merge, `VACUUM`, WAL truncate), like `forget` but without a tombstone; before, the text stayed in the FTS index and on disk.
+- `towit search` and `towit list` strip terminal control sequences and collapse newlines in table output, as `show` does.
+- Ingest redacts a full tool value, error or message before applying the 200, 300 and 50,000 character caps, so a secret cut at a cap boundary no longer survives in part.
+- `~/.towit/errors.log` and its rotated copies are created owner-only (`0600`); looser existing files are tightened.
 - FTS5 search input is escaped into quoted phrases and bound as a parameter; the `git rev-parse` subprocess used for repo grouping uses a list command, the scoped environment, and a 5-second timeout.
 
 ## [0.8.2] - 2026-04-17
