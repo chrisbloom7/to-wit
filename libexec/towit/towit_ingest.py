@@ -254,8 +254,8 @@ def catch_up(root: str | None = None, db: Database | None = None) -> dict[str, i
     Scans `root` (default ~/.claude/projects) for *.jsonl files with an mtime newer than
     the `last_catch_up` stamp minus a 60 s slack. Never calls the LLM. Returns counts
     keyed by ingest_transcript status, plus 'error' for files that raised. The stamp is
-    the scan start time, written only once the scan completes. A missing DB (SystemExit)
-    propagates: it is a global failure, not a per-file one.
+    the scan start time, written only once the scan completes and without errors. A missing
+    DB (SystemExit) propagates: it is a global failure, not a per-file one.
     """
     root = root or os.path.expanduser('~/.claude/projects')
     db = db or Database()
@@ -290,7 +290,9 @@ def catch_up(root: str | None = None, db: Database | None = None) -> dict[str, i
                     pass
             counts[status] = counts.get(status, 0) + 1
 
-    db.set_meta(CATCH_UP_META_KEY, started.isoformat())
+    # An errored file is older than the new stamp, so advancing would skip it on the next scan.
+    if not counts.get('error'):
+        db.set_meta(CATCH_UP_META_KEY, started.isoformat())
     return counts
 
 

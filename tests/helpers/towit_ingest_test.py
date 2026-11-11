@@ -303,6 +303,14 @@ class TestIngestTranscript(unittest.TestCase):
         self.assertEqual(ingest_transcript(sub_path, self.db), 'ingested')
         self.assertEqual(len(self._rows('agent-0001')), 3)
 
+    def test_should_skip_path_subagent_depends_on_include_setting(self):
+        # Regression pin for the subagent-path check (refactored to is_subagent_path).
+        sub_path = os.path.join(self.folder, 'sess-0001', 'subagents', 'agent-0001.jsonl')
+        self.assertTrue(towit_ingest.should_skip_path(sub_path))
+        self.ingest_include_subagents.return_value = True
+        self.assertFalse(towit_ingest.should_skip_path(sub_path))
+        self.assertFalse(towit_ingest.should_skip_path(self.path))
+
     def test_symlinked_transcript_skipped(self):
         link = os.path.join(self.folder, 'linked-session.jsonl')
         os.symlink(self.path, link)
@@ -525,7 +533,41 @@ class TestCatchUp(unittest.TestCase):
         with unittest.mock.patch.object(towit_ingest, 'ingest_transcript', side_effect=flaky):
             counts = towit_ingest.catch_up(root=self.root, db=self.db)
         self.assertEqual(counts, {'error': 1, 'ingested': 1})
-        self.assertIsNotNone(self.db.get_meta('last_catch_up'))
+        self.assertIsNone(self.db.get_meta('last_catch_up'))  # an errored scan is retried
+
+    def _flaky_ingest(self):
+        real = towit_ingest.ingest_transcript
+
+        def flaky(path, db=None):
+            if path.endswith('sess-0001.jsonl'):
+                raise RuntimeError('boom')
+            return real(path, db)
+        return unittest.mock.patch.object(towit_ingest, 'ingest_transcript', side_effect=flaky)
+
+    def test_error_during_scan_does_not_advance_existing_stamp(self):
+        old_stamp = '2020-01-01T00:00:00+00:00'
+        self.db.set_meta('last_catch_up', old_stamp)
+        with self._flaky_ingest():
+            counts = towit_ingest.catch_up(root=self.root, db=self.db)
+        self.assertEqual(counts.get('error'), 1)
+        self.assertEqual(self.db.get_meta('last_catch_up'), old_stamp,
+                         'last_catch_up must not advance when any transcript errored')
+
+    def test_error_during_first_scan_leaves_stamp_unset(self):
+        self.assertIsNone(self.db.get_meta('last_catch_up'))
+        with self._flaky_ingest():
+            counts = towit_ingest.catch_up(root=self.root, db=self.db)
+        self.assertEqual(counts.get('error'), 1)
+        self.assertIsNone(self.db.get_meta('last_catch_up'),
+                          'last_catch_up must stay unset when the first scan had an error')
+
+    def test_clean_scan_still_advances_stamp(self):
+        old_stamp = '2020-01-01T00:00:00+00:00'
+        self.db.set_meta('last_catch_up', old_stamp)
+        counts = towit_ingest.catch_up(root=self.root, db=self.db)
+        self.assertNotIn('error', counts)
+        self.assertGreater(datetime.fromisoformat(self.db.get_meta('last_catch_up')),
+                           datetime.fromisoformat(old_stamp))
 
     def test_missing_root_returns_empty(self):
         self.assertEqual(towit_ingest.catch_up(root=os.path.join(self.tmp, 'nope'), db=self.db), {})
