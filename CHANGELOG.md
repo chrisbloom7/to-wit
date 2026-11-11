@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-11-11
+
 ### Fixed
 
 - `towit` no longer archives or sends to the LLM entries Claude Code marks as meta (such as the `<local-command-caveat>` text). Sessions archived earlier are cleaned the next time they are ingested (an archived session that ends with a meta entry is cleaned once it grows); `towit backfill` re-ingests every session.
