@@ -243,5 +243,70 @@ class TestTowitList(unittest.TestCase):
         self.assertNotIn('conv-c', ids)
 
 
+class TestTowitListSanitizesTable(unittest.TestCase):
+    """Titles, keywords and cwd come from archived text; table output must be terminal-safe."""
+    EVIL = 'x\x1b[31mred\x1b[0m \x1b]0;pwned\x07 y\rz\x9b2J'
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        db = Database(self.db_path)
+        db.create_schema()
+        cwd = '/w/app' + '\x1b]0;cwdpwn\x07'
+        db.upsert_conversation({
+            'id': 'evil-1', 'folder': '/f', 'cwd': cwd, 'started_at': '2026-02-01T00:00:00Z',
+            'last_active': '2026-02-01T00:00:00Z', 'title': 'title ' + self.EVIL + '\nmore',
+            'summary': '', 'topics': [], 'keywords': ['kw' + self.EVIL]})
+        db.archive_session(
+            {'id': 'evil-2', 'folder': '/f', 'cwd': cwd, 'started_at': '2026-02-02T00:00:00Z',
+             'last_active': '2026-02-02T00:00:00Z', 'repo_key': None, 'source_path': None},
+            [{'role': 'user', 'ts': None, 'text': 'first line ' + self.EVIL + '\nsecond line\there'},
+             {'role': 'assistant', 'ts': None, 'text': 'ok'}])
+
+    def test_table_cells_and_cwd_header_are_clean(self):
+        r = run_list(self.config_path)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for ch in r.stdout:
+            if ch != '\n':
+                self.assertGreaterEqual(ord(ch), 0x20, repr(ch))
+                self.assertFalse(0x7f <= ord(ch) <= 0x9f, repr(ch))
+        for leaked in ('[31m', 'pwned', 'cwdpwn', '[2J'):
+            self.assertNotIn(leaked, r.stdout)
+        self.assertEqual(len(r.stdout.splitlines()), 5, r.stdout)  # cwd, header, divider, 2 rows
+
+    def test_json_still_ascii_escapes(self):
+        r = run_list(self.config_path, ['--format', 'json'])
+        self.assertNotIn('\x1b', r.stdout)
+        self.assertNotIn('\x07', r.stdout)
+
+
+class TestTowitListArchiveOnlyTitle(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        db = Database(self.db_path)
+        db.create_schema()
+        db.archive_session(
+            {'id': 'arc-only', 'folder': '/f', 'cwd': '/w/app', 'started_at': '2026-02-01T00:00:00Z',
+             'last_active': '2026-02-01T00:00:00Z', 'repo_key': None, 'source_path': None},
+            [{'role': 'user', 'ts': None, 'text': 'How do I tune the flux capacitor?'},
+             {'role': 'assistant', 'ts': None, 'text': 'carefully'}])
+
+    def test_table_shows_first_user_message_as_title(self):
+        r = run_list(self.config_path)
+        self.assertIn('How do I tune the flux capacitor?', r.stdout)
+
+    def test_json_and_csv_use_the_same_fallback_title(self):
+        import json
+        data = json.loads(run_list(self.config_path, ['--format', 'json']).stdout)
+        self.assertEqual(data[0]['title'], 'How do I tune the flux capacitor?')
+        rows = list(csv.reader(io.StringIO(run_list(self.config_path, ['--format', 'csv']).stdout)))
+        self.assertEqual(rows[1][1], 'How do I tune the flux capacitor?')
+
+
 if __name__ == '__main__':
     unittest.main()

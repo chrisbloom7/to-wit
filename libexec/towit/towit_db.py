@@ -686,7 +686,9 @@ class Database:
 
         with self.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-            return [self._row_to_dict(r) for r in rows]
+            results = [self._row_to_dict(r) for r in rows]
+            self._fill_title_fallback(conn, results)
+            return results
 
     def get_conversation(self, conv_id: str):
         """Return a single conversation dict, or None if not found."""
@@ -804,6 +806,17 @@ class Database:
                 + " ORDER BY started_at DESC, id", params).fetchall()
             return [r['id'] for r in rows]
 
+    def subagent_ids_for_session(self, session_id: str) -> list:
+        """Ids of a session's subagent conversations: rows stored under their own ids in
+        a folder ending `/<session_id>/subagents`."""
+        self.validate()
+        suffix = f"/{session_id}/subagents"
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM conversations WHERE length(folder) >= length(?1) "
+                "AND substr(folder, -length(?1)) = ?1 ORDER BY id", (suffix,)).fetchall()
+            return [r['id'] for r in rows]
+
     def repo_count_for_scope(self, repo: str = None, folder: str = None) -> int:
         """Number of distinct repo_keys among the conversations in a scope (see
         conversation_ids_for_scope); lets a caller show how widely a basename matches."""
@@ -836,25 +849,29 @@ class Database:
         busy, log, checkpointed = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
         return busy == 0 and checkpointed >= log
 
-    def purge_free_space(self, example_id: str = '<session-id>') -> str | None:
+    def purge_free_space(self, example_id: str = '<session-id>', retry: str = None) -> str | None:
         """Physically remove text freed earlier by any writer (VACUUM, then truncate the
         WAL). Idempotent, safe to run any time, and never raises: returns a warning
-        string naming the retry command (`towit forget <example_id>`) if cleanup was
-        incomplete, else None."""
+        string naming the retry command (`towit forget <example_id>`, or `retry` when
+        given) if cleanup was incomplete, else None."""
         self.validate()
-        retry = (f"Re-run `towit forget {example_id}` when no other towit process is "
-                 f"active to finish cleanup.")
+        removed = 'removed' if retry else 'forgotten'
+        retry = retry or (f"Re-run `towit forget {example_id}` when no other towit process is "
+                          f"active to finish cleanup.")
         try:
             with self.connect() as conn:
                 if self._purge_free_space(conn):
                     return None
         except sqlite3.Error as exc:
-            return (f"the conversations were forgotten, but physical cleanup was incomplete "
+            return (f"the conversations were {removed}, but physical cleanup was incomplete "
                     f"({exc}); deleted data may remain on disk. {retry}")
         return f"some deleted data may remain in the write-ahead log. {retry}"
 
-    def forget_conversations(self, ids: list) -> int:
+    def forget_conversations(self, ids: list, tombstone: bool = True) -> int:
         """Permanently delete conversations and tombstone their ids; return how many existed.
+
+        With tombstone=False (used by `prune`) the ids are not tombstoned, so a session
+        whose transcript reappears can be archived again; everything else is identical.
 
         Forgets exactly the ids passed — a caller that resolved a scope and prompted the
         user passes the set matched at prompt time, so conversations that appear later
@@ -877,7 +894,8 @@ class Database:
             try:
                 for conv_id in dict.fromkeys(ids):
                     if conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,)).rowcount:
-                        conn.execute("INSERT OR IGNORE INTO forgotten (id) VALUES (?)", (conv_id,))
+                        if tombstone:
+                            conn.execute("INSERT OR IGNORE INTO forgotten (id) VALUES (?)", (conv_id,))
                         forgotten += 1
                         first_id = first_id or conv_id
                 if forgotten:
@@ -888,7 +906,11 @@ class Database:
                 conn.rollback()
                 raise
         if forgotten:
-            self.cleanup_warning = self.purge_free_space(first_id)
+            quoted_path = "'" + self.db_path.replace("'", "'\\''") + "'"  # shell-safe
+            self.cleanup_warning = self.purge_free_space(
+                first_id, None if tombstone else
+                f"When no other towit process is active, run: sqlite3 {quoted_path} "
+                f"'VACUUM; PRAGMA wal_checkpoint(TRUNCATE);'")
         return forgotten
 
     def forget_conversation(self, conv_id: str) -> bool:
@@ -994,7 +1016,8 @@ class Database:
 
         Returns 'ingested' (not previously archived), 'appended' (stored messages
         are a prefix of messages), 'rewritten' (stored messages diverged),
-        'unchanged', or 'forgotten' (id is tombstoned; nothing written). LLM
+        'unchanged' (including an older, shorter snapshot of a longer archive; nothing
+        written), or 'forgotten' (id is tombstoned; nothing written). LLM
         metadata (title, summary, message_count, topics, keywords) is never touched. One BEGIN IMMEDIATE transaction; any
         exception rolls everything back.
         """
@@ -1020,6 +1043,16 @@ class Database:
                     outcome = 'unchanged' if stored == len(messages) else 'appended'
                     start = stored
                 else:
+                    if row['archived'] and stored > len(messages) > 0:
+                        # An older, shorter snapshot of a longer archive (e.g. a stale reader
+                        # racing a newer ingest) must not truncate it. Only a stored message at
+                        # the snapshot's tail position that differs marks a genuine rewrite.
+                        at_tail = conn.execute(
+                            "SELECT role, text FROM messages WHERE conversation_id = ? AND seq = ?",
+                            (conv_id, len(messages) - 1)).fetchone()
+                        if at_tail and message_hash(at_tail['role'], at_tail['text']) == tail_hash:
+                            conn.rollback()
+                            return 'unchanged'
                     outcome, start = 'rewritten', 0
 
                 params = {

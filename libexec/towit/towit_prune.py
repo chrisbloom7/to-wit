@@ -20,6 +20,7 @@ left untouched — they can still be resumed with `towit open --force`.
 
 import argparse
 import os
+import sqlite3
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -82,12 +83,26 @@ def main():
             print("Aborted. Nothing removed.")
             return
 
-    for s in removable:
-        transcript = os.path.join(s['folder'], f"{s['id']}.jsonl")
-        if args.dry_run:
+    if args.dry_run:
+        for s in removable:
+            transcript = os.path.join(s['folder'], f"{s['id']}.jsonl")
             print(f"  would remove: {s['id']}  (transcript: {transcript})")
-        else:
-            db.delete_conversation(s['id'])
+    elif removable:
+        # Archived rows get the same physical removal as `forget` (FTS merge, VACUUM, WAL
+        # truncate) minus the tombstone, so a pruned session can be archived again if its
+        # transcript returns. Metadata-only rows hold no message text: a plain delete is enough.
+        try:
+            for s in removable:
+                if not s['archived']:
+                    db.delete_conversation(s['id'])
+            archived_ids = [s['id'] for s in removable if s['archived']]
+            if archived_ids:
+                db.forget_conversations(archived_ids, tombstone=False)
+        except sqlite3.Error as exc:
+            print(f"Error: could not prune ({exc}); some entries may not have been deleted.",
+                  file=sys.stderr)
+            sys.exit(1)
+        for s in removable:
             print(f"  removed: {s['id']}")
 
     total = len(removable)
@@ -97,6 +112,9 @@ def main():
         print(f"\nDry run: {total} of {len(stubs)} entr{'y' if total == 1 else 'ies'} would be pruned.")
     else:
         print(f"\nPruned {total} of {len(stubs)} entr{'y' if total == 1 else 'ies'}.")
+
+    if db.cleanup_warning:
+        print(f"Warning: {db.cleanup_warning}", file=sys.stderr)
 
     if kept:
         print(f"\nKept {len(kept)} archived "

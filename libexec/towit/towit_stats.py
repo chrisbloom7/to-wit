@@ -70,7 +70,7 @@ def main():
     )
     archive = db.archive_stats()
 
-    print(f"Conversations indexed : {total}")
+    print(f"Total conversations   : {total}")
     print(f"Date range            : {oldest or 'n/a'} — {newest or 'n/a'}")
     print(f"Unique projects       : {unique_projects}")
     if pruneable:

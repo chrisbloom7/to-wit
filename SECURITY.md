@@ -11,7 +11,7 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 | Claude Code JSONL transcripts | High | Written by Claude Code itself; may indirectly contain untrusted external data (e.g. pasted content) |
 | Claude CLI responses (indexing) | Medium | Parsed with error handling; treated as structured JSON with graceful fallback |
 | Hook payload (stdin JSON) | Medium | Provided by Claude Code for `Stop`, `SessionEnd`, and `SessionStart`; `session_id` format and the `transcript_path` filesystem path are validated before use (`SessionStart` uses no path from the payload) |
-| Archived message text | Medium | Originates in transcripts, so it can carry tool output, web content, or terminal escape sequences; `towit show` strips control sequences before printing; never interpreted as SQL or FTS5 syntax |
+| Archived message text | Medium | Originates in transcripts, so it can carry tool output, web content, or terminal escape sequences; `towit show` strips control sequences before printing, and `towit search` and `towit list` do the same for their table output (JSON output ASCII-escapes instead; CSV is printed raw); never interpreted as SQL or FTS5 syntax |
 | Search terms (CLI arguments) | Medium | Escaped into quoted FTS5 phrases and bound as parameters |
 | Environment variables | Medium | Used for config overrides; subprocess env is scoped to an explicit allowlist |
 | SQLite database | High | Local file; no network exposure; holds full message text |
@@ -41,7 +41,7 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 
 - `towit forget <session-id>`, `--repo <path|name>`, and `--folder <path>` permanently delete conversations with their messages, search-index entries, topics, and keywords, after a confirmation prompt (or `--yes`)
 - A tombstone (the session id and a timestamp only) is kept so that `backfill`, the hooks, and the catch-up scan cannot re-ingest a conversation from a transcript that is still on disk
-- Deletion is physical, not just logical: `PRAGMA secure_delete=ON` zeroes freed pages, the FTS5 index is merged (`optimize`), and a `VACUUM` plus write-ahead-log truncate follow. If that cleanup cannot finish, `forget` warns on stderr and `towit forget <session-id>` can be re-run to retry
+- Deletion is physical, not just logical: `PRAGMA secure_delete=ON` zeroes freed pages, the FTS5 index is merged (`optimize`), and a `VACUUM` plus write-ahead-log truncate follow (`towit prune --archive` deletes the same way, without a tombstone). If that cleanup cannot finish, `forget` warns on stderr and `towit forget <session-id>` can be re-run to retry
 - The original transcripts under `~/.claude/projects/` are not touched
 
 ### Input Validation
@@ -73,7 +73,7 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 ### Error Handling
 
 - The hooks (`Stop`, `SessionEnd`, `SessionStart`) catch all exceptions and never exit non-zero (to avoid interrupting Claude Code). Work runs in a detached background process, so a slow or failing ingest can never block a session or exceed `SessionEnd`'s time budget; a `TOWIT_INDEXING` guard stops towit's own `claude` calls from triggering the hooks recursively
-- Errors are logged to `~/.towit/errors.log` (rotating, 100 KB max, 2 backups) for post-hoc debugging
+- Errors are logged to `~/.towit/errors.log` (rotating, 100 KB max, 2 backups, owner-only `0600`) for post-hoc debugging
 
 ## Reporting a Vulnerability
 

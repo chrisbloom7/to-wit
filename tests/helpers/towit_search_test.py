@@ -455,5 +455,54 @@ class TestTowitSearchArchive(unittest.TestCase):
         self.assertIn('snippet', header)
 
 
+class TestTowitSearchSanitizesTable(unittest.TestCase):
+    """Archived text can carry terminal escapes and newlines; table output must not."""
+    EVIL = 'x\x1b[31mred\x1b[0m \x1b]0;pwned\x07 y\rz\x9b2J'
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        db = Database(self.db_path)
+        db.create_schema()
+        cwd = '/w/app' + '\x1b]0;cwdpwn\x07'
+        db.archive_session(
+            {'id': 'evil-1', 'folder': '/f', 'cwd': cwd, 'started_at': '2026-02-01T00:00:00Z',
+             'last_active': '2026-02-01T00:00:00Z', 'repo_key': None, 'source_path': None},
+            [{'role': 'user', 'ts': None, 'text': 'zorblat ' + self.EVIL + '\nsecond\tline of it'},
+             {'role': 'assistant', 'ts': None, 'text': 'zorblat reply ' + self.EVIL}])
+        db.upsert_conversation({
+            'id': 'evil-2', 'folder': '/f', 'cwd': cwd, 'started_at': '2026-02-02T00:00:00Z',
+            'last_active': '2026-02-02T00:00:00Z', 'title': 'zorblat title ' + self.EVIL + '\nmore',
+            'summary': '', 'topics': [], 'keywords': ['zorblat-kw' + self.EVIL]})
+
+    def assert_clean(self, out, expected_lines):
+        for ch in out:
+            if ch != '\n':
+                self.assertGreaterEqual(ord(ch), 0x20, repr(ch))
+                self.assertFalse(0x7f <= ord(ch) <= 0x9f, repr(ch))
+        for leaked in ('[31m', 'pwned', 'cwdpwn', '[2J'):
+            self.assertNotIn(leaked, out)
+        self.assertEqual(len(out.splitlines()), expected_lines, out)
+
+    def test_table_cells_and_cwd_header_are_clean(self):
+        r = run_search(self.config_path, ['zorblat'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # cwd header + column header + divider + two rows
+        self.assert_clean(r.stdout, 5)
+        self.assertIn('zorblat', r.stdout)
+
+    def test_metadata_only_table_is_clean(self):
+        r = run_search(self.config_path, ['zorblat', '--only', 'metadata'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assert_clean(r.stdout, 4)
+
+    def test_json_still_ascii_escapes(self):
+        r = run_search(self.config_path, ['zorblat', '--format', 'json'])
+        self.assertNotIn('\x1b', r.stdout)
+        self.assertNotIn('\x07', r.stdout)
+
+
 if __name__ == '__main__':
     unittest.main()

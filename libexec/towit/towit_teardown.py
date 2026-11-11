@@ -12,7 +12,7 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
-from towit_config import config
+from towit_config import config, remove_database_files
 
 
 def main():
@@ -50,7 +50,7 @@ def main():
         _remove_hook()
 
     if db_exists:
-        os.remove(db_path)
+        remove_database_files(db_path)
         print(f"Database deleted: {db_path}")
 
     print("Teardown complete.")

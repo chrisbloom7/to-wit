@@ -240,19 +240,54 @@ def validate_jsonl_path(path: str) -> str | None:
     return None
 
 
+def remove_database_files(db_path: str) -> None:
+    """Delete the database and its -wal, -shm and -journal sidecars.
+
+    A killed process can leave the newest data only in the write-ahead log, so first
+    try to fold and truncate it (best effort), then remove every sidecar that exists.
+    """
+    import sqlite3
+    try:
+        conn = sqlite3.connect(db_path, timeout=2)
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        pass
+    for suffix in ('', '-wal', '-shm', '-journal'):
+        try:
+            os.remove(db_path + suffix)
+        except FileNotFoundError:
+            pass
+
+
 def get_error_logger():
-    """Return a rotating logger that writes to ~/.towit/errors.log."""
+    """Return a rotating logger that writes to ~/.towit/errors.log (owner-only, 0600)."""
+    import glob
     import logging
     import logging.handlers
+
+    class _PrivateRotatingFileHandler(logging.handlers.RotatingFileHandler):
+        def _open(self):
+            # Runs at creation and again after every rollover, so each new file is 0600.
+            old_umask = os.umask(0o077)
+            try:
+                return super()._open()
+            finally:
+                os.umask(old_umask)
+
     log_dir = os.path.expanduser('~/.towit')
     os.makedirs(log_dir, mode=0o700, exist_ok=True)  # owner-only; an existing dir is left as is
+    log_path = os.path.join(log_dir, 'errors.log')
     logger = logging.getLogger('towit.hook')
     if not logger.handlers:
-        handler = logging.handlers.RotatingFileHandler(
-            os.path.join(log_dir, 'errors.log'),
-            maxBytes=100_000,
-            backupCount=2,
-        )
+        for path in [log_path] + glob.glob(glob.escape(log_path) + '.*'):
+            try:
+                os.chmod(path, 0o600)  # tighten a log (or rotation) created by an older version
+            except OSError:
+                pass
+        handler = _PrivateRotatingFileHandler(log_path, maxBytes=100_000, backupCount=2)
         handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
         logger.addHandler(handler)
         logger.setLevel(logging.ERROR)
