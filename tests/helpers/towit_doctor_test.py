@@ -595,6 +595,47 @@ class TestHookChecks(unittest.TestCase):
         self.assertIn('/no/such/python3', result.label)
         self.assertIn(self.hook_script, result.label)
 
+    def test_script_path_parses_quoted_command_with_spaces(self):
+        from towit_doctor import _script_path
+        self.assertEqual(_script_path("python3 '/opt/My Apps/towit/towit_hook.py'"),
+                         '/opt/My Apps/towit/towit_hook.py')
+
+    def test_interpreter_parses_quoted_command_with_spaces(self):
+        from towit_doctor import _interpreter
+        self.assertEqual(_interpreter("'/opt/My Apps/bin/python3' '/opt/x/towit_hook.py'"),
+                         '/opt/My Apps/bin/python3')
+
+    def test_unbalanced_quote_command_does_not_raise(self):
+        from towit_doctor import _script_path, _interpreter
+        cmd = "'/opt/bin/python3 /opt/x/towit_hook.py"
+        _script_path(cmd)
+        _interpreter(cmd)
+
+    def test_quoted_missing_interpreter_with_spaces_is_flagged(self):
+        from towit_doctor import check_hook_commands
+        open(self.hook_script, 'w').close()
+        self._write_settings({'hooks': {ev: [{'matcher': '', 'hooks': [
+            {'type': 'command', 'command': f"'/no such/dir/python3' '{self.hook_script}'"}]}]
+            for ev in ['Stop', 'SessionEnd', 'SessionStart']}})
+        result = check_hook_commands(self.settings_path)
+        self.assertEqual(result.status, 'FAIL')
+        self.assertIn('/no such/dir/python3', result.label)
+
+    def test_quoted_existing_script_and_interpreter_with_spaces_is_pass(self):
+        from towit_doctor import check_hook_commands
+        spaced = os.path.join(self.tmpdir, 'with space')
+        os.makedirs(spaced)
+        script = os.path.join(spaced, 'towit_hook.py')
+        open(script, 'w').close()
+        interp = os.path.join(spaced, 'python3')
+        with open(interp, 'w') as f:
+            f.write('#!/bin/sh\n')
+        os.chmod(interp, 0o755)
+        self._write_settings({'hooks': {ev: [{'matcher': '', 'hooks': [
+            {'type': 'command', 'command': f"'{interp}' '{script}'"}]}]
+            for ev in ['Stop', 'SessionEnd', 'SessionStart']}})
+        self.assertEqual(check_hook_commands(self.settings_path).status, 'PASS')
+
     def test_bare_python3_interpreter_is_never_flagged(self):
         from towit_doctor import check_hook_commands
         open(self.hook_script, 'w').close()

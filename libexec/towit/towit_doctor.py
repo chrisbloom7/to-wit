@@ -9,6 +9,7 @@ warnings), 1 if any check fails.  Never performs automatic remediation.
 import argparse
 import json
 import os
+import shlex
 import shutil
 import sqlite3
 import sys
@@ -394,9 +395,18 @@ def _find_hook_commands(settings_path: str) -> dict:
     return found
 
 
+def _tokens(command: str) -> list[str]:
+    """Split a hook command shell-style; fall back to whitespace on an unbalanced quote."""
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return command.split()
+
+
 def _script_path(command: str) -> str | None:
-    # Command form: "python3 /abs/path/to/towit_hook.py"
-    return next((p for p in command.strip().split() if _HOOK_MARKER in p), None)
+    # Command form: "python3 /abs/path/to/towit_hook.py", each path shell-quoted when it has
+    # special characters (e.g. "'/my dir/python' '/my dir/towit_hook.py'")
+    return next((p for p in _tokens(command) if _HOOK_MARKER in p), None)
 
 
 def check_hook_settings_file(settings_path: str) -> CheckResult:
@@ -439,7 +449,7 @@ def check_hook_events(settings_path: str) -> CheckResult:
 
 def _interpreter(command: str) -> str | None:
     """First token of a hook command when it is an absolute path (bare names are PATH-resolved)."""
-    tokens = command.split()
+    tokens = _tokens(command)
     return tokens[0] if tokens and os.path.isabs(tokens[0]) else None
 
 
