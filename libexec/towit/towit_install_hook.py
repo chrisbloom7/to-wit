@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import sys
 import tempfile
 
@@ -63,18 +64,17 @@ def hook_interpreter(env=None):
     """Return the interpreter to write into the hook command.
 
     TOWIT_PYTHON (from `env`, default os.environ) wins when it is an absolute, executable
-    path without whitespace (the command is split on whitespace). Otherwise falls back to
+    path (hook_command() shell-quotes it, so spaces are fine). Otherwise falls back to
     python3, with a warning on stderr if it was set but unusable.
     """
     raw = os.environ.get('TOWIT_PYTHON') if env is None else env.get('TOWIT_PYTHON')
     if not raw:
         return 'python3'
-    if (os.path.isabs(raw) and not re.search(r'\s', raw)
-            and os.path.isfile(raw) and os.access(raw, os.X_OK)):
+    if os.path.isabs(raw) and os.path.isfile(raw) and os.access(raw, os.X_OK):
         return raw
     print(
-        f"Warning: TOWIT_PYTHON={raw!r} is not an absolute, executable path without "
-        "whitespace; using python3 in the hook command.",
+        f"Warning: TOWIT_PYTHON={raw!r} is not an absolute, executable path; "
+        "using python3 in the hook command.",
         file=sys.stderr
     )
     return 'python3'
@@ -82,7 +82,7 @@ def hook_interpreter(env=None):
 
 def hook_command():
     """The command registered for every To Wit hook event (may warn; call once per run)."""
-    return f"{hook_interpreter()} {HOOK_SCRIPT}"
+    return f"{shlex.quote(hook_interpreter())} {shlex.quote(HOOK_SCRIPT)}"
 
 
 def _load_settings():

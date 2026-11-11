@@ -410,11 +410,26 @@ class TestHookInterpreter(unittest.TestCase):
         self.assertEqual(value, 'python3')
         self.assertIn('TOWIT_PYTHON', err)
 
-    def test_path_with_whitespace_is_ignored_with_warning(self):
+    def test_absolute_executable_path_with_whitespace_is_accepted_without_warning(self):
         spaced_dir = os.path.join(self.tmpdir, 'with space')
         os.makedirs(spaced_dir)
         spaced = _make_stub_python(spaced_dir)
         value, err = self._interp({'TOWIT_PYTHON': spaced})
+        self.assertEqual(value, spaced)
+        self.assertEqual(err, '')
+
+    def test_relative_path_with_whitespace_is_still_rejected(self):
+        value, err = self._interp({'TOWIT_PYTHON': 'with space/python3'})
+        self.assertEqual(value, 'python3')
+        self.assertIn('TOWIT_PYTHON', err)
+
+    def test_non_executable_path_with_whitespace_is_still_rejected(self):
+        spaced_dir = os.path.join(self.tmpdir, 'with space')
+        os.makedirs(spaced_dir)
+        plain = os.path.join(spaced_dir, 'plain-file')
+        open(plain, 'w').close()
+        os.chmod(plain, 0o644)
+        value, err = self._interp({'TOWIT_PYTHON': plain})
         self.assertEqual(value, 'python3')
         self.assertIn('TOWIT_PYTHON', err)
 
@@ -578,6 +593,123 @@ class TestInstallHookRepair(unittest.TestCase):
         self.assertEqual(end, [[REAL_HOOK_COMMAND], [REAL_HOOK_COMMAND]])
         start = [h['command'] for e in data['hooks']['SessionStart'] for h in e['hooks']]
         self.assertEqual(start, [REAL_HOOK_COMMAND])
+
+
+class TestHookCommandQuoting(unittest.TestCase):
+    """hook_command() must survive a shell split even when paths contain odd characters."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _command(self, script, env=None):
+        import contextlib
+        import io
+        from unittest.mock import patch
+        import towit_install_hook
+        with patch.object(towit_install_hook, 'HOOK_SCRIPT', script), \
+                patch.dict(os.environ, env or {}), \
+                contextlib.redirect_stderr(io.StringIO()):
+            if not env:
+                os.environ.pop('TOWIT_PYTHON', None)
+            return towit_install_hook.hook_command()
+
+    def _assert_roundtrip(self, script):
+        import shlex
+        command = self._command(script)
+        try:
+            words = shlex.split(command)
+        except ValueError as e:
+            self.fail(f'command is not shell-parseable ({e}): {command}')
+        self.assertEqual(words, ['python3', script])
+
+    def test_script_path_with_space_roundtrips(self):
+        self._assert_roundtrip('/opt/My Apps/towit/libexec/towit/towit_hook.py')
+
+    def test_script_path_with_single_quote_roundtrips(self):
+        self._assert_roundtrip("/opt/it's here/towit/libexec/towit/towit_hook.py")
+
+    def test_script_path_with_shell_metacharacters_roundtrips(self):
+        self._assert_roundtrip('/opt/$(touch x)/`id`;&|<>*/towit_hook.py')
+
+    def test_metacharacters_are_not_executed_by_the_shell(self):
+        marker = os.path.join(self.tmpdir, 'pwned')
+        script = f'/opt/$(touch {marker})/towit_hook.py'
+        quoted_script = self._command(script).split(' ', 1)[1]
+        result = subprocess.run(['sh', '-c', 'printf "%s\\n" ' + quoted_script],
+                                capture_output=True, text=True)
+        self.assertFalse(os.path.exists(marker))
+        self.assertEqual(result.stdout.strip(), script)
+
+    def test_normal_homebrew_path_is_unchanged_and_unquoted(self):
+        script = '/opt/homebrew/opt/towit/libexec/libexec/towit/towit_hook.py'
+        interp = '/opt/homebrew/opt/python@3.15/bin/python3.15'
+        cmd = self._command(script, {'TOWIT_PYTHON': interp}) if os.path.isfile(interp) else None
+        if cmd is None:
+            from unittest.mock import patch
+            import towit_install_hook
+            with patch.object(towit_install_hook, 'HOOK_SCRIPT', script), \
+                    patch.object(towit_install_hook, 'hook_interpreter', return_value=interp):
+                cmd = towit_install_hook.hook_command()
+        self.assertEqual(cmd, f'{interp} {script}')
+        self.assertNotIn("'", cmd)
+        self.assertNotIn('"', cmd)
+
+    def test_towit_python_with_space_is_accepted_and_quoted(self):
+        import shlex
+        spaced_dir = os.path.join(self.tmpdir, 'with space')
+        os.makedirs(spaced_dir)
+        stub = _make_stub_python(spaced_dir)
+        script = '/opt/towit/towit_hook.py'
+        cmd = self._command(script, {'TOWIT_PYTHON': stub})
+        self.assertEqual(shlex.split(cmd), [stub, script])
+
+    def test_relative_towit_python_still_falls_back_to_python3(self):
+        script = '/opt/towit/towit_hook.py'
+        cmd = self._command(script, {'TOWIT_PYTHON': 'rel/python3'})
+        self.assertEqual(cmd, f'python3 {script}')
+
+    def test_install_hook_writes_quoted_command_for_spaced_script_path(self):
+        import shlex
+        settings_path = os.path.join(self.tmpdir, 'settings.json')
+        spaced = os.path.join(self.tmpdir, 'with space')
+        shutil.copytree(HELPERS_DIR, os.path.join(spaced, 'towit'),
+                        ignore=shutil.ignore_patterns('__pycache__'))
+        script = os.path.join(spaced, 'towit', 'towit_install_hook.py')
+        env = {k: v for k, v in os.environ.items() if k != 'TOWIT_PYTHON'}
+        env['TOWIT_SETTINGS_PATH'] = settings_path
+        result = subprocess.run(['python3', script], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(settings_path) as f:
+            data = json.load(f)
+        command = data['hooks']['Stop'][0]['hooks'][0]['command']
+        self.assertEqual(shlex.split(command),
+                         ['python3', os.path.join(spaced, 'towit', 'towit_hook.py')],
+                         command)
+
+
+class TestRepairQuoting(unittest.TestCase):
+    def _settings(self, command):
+        return {'hooks': {ev: [{'matcher': m, 'hooks': [{'type': 'command', 'command': command}]}]
+                          for ev, m in {'Stop': '', 'SessionEnd': '', 'SessionStart': 'startup'}.items()}}
+
+    def test_old_unquoted_command_with_space_is_rewritten_to_quoted_form_idempotently(self):
+        import shlex
+        from unittest.mock import patch
+        import towit_install_hook
+        script = '/opt/My Apps/towit/towit_hook.py'
+        settings = self._settings(f'python3 {script}')
+        with patch.object(towit_install_hook, 'HOOK_SCRIPT', script), \
+                patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('TOWIT_PYTHON', None)
+            self.assertEqual(towit_install_hook.repair_commands(settings), 3)
+            for ev in towit_install_hook.HOOK_EVENTS:
+                cmd = settings['hooks'][ev][0]['hooks'][0]['command']
+                self.assertEqual(shlex.split(cmd), ['python3', script])
+                self.assertNotEqual(cmd, f'python3 {script}')
+            self.assertEqual(towit_install_hook.repair_commands(settings), 0)
 
 
 if __name__ == '__main__':
