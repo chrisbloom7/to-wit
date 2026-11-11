@@ -242,5 +242,221 @@ class TestInstallHookHelp(unittest.TestCase):
                          "--help should not create or modify settings file")
 
 
+REAL_HOOK_COMMAND = f"python3 {os.path.join(HELPERS_DIR, 'towit_hook.py')}"
+ALL_EVENTS = {'Stop': '', 'SessionEnd': '', 'SessionStart': 'startup'}
+
+
+def _stale_settings(command='python3 /old/clone/towit_hook.py', events=ALL_EVENTS):
+    return {"hooks": {ev: [{"matcher": m, "hooks": [{"type": "command", "command": command}]}]
+                      for ev, m in events.items()}}
+
+
+class TestStableScriptPath(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _make_cellar(self, prefix, version='0.9.0', link=True):
+        libexec = os.path.join(prefix, 'Cellar', 'towit', version, 'libexec', 'towit')
+        os.makedirs(libexec)
+        script = os.path.join(libexec, 'towit_hook.py')
+        open(script, 'w').close()
+        if link:
+            os.makedirs(os.path.join(prefix, 'opt'))
+            os.symlink(f'../Cellar/towit/{version}', os.path.join(prefix, 'opt', 'towit'))
+        return script
+
+    def test_cellar_path_rewritten_to_opt_when_opt_exists(self):
+        from towit_install_hook import stable_script_path
+        script = self._make_cellar(self.tmpdir)
+        self.assertEqual(stable_script_path(script),
+                         os.path.join(self.tmpdir, 'opt', 'towit', 'libexec', 'towit', 'towit_hook.py'))
+
+    def test_cellar_path_unchanged_when_opt_missing(self):
+        from towit_install_hook import stable_script_path
+        script = self._make_cellar(self.tmpdir, link=False)
+        self.assertEqual(stable_script_path(script), script)
+
+    def test_non_cellar_path_unchanged(self):
+        from towit_install_hook import stable_script_path
+        clone = os.path.join(self.tmpdir, 'clone', 'libexec', 'towit', 'towit_hook.py')
+        os.makedirs(os.path.dirname(clone))
+        open(clone, 'w').close()
+        self.assertEqual(stable_script_path(clone), clone)
+
+    def test_works_for_two_different_prefixes(self):
+        from towit_install_hook import stable_script_path
+        for name, version in (('arm', '0.9.0'), ('intel', '1.2.3')):
+            prefix = os.path.join(self.tmpdir, name)
+            script = self._make_cellar(prefix, version)
+            self.assertEqual(
+                stable_script_path(script),
+                os.path.join(prefix, 'opt', 'towit', 'libexec', 'towit', 'towit_hook.py'), name)
+
+
+class TestFakeHomebrewLayout(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.settings_path = os.path.join(self.tmpdir, 'settings.json')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _install_version(self, version):
+        """Copy libexec/towit into Cellar/towit/<version> and repoint opt/towit at it."""
+        dest = os.path.join(self.tmpdir, 'Cellar', 'towit', version, 'libexec', 'towit')
+        shutil.copytree(HELPERS_DIR, dest, ignore=shutil.ignore_patterns('__pycache__'))
+        opt = os.path.join(self.tmpdir, 'opt')
+        os.makedirs(opt, exist_ok=True)
+        link = os.path.join(opt, 'towit')
+        if os.path.islink(link):
+            os.unlink(link)
+        os.symlink(f'../Cellar/towit/{version}', link)
+        return os.path.join(dest, 'towit_install_hook.py')
+
+    def _run(self, script):
+        env = {**os.environ, 'TOWIT_SETTINGS_PATH': self.settings_path}
+        return subprocess.run(['python3', script], env=env, capture_output=True, text=True)
+
+    def _commands(self):
+        with open(self.settings_path) as f:
+            data = json.load(f)
+        return {ev: [h['command'] for e in data['hooks'][ev] for h in e['hooks']]
+                for ev in ALL_EVENTS}
+
+    def test_installs_version_independent_opt_path_and_survives_upgrade(self):
+        script_090 = self._install_version('0.9.0')
+        result = self._run(script_090)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = f"python3 {self.tmpdir}/opt/towit/libexec/towit/towit_hook.py"
+        for ev, cmds in self._commands().items():
+            self.assertEqual(cmds, [expected], ev)
+            self.assertNotIn('Cellar', cmds[0])
+            self.assertNotIn('0.9.0', cmds[0])
+
+        with open(self.settings_path, 'rb') as f:
+            before = f.read()
+
+        # Simulate `brew upgrade`: new keg, opt symlink repointed, old keg removed.
+        script_091 = self._install_version('0.9.1')
+        shutil.rmtree(os.path.join(self.tmpdir, 'Cellar', 'towit', '0.9.0'))
+        result = self._run(script_091)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('already installed', (result.stdout + result.stderr).lower())
+        with open(self.settings_path, 'rb') as f:
+            self.assertEqual(f.read(), before)
+
+
+class TestInstallHookRepair(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.settings_path = os.path.join(self.tmpdir, 'settings.json')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write(self, data):
+        with open(self.settings_path, 'w') as f:
+            json.dump(data, f, indent=2)
+            f.write('\n')
+
+    def _read(self):
+        with open(self.settings_path) as f:
+            return json.load(f)
+
+    def _bytes(self):
+        with open(self.settings_path, 'rb') as f:
+            return f.read()
+
+    def test_stale_commands_are_rewritten_and_matchers_preserved(self):
+        self._write(_stale_settings())
+        result = run_install_hook(self.settings_path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('updated', (result.stdout + result.stderr).lower())
+        data = self._read()
+        for ev, matcher in ALL_EVENTS.items():
+            entries = data['hooks'][ev]
+            self.assertEqual(len(entries), 1, ev)
+            self.assertEqual(entries[0]['matcher'], matcher, ev)
+            self.assertEqual([h['command'] for h in entries[0]['hooks']], [REAL_HOOK_COMMAND], ev)
+
+    def test_repair_leaves_sibling_hooks_and_other_keys_untouched_in_order(self):
+        other = {"type": "command", "command": "echo other"}
+        settings = {
+            "theme": "dark",
+            "hooks": {
+                "PreToolUse": [{"matcher": "Bash", "hooks": [dict(other)]}],
+                "Stop": [{"matcher": "", "hooks": [
+                    dict(other),
+                    {"type": "command", "command": "python3 /old/clone/towit_hook.py"},
+                    {"type": "command", "command": "echo after"}]}],
+                "SessionEnd": [{"matcher": "", "hooks": [
+                    {"type": "command", "command": "python3 /old/clone/towit_hook.py"}]}],
+                "SessionStart": [{"matcher": "startup", "hooks": [
+                    dict(other),
+                    {"type": "command", "command": "python3 /old/clone/towit_hook.py"}]}],
+            },
+            "permissions": {"allow": ["Bash(git status)"]},
+        }
+        self._write(settings)
+        result = run_install_hook(self.settings_path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        expected = json.loads(json.dumps(settings))
+        for entries in expected['hooks'].values():
+            for entry in entries:
+                for hook in entry['hooks']:
+                    if 'towit_hook.py' in hook['command']:
+                        hook['command'] = REAL_HOOK_COMMAND
+        # json.dumps without sort_keys compares key order as well as content.
+        self.assertEqual(json.dumps(self._read(), indent=2), json.dumps(expected, indent=2))
+
+    def test_partial_install_with_stale_stop_repairs_and_adds_missing_events(self):
+        self._write(_stale_settings(events={'Stop': ''}))
+        result = run_install_hook(self.settings_path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = self._read()
+        for ev, matcher in ALL_EVENTS.items():
+            cmds = [(e['matcher'], h['command']) for e in data['hooks'][ev] for h in e['hooks']]
+            self.assertEqual(cmds, [(matcher, REAL_HOOK_COMMAND)], ev)
+
+    def test_rerun_after_repair_is_noop(self):
+        self._write(_stale_settings())
+        run_install_hook(self.settings_path)
+        for ev in ALL_EVENTS:  # guard: the first run must actually have repaired
+            self.assertEqual(self._read()['hooks'][ev][0]['hooks'][0]['command'],
+                             REAL_HOOK_COMMAND, ev)
+        before = self._bytes()
+        result = run_install_hook(self.settings_path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('already installed', (result.stdout + result.stderr).lower())
+        self.assertEqual(self._bytes(), before)
+
+    def test_two_towit_entries_one_stale_one_current_all_end_current(self):
+        other = {"type": "command", "command": "echo other"}
+        stale = {"type": "command", "command": "python3 /old/clone/towit_hook.py"}
+        current = {"type": "command", "command": REAL_HOOK_COMMAND}
+        settings = _stale_settings()
+        # Stop: stale + current in the same entry; SessionEnd: split across two entries.
+        settings['hooks']['Stop'][0]['hooks'] = [dict(stale), dict(other), dict(current)]
+        settings['hooks']['SessionEnd'] = [
+            {"matcher": "", "hooks": [dict(current)]},
+            {"matcher": "", "hooks": [dict(stale)]},
+        ]
+        self._write(settings)
+        result = run_install_hook(self.settings_path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('updated', (result.stdout + result.stderr).lower())
+        data = self._read()
+        stop = [h['command'] for e in data['hooks']['Stop'] for h in e['hooks']]
+        self.assertEqual(stop, [REAL_HOOK_COMMAND, 'echo other', REAL_HOOK_COMMAND])
+        end = [[h['command'] for h in e['hooks']] for e in data['hooks']['SessionEnd']]
+        self.assertEqual(end, [[REAL_HOOK_COMMAND], [REAL_HOOK_COMMAND]])
+        start = [h['command'] for e in data['hooks']['SessionStart'] for h in e['hooks']]
+        self.assertEqual(start, [REAL_HOOK_COMMAND])
+
+
 if __name__ == '__main__':
     unittest.main()

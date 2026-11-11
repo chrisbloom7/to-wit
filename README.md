@@ -55,6 +55,8 @@ towit backfill       # archives the transcripts still on disk (Claude Code event
 towit doctor         # confirms hooks, FTS5, and the archive schema
 ```
 
+If you move your clone, re-run `towit install-hook`: it repairs hooks that point at the old location.
+
 New `[ingest]` and `[indexing]` settings use their defaults until you add them; see [Configuration](#configuration). If you originally installed into `/usr/local/bin`, the symlink keeps working, but `towit implode --install-dir /usr/local/bin` (or `./uninstall /usr/local/bin`) needs the directory spelled out now that the default is `~/.local/bin`.
 
 ## Quick start
