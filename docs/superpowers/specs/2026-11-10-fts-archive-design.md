@@ -1,7 +1,10 @@
 # Full-Text Archive Design
 
 **Date:** 2026-11-10
-**Status:** Draft — awaiting review
+**Status:** Implemented
+**Plan:** [2026-11-10-fts-archive.md](../plans/2026-11-10-fts-archive.md)
+
+This document describes the design. Where the shipped behavior differs, see "Deviations and Notes" and "Live Trial Results" at the end; those sections, and the README, describe what the code does.
 
 ## Overview
 
@@ -36,7 +39,7 @@ A throwaway prototype (scratchpad, not in repo) ingested 31 real sessions (~6,30
 | Question | Result | Decision |
 |---|---|---|
 | Ingest speed | 0.9 s for the whole corpus, no network | Safe to run synchronously in the hook |
-| Size | ~300 KB text and ~500 KB DB per session on average | Document in README; roughly 500 MB per 1,000 sessions |
+| Size | ~300 KB text and ~500 KB DB per session on average | Document in README. The live trial later measured ~0.7 MB per top-level session on a heavy-use project (see Live Trial Results) |
 | Tokenizer | `unicode61` with `tokenchars '_-.'`: 14.7 MB, clean snippets. `trigram`: 33.4 MB, broken snippets, noisy substring hits | `unicode61` default; trigram not offered in this spec |
 | Identifier search | `TOWIT_INDEXING` matched whole under `unicode61` | Required `tokenchars` setting |
 | Unquoted multi-word | `stop hook` returned 37 hits, mostly the word "stop"; quoted returned 2 | Quoted input is a phrase query (see Search) |
@@ -226,13 +229,13 @@ The trial is done when the acceptance bar is met or the shortfall is understood.
 - **Transcript format drift.** The docs describe the JSONL format as internal. All parsing stays in one place, covered by fixtures, and `doctor` can warn when a transcript yields zero messages.
 - **Compaction and rewind.** Untested. The `tail_hash` guard degrades to a safe re-ingest rather than corrupting the archive.
 - **Default-behavior change** in `search`. Documented in the changelog; `--only metadata` restores the old scope.
-- **Disk growth.** About 0.5 MB per session; surfaced in `stats`.
+- **Disk growth.** Prototype estimate ~0.5 MB per session; the live trial measured ~0.7 MB per top-level session (16.4 MB / 24 sessions). Surfaced in `stats`.
 
 ## Decisions
 
 Resolved on 2026-11-10:
 
-1. **Subagent transcripts: excluded by default.** `include_subagents = false` stays the default, matching current backfill. The Robinina trial runs both modes and may recommend flipping it.
+1. **Subagent transcripts: excluded by default.** `include_subagents = false` stays the default, matching current backfill. The Robinina trial ran both modes and the numbers support keeping it off (see Live Trial Results); the decision is confirmed pending the known-answer step.
 2. **Worktree grouping: by git common dir.** At ingest, resolve `git rev-parse --git-common-dir` from the session `cwd` and store the result in a new nullable `conversations.repo_key` column (index it; `--repo <path|name>` filters on it). If `cwd` no longer exists or is not a git checkout, fall back to `cwd`. Resolution happens once at first ingest and is never recomputed, so deleted worktrees keep their key. `--folder` keeps its current meaning.
 3. **Stub depth: `description`, falling back to `command`.** For `Bash` stubs. Other tools use the first available of the existing key list.
 4. **Removed worktrees keep their transcripts.** Project folders for worktrees that no longer exist (e.g. `docs-beta-testing`, `studio-app-neato-logo-placements` under `~/.claude/projects`) are still present, so removal does not delete transcripts, only the 30-day purge does. The archive therefore matters for retention, not recovery from worktree removal. `prune` still must not treat a missing `cwd` as a reason to delete archived rows.
@@ -253,9 +256,49 @@ The first attempt used a string the model failed to produce (it mis-reversed the
 
 ## Open Questions
 
-None blocking. Items 1–3 under "Not covered by the prototype" in Evidence (compaction/rewind, ranking at scale, backfill at scale) remain to be measured during the live trial.
+None blocking, except the pending known-answer step in Live Trial Results. Items 1–3 under "Not covered by the prototype" in Evidence (compaction/rewind, ranking at scale, backfill at scale) remain to be measured during the live trial.
 
 ## Follow-Up Specs
 
 1. **Batch enrichment:** `towit enrich`, selection by `enriched_at`, `--limit`/`--dry-run`, locking, optional chunked summarization; move the LLM trigger from every `Stop` to `SessionEnd` plus the `SessionStart` catch-up (bounded by `--limit`), replacing the `reindex_delta` throttle
 2. **Agent access:** skill and/or `towit mcp` stdio server exposing `search`, `show`, `list` with result-size caps and untrusted-content framing
+
+## Deviations and Notes
+
+What shipped differs from the text above in these ways. The first five were planned before implementation; the rest were found while building and documenting it.
+
+| Spec says | Shipped | Why |
+|---|---|---|
+| Reuse `conversations.message_count` | New column `archived_message_count` | `message_count` is the prose-only count that drives `reindex_delta`; archive counts include stubs and would corrupt LLM re-index timing |
+| Search ranked together with metadata weighting | Tiered: conversations with a metadata match first, then by best `bm25` | `bm25` scores and `LIKE` matches are not comparable. Revisit with real queries (see the pending known-answer step) |
+| (silent) | Per-message cap of 50,000 characters | A pasted log must not bloat the archive |
+| JSON output includes `conversation_id` | JSON keeps the existing `id` key and adds `seq`, `snippet`, `score` (`show --format json` is an array of `seq`, `role`, `ts`, `text`) | Avoids breaking existing consumers |
+| (silent) | `Database.is_indexed` means "has a non-null title" | Ingest creates rows with no title; backfill's dry run must not call them indexed |
+| Search output example (`ID` truncated to 8 characters, Date before Title) | Table columns are ID (full), Title, Keywords, Turn, Snippet, Date, grouped by working directory; "Turn" is the 0-based `seq` | Kept the existing table layout and added columns |
+| `repo_key` is "resolved once at first ingest and never recomputed" | `towit_ingest` re-resolves it on every ingest of a session, and `archive_session` overwrites the stored value. A later `backfill` (or any hook run) after a worktree was deleted replaces a good key with the now-missing `cwd` | Observed in the final audit. Sessions from already-deleted worktrees (live trial: `studio-app.phase-2a-payments`) therefore do not group under the main repo. Not fixed here; documented in the README |
+| (silent) | `include_subagents` affects `backfill` and the `SessionStart` catch-up scan only. The `Stop` and `SessionEnd` hooks never ingest subagent transcripts, and subagent sessions are never LLM-indexed | Subagent sessions are not interactive conversations |
+| (silent) | Text-only search results are capped at 50 conversations; metadata results are never capped; search arguments with no letter or digit are dropped | Bounded output; FTS5 cannot tokenize them |
+| Schema "added by migrations" | `PRAGMA user_version` / `SCHEMA_VERSION`; `Database.validate()` migrates an older database in place on first use | Existing catalogs upgrade without running `towit setup` |
+| `forget` deletes rows | Also zeroes freed pages (`secure_delete`), merges the FTS index, runs `VACUUM` and a WAL truncate (cost is proportional to database size). `forget <id>` on an already-forgotten id re-runs that cleanup, which is the retry named in warnings; a failed cleanup warns on stderr and exits 0 | Deleted text must not linger in the file |
+| `doctor` gains FTS5 and integrity checks | Also checks all three hook events, that hook command paths exist (fail if none resolve, warn if partial), and `disableAllHooks` in the settings file it is given; the integrity check fails only on corruption and warns if the database is locked or read-only. Up to 17 checks in total | Hook coverage is the main way capture silently fails |
+| `prune` reports "Likely removed by `claude purge`" | Subagent conversations have folder `<project>/<session>/subagents`, so a purged subagent session directory also appears in that report | Follows from how folders are stored |
+| One LLM call per hook | `Stop` and `SessionEnd` are separate processes; if both run before the first finishes, both may call the LLM for the same session | Cost only; not worth a lock |
+
+## Live Trial Results
+
+Run 2026-11-10 against `../../Robinina-LLC` with an isolated database, `folders = ["*Robinina-LLC*"]`, and `[indexing] enabled = false` (no LLM calls):
+
+| | `include_subagents = false` | `include_subagents = true` |
+|---|---|---|
+| Conversations | 24 | 597 (568 subagent) |
+| Messages archived | 14,003 | 35,203 |
+| Database size | 16.4 MB | 27.5 MB |
+| Backfill time | 2.8 s (2 skipped) | 8.3 s (3 skipped) |
+
+- **Disk:** about 0.68 MB per top-level session without subagents (16.4 MB / 24); the 568 subagent transcripts add about 11 MB (about 20 KB each). The README states this, not the prototype's 0.5 MB.
+- **Query latency:** 60-100 ms per search on the 597-conversation database.
+- **Hygiene scan:** 0 unredacted secret-pattern hits in either database (counts only; no values printed).
+- **Worktree grouping:** sessions whose worktree had already been deleted when first archived keep their `cwd` as `repo_key` and do not group under the main repo (for example `studio-app.phase-2a-payments` is its own key). See Deviations and Notes.
+- **Known-answer queries (~10 queries, intended session in the top 3 for at least 8):** pending; to be recorded by the maintainer. No result is claimed here.
+
+**Decision:** `include_subagents` stays `false`. Archiving subagents multiplies the conversation count about 25x for about 1.7x the disk, mostly transcripts that are not interactive conversations. This is confirmed pending the known-answer step.

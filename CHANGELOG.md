@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> This release changes existing behavior (the default scope of `search`, the default of `prune`, what `backfill` does, and which hook events are installed). To Wit is a 0.x project, so these behavior changes are made in a minor release rather than a major one. The notes under **Changed** and **Upgrading** explain how to get the old behavior back.
+
+### Added
+
+- **Full-text archive.** To Wit now stores the text of every user and assistant message (plus one-line tool-call stubs such as `[Bash] <description>` and truncated `[error]` results) in SQLite with FTS5, so conversations stay searchable after Claude Code deletes the transcript. Metadata generation by Claude is now optional enrichment, not a prerequisite for a conversation being found. Archiving is incremental and append-only, needs no API calls, and a message is capped at 50,000 characters.
+- **Three hook events.** `towit install-hook` now registers `Stop`, `SessionEnd`, and `SessionStart` (matcher `startup`). `SessionEnd` captures the final state of a session; `SessionStart` runs a catch-up scan that archives (without any LLM calls) transcripts modified since the last scan, recovering sessions that ended without a hook. All work runs in a detached background process.
+- `towit show <session-id> [--around <seq>] [--context <n>] [--format text|json]`: print archived messages (the **Turn** number in search results is the 0-based `seq`). Works after the transcript is gone.
+- `towit forget <session-id> | --repo <path|name> | --folder <path> [--yes]`: permanently delete conversations (messages, FTS entries, topics, keywords) and tombstone the id so backfill, hooks, and the catch-up scan never re-ingest it. Cleanup is physical (`secure_delete`, FTS `optimize`, `VACUUM`, WAL truncate); re-running `forget <id>` on an already-forgotten id retries it.
+- `towit search --only text|metadata` and `--repo <path|name>` (matches a repo key exactly or by its final path component). Results gain a Turn and Snippet column in the table, and `seq`, `snippet`, and `score` fields in JSON and CSV.
+- `towit prune --archive` and `--yes`, and a "Likely removed by claude purge" report listing archived conversations whose whole project folder is gone.
+- **Configuration:** `[ingest]` section (`redact`, `extra_patterns`, `include_subagents`, `folders`) and `[indexing] enabled` (set `false` for archive-only operation with zero API spend).
+- **Secret redaction.** Secret-shaped strings are replaced with `[REDACTED:<kind>]` before text is archived and before it is sent to `claude -p`. Best effort and ingest-time only.
+- `towit doctor` (now up to 17 checks): SQLite FTS5 availability; archive schema (tables, `PRAGMA user_version`) and an FTS5 integrity check that fails only on real corruption and warns if the database is locked or read-only; all three hook events registered; hook command paths exist (fail if none resolve, warn if only some do); a warning when `disableAllHooks` is true in the settings file it reads.
+- `towit stats` prints archived and metadata-only conversation counts, archived message count, and database size in their own block.
+- The schema migrates automatically on first use: databases created by earlier versions are upgraded in place (tracked with `PRAGMA user_version`), and `towit setup` still works as before.
+
+### Changed
+
+- **`towit search` default scope now includes message text** together with keywords, titles, and summaries (previously keywords only). Conversations with a metadata match rank first, then by `bm25` relevance of the best message. Use `--only metadata` for the old scope. Text-only matches are capped at 50; arguments containing spaces are exact phrases; FTS5 operators in input are treated literally.
+- **`towit prune` no longer removes archived conversations by default**; it removes only entries that were never archived and whose transcripts are missing. Use `prune --archive` for the old behavior.
+- `towit backfill` now archives message text for every transcript on disk (and only runs the LLM for sessions that are not yet indexed, unless `--force`). `--dry-run` reports what would be indexed.
+- The transcript sent to Claude for analysis is now redacted.
+- The hooks archive in a detached background process; LLM indexing runs after archiving unless `[indexing] enabled = false`. `Stop` and `SessionEnd` can both trigger indexing for one session, which may cost an extra API call.
+- JSON search output keeps the existing `id` key (it does not become `conversation_id`) and adds `seq`, `snippet`, and `score`.
+- Teardown, implode, and doctor wording now refers to the hooks rather than "the stop hook". `teardown` and `implode` delete the archive.
+
+### Upgrading
+
+- Existing installs only have the `Stop` hook. Re-run `towit install-hook` to add `SessionEnd` and `SessionStart` (`towit doctor` warns until you do), then `towit backfill` to archive transcripts that are still on disk.
+- **`claude purge` and Claude Code's retention sweep do not delete the To Wit archive.** Use `towit forget` to remove data.
+- The archive adds roughly 0.7 MB per top-level session on a heavy-use project (see the README).
+
+### Fixed
+
+- `towit setup --full` now generates `~/.towit/config.toml` as documented.
+
+### Security
+
+- Secret redaction before archiving and before text is sent to Claude (best effort; see SECURITY.md).
+- `towit forget` provides permanent, physical deletion of archived conversations, with a tombstone so they are not re-ingested.
+- `towit show` strips terminal control sequences from archived text before printing it.
+- FTS5 search input is escaped into quoted phrases and bound as a parameter; the `git rev-parse` subprocess used for repo grouping uses a list command, the scoped environment, and a 5-second timeout.
+
 ## [0.8.2] - 2026-04-17
 
 ### Fixed

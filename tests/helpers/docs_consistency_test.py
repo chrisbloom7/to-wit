@@ -153,5 +153,16 @@ class TestSecurityMd(DocTestCase):
             self.assertContains(security, term, f"SECURITY.md does not mention {term!r}")
 
 
+class TestChangelog(DocTestCase):
+    @unittest.skipUnless(os.environ.get('TOWIT_RELEASE_CHECK') == '1',
+                         'release gate: set TOWIT_RELEASE_CHECK=1')
+    def test_changelog_has_unreleased_content(self):
+        changelog = _read('CHANGELOG.md')
+        start = changelog.index('## [Unreleased]') + len('## [Unreleased]')
+        nxt = re.search(r'(?m)^## \[', changelog[start:])
+        section = changelog[start:start + nxt.start()] if nxt else changelog[start:]
+        self.assertTrue(section.strip(), "CHANGELOG.md [Unreleased] section is empty")
+
+
 if __name__ == '__main__':
     unittest.main()
