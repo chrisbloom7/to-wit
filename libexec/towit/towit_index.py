@@ -47,6 +47,9 @@ def parse_jsonl(path: str) -> list:
                 entry_type = entry.get('type', '')
                 if entry_type not in ('user', 'assistant'):
                     continue
+                # Meta entries are harness-injected (e.g. local-command caveats), not conversation.
+                if entry.get('isMeta') is True:
+                    continue
 
                 msg = entry.get('message', {})
                 role = msg.get('role', entry_type)

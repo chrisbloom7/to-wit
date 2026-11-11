@@ -106,6 +106,30 @@ class TestParseTranscript(unittest.TestCase):
         self.assertTrue(text.endswith('chars truncated ...]'))
         self.assertTrue(text.endswith('\n[... %d chars truncated ...]' % (120_000 - MAX_MESSAGE_CHARS)))
 
+    def test_is_meta_true_entries_dropped_order_preserved(self):
+        meta = _entry('user', '<local-command-caveat>The command below was run directly</local-command-caveat>')
+        meta['isMeta'] = True
+        parsed = self._parse([_entry('user', 'first'), meta, _entry('assistant', 'second'),
+                              _entry('user', 'third')])
+        self.assertEqual([m.text for m in parsed.messages], ['first', 'second', 'third'])
+
+    def test_non_true_is_meta_values_are_kept(self):
+        entries = []
+        for i, value in enumerate([False, 'true', 1, None, 'yes']):
+            e = _entry('user', f'kept-{i}')
+            e['isMeta'] = value
+            entries.append(e)
+        entries.append(_entry('user', 'no-key'))
+        parsed = self._parse(entries)
+        self.assertEqual([m.text for m in parsed.messages],
+                         ['kept-0', 'kept-1', 'kept-2', 'kept-3', 'kept-4', 'no-key'])
+
+    def test_is_meta_assistant_entry_dropped(self):
+        meta = _entry('assistant', 'harness note')
+        meta['isMeta'] = True
+        parsed = self._parse([_entry('user', 'q'), meta, _entry('assistant', 'a')])
+        self.assertEqual([m.text for m in parsed.messages], ['q', 'a'])
+
     def test_metadata_fields(self):
         parsed = self._parse([
             {'type': 'summary', 'summary': 'x'},
@@ -278,6 +302,99 @@ class TestIngestTranscript(unittest.TestCase):
     def test_fewer_than_two_user_messages_skipped(self):
         _write_jsonl(self.path, [_entry('user', 'only one'), _entry('assistant', 'a'),
                                  _entry('assistant', 'b')])
+        self.assertEqual(ingest_transcript(self.path, self.db), 'skipped')
+        self.assertEqual(self._rows(), [])
+        self.assertIsNone(self._conv())
+
+    def _meta_turns(self):
+        meta = _entry('user', '<local-command-caveat>Caveat: ran directly</local-command-caveat>')
+        meta['isMeta'] = True
+        return meta
+
+    def _archive_old_style(self, entries):
+        """Archive `entries` as the pre-fix parser would have: isMeta entries included."""
+        stored = [{'role': e['message']['role'], 'ts': e['timestamp'],
+                   'text': e['message']['content']} for e in entries]
+        conv = {'id': 'sess-0001', 'folder': self.folder, 'cwd': '/work/proj',
+                'started_at': '2026-01-01T00:00:00Z', 'last_active': '2026-01-01T00:00:00Z',
+                'repo_key': '/work/proj', 'source_path': self.path}
+        self.assertEqual(self.db.archive_session(conv, stored), 'ingested')
+        self.db.upsert_conversation({
+            'id': 'sess-0001', 'folder': self.folder, 'cwd': '/work/proj',
+            'started_at': '2026-01-01T00:00:00Z', 'last_active': '2026-01-01T00:00:00Z',
+            'title': 'Kept title', 'summary': 'Kept summary', 'topics': ['kept-topic'],
+            'keywords': ['kept-kw'], 'message_count': 3})
+
+    def _llm_metadata(self):
+        with self.db.connect() as conn:
+            conv = conn.execute('SELECT title, summary, message_count FROM conversations '
+                                'WHERE id = ?', ('sess-0001',)).fetchone()
+            topics = [r[0] for r in conn.execute(
+                'SELECT t.name FROM topics t JOIN conversation_topics ct ON ct.topic_id = t.id '
+                'WHERE ct.conversation_id = ?', ('sess-0001',))]
+            kws = [r[0] for r in conn.execute(
+                'SELECT k.name FROM keywords k JOIN conversation_keywords ck ON ck.keyword_id = k.id '
+                'WHERE ck.conversation_id = ?', ('sess-0001',))]
+        return (conv['title'], conv['summary'], conv['message_count'], topics, kws)
+
+    def _assert_meta_free_contiguous(self, texts):
+        rows = self._rows()
+        self.assertEqual([r['seq'] for r in rows], list(range(len(texts))))
+        self.assertEqual([r['text'] for r in rows], texts)
+        self.assertFalse([r for r in rows if 'local-command-caveat' in r['text']])
+
+    def test_meta_entries_not_archived_on_first_ingest(self):
+        _write_jsonl(self.path, [self._turns[0], self._meta_turns()] + self._turns[1:])
+        self.assertEqual(ingest_transcript(self.path, self.db), 'ingested')
+        self._assert_meta_free_contiguous(['first question', 'an answer', 'second question'])
+
+    def test_session_archived_with_mid_meta_is_rewritten_without_meta(self):
+        old = [self._turns[0], self._meta_turns(), self._turns[1], self._turns[2]]
+        self._archive_old_style(old)
+        before = self._llm_metadata()
+        _write_jsonl(self.path, old)
+        self.assertEqual(ingest_transcript(self.path, self.db), 'rewritten')
+        self._assert_meta_free_contiguous(['first question', 'an answer', 'second question'])
+        self.assertEqual(self._llm_metadata(), before)
+        self.assertEqual(self._conv()['archived_message_count'], 3)
+        self.assertEqual(ingest_transcript(self.path, self.db), 'unchanged')
+
+    def test_session_archived_with_trailing_meta_is_cleaned_when_it_grows(self):
+        # A trailing meta row looks like an older, shorter snapshot of a longer archive, which
+        # archive_session deliberately never truncates, so it stays until the session grows.
+        old = self._turns + [self._meta_turns()]
+        self._archive_old_style(old)
+        before = self._llm_metadata()
+        _write_jsonl(self.path, old)
+        self.assertEqual(ingest_transcript(self.path, self.db), 'unchanged')
+        self.assertEqual(len(self._rows()), 4)
+        _write_jsonl(self.path, old + [_entry('assistant', 'later answer')])
+        self.assertEqual(ingest_transcript(self.path, self.db), 'rewritten')
+        self._assert_meta_free_contiguous(['first question', 'an answer', 'second question',
+                                           'later answer'])
+        self.assertEqual(self._llm_metadata(), before)
+        self.assertEqual(ingest_transcript(self.path, self.db), 'unchanged')
+
+    def test_session_archived_with_leading_meta_is_rewritten_without_meta(self):
+        old = [self._meta_turns()] + self._turns
+        self._archive_old_style(old)
+        _write_jsonl(self.path, old)
+        self.assertEqual(ingest_transcript(self.path, self.db), 'rewritten')
+        self._assert_meta_free_contiguous(['first question', 'an answer', 'second question'])
+        self.assertEqual(ingest_transcript(self.path, self.db), 'unchanged')
+
+    def test_meta_free_growth_still_appends_then_unchanged(self):
+        self.assertEqual(ingest_transcript(self.path, self.db), 'ingested')
+        _write_jsonl(self.path, self._turns + [_entry('assistant', 'more'),
+                                               _entry('user', 'and more')])
+        self.assertEqual(ingest_transcript(self.path, self.db), 'appended')
+        self.assertEqual(ingest_transcript(self.path, self.db), 'unchanged')
+        self._assert_meta_free_contiguous(['first question', 'an answer', 'second question',
+                                           'more', 'and more'])
+
+    def test_meta_user_message_does_not_count_toward_two_user_rule(self):
+        _write_jsonl(self.path, [_entry('user', 'only real one'), self._meta_turns(),
+                                 _entry('assistant', 'a')])
         self.assertEqual(ingest_transcript(self.path, self.db), 'skipped')
         self.assertEqual(self._rows(), [])
         self.assertIsNone(self._conv())

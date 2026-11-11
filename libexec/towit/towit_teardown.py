@@ -54,7 +54,10 @@ def main():
 
     if db_exists or sidecars:
         remove_database_files(db_path)
-        print(f"Database deleted: {db_path}")
+        if db_exists:
+            print(f"Database deleted: {db_path}")
+        else:
+            print("Leftover database files deleted")
 
     print("Teardown complete.")
 
