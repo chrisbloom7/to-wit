@@ -33,7 +33,7 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 
 ### Secret Redaction
 
-- Message text is scanned for secret-shaped strings (AWS key ids, GitHub, Anthropic, OpenAI, Stripe, and Slack tokens, JWTs, private-key blocks, `Bearer` tokens, credentials embedded in URLs, and long `*_KEY` / `*_SECRET` / `*_TOKEN` / `*_PASSWORD` assignment values) and matches are replaced with `[REDACTED:<kind>]` **before** they are written to the database. The same redaction is applied to the transcript text sent to the `claude` CLI for metadata generation. Add patterns with `[ingest] extra_patterns`; disable with `[ingest] redact = false`
+- Message text is scanned for secret-shaped strings (AWS key ids, GitHub, Anthropic, OpenAI, Stripe, and Slack tokens, JWTs, private-key blocks, `Bearer` tokens, credentials embedded in URLs, and long `*_KEY` / `*_SECRET` / `*_TOKEN` / `*_PASSWORD` assignment values) and matches are replaced with `[REDACTED:<kind>]` **before** they are written to the database. The same redaction is applied to the transcript text sent to the `claude` CLI for metadata generation and for `export --summarize`. Add patterns with `[ingest] extra_patterns`; disable with `[ingest] redact = false`
 - Redaction is pattern-based and best effort. It will miss secrets in unfamiliar formats, and it runs at ingest time only: archived rows are not rewritten if you change the setting later. Use `towit forget` to remove a conversation that contains a secret
 - Only tool-call stubs (at most 200 characters of a description, command, or path) and truncated error results (at most 300 characters) are stored; tool results and file contents are not archived. A single message is capped at 50,000 characters
 
@@ -62,7 +62,7 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 - The `claude` subprocess is invoked with a list (never `shell=True`)
 - The subprocess environment for indexing and export (the claude calls) is scoped to an explicit prefix allowlist (`HOME`, `PATH`, `USER`, `TMPDIR`, `TERM`, `LANG`, `LC_*`, `CLAUDE_*`, `ANTHROPIC_*`) to avoid leaking unrelated credentials.
 - `towit resume` replaces itself with an interactive `claude --resume` and keeps your full environment by design; it is not a scoped subprocess
-- `towit export --summarize` sends the original transcript (not the redacted archive) to the `claude` CLI at your request, with the same scoped environment as indexing. `towit export --topic <name> --summarize` sends stored titles and summaries, which for conversations indexed by 0.8.2 or earlier may have been generated from unredacted transcripts
+- `towit export --summarize` sends the original transcript to the `claude` CLI at your request, with the same scoped environment as indexing. When `[ingest] redact` is on (the default) the text is redacted at send time with the same patterns, including `extra_patterns`; with it off, the text is sent unchanged. `towit export --topic <name> --summarize` sends stored summaries, redacted at send time the same way, which also covers rows indexed by 0.8.2 or earlier whose summaries were generated from unredacted transcripts. Redaction is best effort (see Secret Redaction)
 - Ingest runs `git -C <cwd> rev-parse --git-common-dir` to group worktrees of one repo. It is invoked with a list (never `shell=True`), with the same scoped environment, a 5-second timeout, and any failure falls back to the working directory
 
 ### Settings File Writes

@@ -87,7 +87,7 @@ The archive is append-only: each ingest compares the stored tail hash to the tra
 - Path validation on all transcript paths and session IDs
 - SQL uses parameterized queries only (no string interpolation in WHERE clauses); FTS5 queries are built from quoted phrases (`build_match_expression`) bound as a parameter
 - Subprocess environments (the `claude` calls and the `git rev-parse` in `resolve_repo_key`) are scoped to an allowlist of env var prefixes via `safe_subprocess_env()`; subprocesses use list form, never `shell=True`
-- Secrets are redacted (`towit_redact`) before text is stored and before the indexing transcript is sent to `claude -p`; redaction is best effort and ingest-time only. `towit export --summarize` sends the original, unredacted transcript, and `export --topic --summarize` sends stored titles and summaries (which rows indexed by 0.8.2 or earlier may have derived from unredacted transcripts)
+- Secrets are redacted (`towit_redact`) before text is stored and before the indexing transcript is sent to `claude -p`; redaction is best effort and ingest-time only. `towit export --summarize` (single and `--topic`) also redacts the prompt at send time when `ingest.redact` is on, so transcripts and stored summaries (including rows indexed by 0.8.2 or earlier) are covered
 - `towit forget` tombstones ids in `forgotten`, and physically removes data (`secure_delete`, FTS `optimize`, `VACUUM`, WAL truncate)
 - Symlinked JSONL files excluded from backfill, the catch-up scan, and ingest
 
