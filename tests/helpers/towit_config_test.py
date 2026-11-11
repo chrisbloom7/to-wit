@@ -30,6 +30,45 @@ class TestErrorLoggerDirectory(unittest.TestCase):
             self.assertEqual(os.stat(os.path.join(home, '.towit')).st_mode & 0o777, 0o700)
 
 
+class TestErrorLogPermissions(unittest.TestCase):
+    def _run(self, home, code):
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, '-c', 'import os; os.umask(0o022)\nimport towit_config\n' + code],
+            cwd=HELPERS_DIR, capture_output=True, text=True,
+            env={'HOME': home, 'PATH': os.environ.get('PATH', ''),
+                 'TOWIT_CONFIG_PATH': os.path.join(home, 'none.toml')})
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def _mode(self, home, name='errors.log'):
+        return os.stat(os.path.join(home, '.towit', name)).st_mode & 0o777
+
+    def test_new_error_log_is_owner_only(self):
+        with tempfile.TemporaryDirectory() as home:
+            self._run(home, "towit_config.get_error_logger().error('boom')")
+            self.assertEqual(self._mode(home), 0o600)
+
+    def test_existing_loose_log_is_tightened(self):
+        with tempfile.TemporaryDirectory() as home:
+            os.makedirs(os.path.join(home, '.towit'), mode=0o700)
+            for name in ('errors.log', 'errors.log.1'):
+                path = os.path.join(home, '.towit', name)
+                with open(path, 'w') as fh:
+                    fh.write('old\n')
+                os.chmod(path, 0o644)
+            self._run(home, "towit_config.get_error_logger()")
+            self.assertEqual(self._mode(home), 0o600)
+            self.assertEqual(self._mode(home, 'errors.log.1'), 0o600)
+
+    def test_rotated_logs_stay_owner_only(self):
+        with tempfile.TemporaryDirectory() as home:
+            self._run(home, "lg = towit_config.get_error_logger()\n"
+                            "for _ in range(5): lg.error('x' * 60000)")
+            self.assertTrue(os.path.exists(os.path.join(home, '.towit', 'errors.log.1')))
+            for name in ('errors.log', 'errors.log.1'):
+                self.assertEqual(self._mode(home, name), 0o600, name)
+
+
 def write_config(tmpdir, content):
     """Write content to a temp config.toml and return its path."""
     path = os.path.join(tmpdir, 'config.toml')
