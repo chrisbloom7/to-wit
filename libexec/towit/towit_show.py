@@ -11,30 +11,14 @@ Reads from the archive, so it works after the original transcript is deleted.
 import argparse
 import json
 import os
-import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_db import Database
+from towit_sanitize import sanitize
 
 DEFAULT_CONTEXT = 5
 MAX_NUMBER = 2**62
-
-# Archived text came from tool output and web content, so strip terminal control
-# sequences before printing it. String-type sequences (OSC, DCS, SOS, PM, APC) go
-# whole, then CSI, then any other two-byte ESC sequence, then stray C0/C1 controls
-# (newline and tab are kept). Bidi override/isolate characters are stripped too.
-_STRING_SEQ = re.compile(r'(?:\x1b[\]PX^_]|[\x90\x98\x9d\x9e\x9f])[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)?')
-_CSI_SEQ = re.compile(r'(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]?')
-_ESC_SEQ = re.compile(r'\x1b[ -/]*[0-~]?')
-_CONTROLS = re.compile('[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]')
-
-
-def sanitize(text) -> str:
-    text = str(text) if text is not None else ''
-    for pattern in (_STRING_SEQ, _CSI_SEQ, _ESC_SEQ, _CONTROLS):
-        text = pattern.sub('', text)
-    return text
 
 
 def _non_negative_int(parser_name: str, value: str) -> int:

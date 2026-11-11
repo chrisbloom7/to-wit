@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_db import Database
+from towit_sanitize import sanitize_cell
 
 
 def _truncate(s, width):
@@ -69,11 +70,11 @@ def _print_table(rows, terms=None, group_by_path=False, show_text=False):
         keywords = r['keywords'] or ''
         if terms:
             keywords = _filter_keywords(keywords, terms)
-        cells = [r['id'] or '', r['title'] or '', keywords, date]
+        cells = [r['id'], r['title'], keywords, date]
         if show_text:
             turn = '' if r.get('seq') is None else str(r['seq'])
-            cells[3:3] = [turn, (r.get('snippet') or '').replace('\n', ' ')]
-        processed.append((r['cwd'] or '', cells))
+            cells[3:3] = [turn, r.get('snippet')]
+        processed.append((sanitize_cell(r['cwd']), [sanitize_cell(c) for c in cells]))
 
     # Compute natural column widths across all rows
     col_widths = [len(h) for h in headers]

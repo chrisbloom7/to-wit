@@ -11,7 +11,7 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 | Claude Code JSONL transcripts | High | Written by Claude Code itself; may indirectly contain untrusted external data (e.g. pasted content) |
 | Claude CLI responses (indexing) | Medium | Parsed with error handling; treated as structured JSON with graceful fallback |
 | Hook payload (stdin JSON) | Medium | Provided by Claude Code for `Stop`, `SessionEnd`, and `SessionStart`; `session_id` format and the `transcript_path` filesystem path are validated before use (`SessionStart` uses no path from the payload) |
-| Archived message text | Medium | Originates in transcripts, so it can carry tool output, web content, or terminal escape sequences; `towit show` strips control sequences before printing; never interpreted as SQL or FTS5 syntax |
+| Archived message text | Medium | Originates in transcripts, so it can carry tool output, web content, or terminal escape sequences; `towit show` strips control sequences before printing, and `towit search` and `towit list` do the same for their table output (JSON output ASCII-escapes instead; CSV is printed raw); never interpreted as SQL or FTS5 syntax |
 | Search terms (CLI arguments) | Medium | Escaped into quoted FTS5 phrases and bound as parameters |
 | Environment variables | Medium | Used for config overrides; subprocess env is scoped to an explicit allowlist |
 | SQLite database | High | Local file; no network exposure; holds full message text |
