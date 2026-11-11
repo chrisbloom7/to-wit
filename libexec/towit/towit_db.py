@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 """
 
+# Bump whenever run_migrations gains steps; stored in PRAGMA user_version.
+SCHEMA_VERSION = 1
+
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
@@ -146,6 +149,23 @@ def build_match_expression(terms: list, mode: str = 'and') -> str | None:
     return (' OR ' if mode == 'or' else ' AND ').join(phrases)
 
 
+def _execute_script(conn, script: str) -> None:
+    """
+    Run a multi-statement script inside the caller's open transaction.
+
+    sqlite3's executescript() COMMITs first, which would drop the migration lock,
+    so split on complete statements (trigger bodies contain semicolons) instead.
+    """
+    statement = ''
+    for line in script.splitlines(keepends=True):
+        statement += line
+        if sqlite3.complete_statement(statement):
+            conn.execute(statement)
+            statement = ''
+    if statement.strip():
+        conn.execute(statement)
+
+
 class Database:
     def __init__(self, db_path=None):
         self.db_path = db_path if db_path is not None else config.db_path
@@ -165,6 +185,15 @@ class Database:
                 file=sys.stderr
             )
             sys.exit(1)
+        # Steady state costs one PRAGMA read; a DB from an older towit migrates
+        # in place (a newer DB is left alone). Errors propagate to the caller.
+        if self.schema_version() < SCHEMA_VERSION:
+            self.run_migrations(only_if_stale=True)
+
+    def schema_version(self) -> int:
+        """Return the schema version stamped in PRAGMA user_version (0 if never stamped)."""
+        with self.connect() as conn:
+            return conn.execute("PRAGMA user_version").fetchone()[0]
 
     @contextlib.contextmanager
     def connect(self):
@@ -186,16 +215,26 @@ class Database:
         """Execute the full schema DDL (safe to run on a fresh DB)."""
         with self.connect() as conn:
             conn.executescript(SCHEMA)
-        self.run_migrations()
+        self.run_migrations()  # also stamps SCHEMA_VERSION
 
-    def run_migrations(self):
-        """Apply incremental schema changes for existing databases."""
+    def run_migrations(self, only_if_stale: bool = False):
+        """
+        Apply incremental schema changes for existing databases, then stamp
+        SCHEMA_VERSION. Idempotent. Runs as one BEGIN IMMEDIATE transaction, so a
+        failure rolls everything back (version unchanged) and concurrent migrators
+        serialize; with only_if_stale the version is re-checked under the lock so
+        the loser of a race does nothing.
+        """
         with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if only_if_stale and version >= SCHEMA_VERSION:
+                return
             try:
                 conn.execute("ALTER TABLE conversations ADD COLUMN message_count INTEGER")
             except sqlite3.OperationalError:
                 pass  # Column already exists
-            conn.executescript("""
+            _execute_script(conn, """
                 CREATE TABLE IF NOT EXISTS keywords (
                   id   INTEGER PRIMARY KEY AUTOINCREMENT,
                   name TEXT UNIQUE NOT NULL COLLATE NOCASE
@@ -219,10 +258,13 @@ class Database:
                     conn.execute(f"ALTER TABLE conversations ADD COLUMN {column}")
                 except sqlite3.OperationalError:
                     pass  # Column already exists
-            conn.executescript(
+            _execute_script(
+                conn,
                 "CREATE INDEX IF NOT EXISTS idx_conversations_repo_key ON conversations(repo_key);"
                 + ARCHIVE_DDL
             )
+            if version < SCHEMA_VERSION:  # never downgrade a newer towit's stamp
+                conn.execute(f"PRAGMA user_version = {int(SCHEMA_VERSION)}")
 
     def upsert_conversation(self, data: dict):
         """
@@ -767,6 +809,7 @@ class Database:
         metadata (title, summary, message_count, topics, keywords) is never touched. One BEGIN IMMEDIATE transaction; any
         exception rolls everything back.
         """
+        self.validate()
         conv_id = conv['id']
         tail_hash = message_hash(messages[-1]['role'], messages[-1]['text']) if messages else None
         with self.connect() as conn:

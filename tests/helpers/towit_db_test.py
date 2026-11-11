@@ -4,6 +4,8 @@
 # Run with: python3 tests/helpers/towit_db_test.py
 
 import contextlib
+import io
+import threading
 import unittest
 import unittest.mock
 import tempfile
@@ -15,7 +17,8 @@ import sys
 HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
 sys.path.insert(0, HELPERS_DIR)
 
-from towit_db import Database, message_hash, build_match_expression, is_fts_query_error
+import towit_db
+from towit_db import SCHEMA_VERSION, Database, message_hash, build_match_expression, is_fts_query_error
 
 SAMPLE_CONV = {
     'id': 'test-session-001',
@@ -1003,6 +1006,178 @@ class TestSearchArchive(unittest.TestCase):
                 'EXPLAIN QUERY PLAN ' + sql, ['"guard"'] + params))
         self.assertIn('messages_fts', plan)
         self.assertNotRegex(plan, r'SCAN (TABLE )?m\b|SCAN TABLE messages\b')
+
+
+# The catalog DDL as it existed before the archive work: no archive columns, no
+# messages/messages_fts/forgotten/meta, user_version 0.
+OLD_SCHEMA = """
+CREATE TABLE conversations (
+  id TEXT PRIMARY KEY, folder TEXT NOT NULL, cwd TEXT, started_at TEXT,
+  last_active TEXT, title TEXT, summary TEXT, message_count INTEGER,
+  indexed_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE topics (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL COLLATE NOCASE);
+CREATE TABLE conversation_topics (
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+  PRIMARY KEY (conversation_id, topic_id));
+CREATE TABLE keywords (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL COLLATE NOCASE);
+CREATE TABLE conversation_keywords (
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  keyword_id INTEGER NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+  PRIMARY KEY (conversation_id, keyword_id));
+CREATE INDEX idx_conversations_started ON conversations(started_at DESC);
+CREATE INDEX idx_conversations_cwd ON conversations(cwd);
+CREATE INDEX idx_ct_topic ON conversation_topics(topic_id);
+CREATE INDEX idx_ct_conv ON conversation_topics(conversation_id);
+CREATE INDEX idx_ck_keyword ON conversation_keywords(keyword_id);
+CREATE INDEX idx_ck_conv ON conversation_keywords(conversation_id);
+INSERT INTO conversations (id, folder, cwd, title, summary, message_count)
+  VALUES ('old-1', '/f', '/w/app', 'Old title', 'Old summary', 4);
+INSERT INTO topics (name) VALUES ('legacy-topic');
+INSERT INTO conversation_topics VALUES ('old-1', 1);
+INSERT INTO keywords (name) VALUES ('legacy-kw');
+INSERT INTO conversation_keywords VALUES ('old-1', 1);
+"""
+
+
+def build_old_schema_db(path):
+    """Create a pre-archive catalog (mode 0600, user_version 0) with one row."""
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.executescript(OLD_SCHEMA)
+    conn.close()
+    os.chmod(path, 0o600)
+
+
+class TestAutoMigration(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 'old.db')
+        build_old_schema_db(self.db_path)
+        self.db = Database(self.db_path)
+
+    def _q(self, sql):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            return conn.execute(sql).fetchall()
+        finally:
+            conn.close()
+
+    def _names(self):
+        return {r[0] for r in self._q("SELECT name FROM sqlite_master")}
+
+    def test_old_db_starts_at_version_zero(self):
+        self.assertEqual(self.db.schema_version(), 0)
+        self.assertNotIn('messages', self._names())
+
+    def test_validate_migrates_old_db(self):
+        before = self._q("SELECT * FROM conversations")
+        self.db.validate()
+        names = self._names()
+        for n in ('messages', 'messages_fts', 'forgotten', 'meta', 'messages_ai',
+                  'messages_ad', 'messages_au', 'idx_conversations_repo_key'):
+            self.assertIn(n, names)
+        cols = {r[1] for r in self._q("PRAGMA table_info(conversations)")}
+        self.assertTrue({'tail_hash', 'source_path', 'archived',
+                         'archived_message_count', 'repo_key'} <= cols)
+        self.assertEqual(self.db.schema_version(), SCHEMA_VERSION)
+        self.assertEqual(self._q("PRAGMA integrity_check"), [('ok',)])
+        row = self._q("SELECT id, title, summary, message_count FROM conversations")
+        self.assertEqual(row, [('old-1', 'Old title', 'Old summary', 4)])
+        self.assertEqual(len(before), 1)
+        self.assertEqual(self._q("SELECT conversation_id, topic_id FROM conversation_topics"),
+                         [('old-1', 1)])
+
+    def test_migration_does_not_change_permissions_or_print(self):
+        with contextlib.redirect_stdout(io.StringIO()) as out, \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            self.db.validate()
+        self.assertEqual(out.getvalue() + err.getvalue(), '')
+        self.assertEqual(os.stat(self.db_path).st_mode & 0o777, 0o600)
+
+    def test_current_db_does_not_migrate(self):
+        self.db.validate()
+        with unittest.mock.patch.object(Database, 'run_migrations') as mig:
+            self.db.validate()
+            Database(self.db_path).validate()
+        mig.assert_not_called()
+
+    def test_fresh_db_is_stamped_and_not_remigrated(self):
+        fresh = Database(os.path.join(self.tmpdir, 'fresh.db'))
+        fresh.create_schema()
+        self.assertEqual(fresh.schema_version(), SCHEMA_VERSION)
+        with unittest.mock.patch.object(Database, 'run_migrations') as mig:
+            fresh.validate()
+        mig.assert_not_called()
+
+    def test_run_migrations_stamps_version(self):
+        self.db.run_migrations()
+        self.assertEqual(self.db.schema_version(), SCHEMA_VERSION)
+
+    def test_newer_db_is_left_alone(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA user_version = %d" % (SCHEMA_VERSION + 5))
+        conn.close()
+        with unittest.mock.patch.object(Database, 'run_migrations') as mig:
+            self.db.validate()
+        mig.assert_not_called()
+        self.assertEqual(self.db.schema_version(), SCHEMA_VERSION + 5)
+        self.assertNotIn('messages', self._names())
+
+    def test_run_migrations_never_downgrades_stamp(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA user_version = %d" % (SCHEMA_VERSION + 5))
+        conn.close()
+        self.db.run_migrations()
+        self.assertEqual(self.db.schema_version(), SCHEMA_VERSION + 5)
+
+    def test_failed_migration_propagates_and_leaves_version_unchanged(self):
+        with unittest.mock.patch.object(towit_db, 'ARCHIVE_DDL', 'CREATE TABLE messages (;'):
+            with self.assertRaises(sqlite3.Error):
+                self.db.validate()
+        self.assertEqual(self.db.schema_version(), 0)
+        cols = {r[1] for r in self._q("PRAGMA table_info(conversations)")}
+        self.assertNotIn('tail_hash', cols)  # rolled back as a unit
+
+    def test_concurrent_validate_calls_both_succeed(self):
+        errors = []
+        barrier = threading.Barrier(2)
+
+        def worker():
+            try:
+                barrier.wait()
+                Database(self.db_path).validate()
+            except BaseException as exc:  # noqa: BLE001 - surface any failure
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(self.db.schema_version(), SCHEMA_VERSION)
+        self.assertEqual(self._q("PRAGMA integrity_check"), [('ok',)])
+        self.assertIn('messages_fts', self._names())
+
+    def test_missing_file_still_exits_without_creating_anything(self):
+        missing = os.path.join(self.tmpdir, 'sub', 'nope.db')
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            with self.assertRaises(SystemExit) as cm:
+                Database(missing).validate()
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn('database not found', err.getvalue())
+        self.assertFalse(os.path.exists(missing))
+        self.assertFalse(os.path.exists(os.path.dirname(missing)))
+
+    def test_archive_session_migrates_old_db(self):
+        out = Database(self.db_path).archive_session(
+            {'id': 'n-1', 'folder': '/f', 'cwd': '/w', 'started_at': None,
+             'last_active': None, 'repo_key': '/w', 'source_path': None},
+            [{'role': 'user', 'ts': None, 'text': 'hello zebra'},
+             {'role': 'assistant', 'ts': None, 'text': 'hi'}])
+        self.assertEqual(out, 'ingested')
 
 
 if __name__ == '__main__':

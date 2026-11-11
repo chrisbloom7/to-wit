@@ -17,6 +17,7 @@ SEARCH_SCRIPT = os.path.join(HELPERS_DIR, 'towit_search.py')
 
 sys.path.insert(0, HELPERS_DIR)
 from towit_db import Database
+from towit_db_test import build_old_schema_db
 
 
 def write_config(tmpdir, db_path):
@@ -338,6 +339,20 @@ class TestTowitSearch(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         data = json.loads(result.stdout)
         self.assertEqual(data, [])
+
+
+class TestTowitSearchOnOldDatabase(unittest.TestCase):
+    def test_search_migrates_old_db_on_first_use(self):
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        db_path = os.path.join(tmpdir, 'old.db')
+        build_old_schema_db(db_path)
+        config_path = write_config(tmpdir, db_path)
+        result = run_search(config_path, ['legacy-kw', '--format', 'json'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('old-1', result.stdout)
+        self.assertEqual(result.stderr, '')
+        self.assertEqual(Database(db_path).schema_version(), 1)
 
 
 class TestTowitSearchArchive(unittest.TestCase):
