@@ -3,6 +3,7 @@
 #
 # Run with: python3 tests/helpers/towit_db_test.py
 
+import contextlib
 import unittest
 import unittest.mock
 import tempfile
@@ -14,7 +15,7 @@ import sys
 HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
 sys.path.insert(0, HELPERS_DIR)
 
-from towit_db import Database, message_hash
+from towit_db import Database, message_hash, build_match_expression
 
 SAMPLE_CONV = {
     'id': 'test-session-001',
@@ -713,6 +714,243 @@ class TestArchiveSession(unittest.TestCase):
         conn.commit()
         conn.close()
         self.assertTrue(self.db.is_forgotten('arc-1'))
+
+
+class TestBuildMatchExpression(unittest.TestCase):
+    def test_single_phrase(self):
+        self.assertEqual(build_match_expression(['stop hook']), '"stop hook"')
+
+    def test_and_join_default(self):
+        self.assertEqual(build_match_expression(['a', 'b']), '"a" AND "b"')
+
+    def test_or_join(self):
+        self.assertEqual(build_match_expression(['a', 'b'], 'or'), '"a" OR "b"')
+
+    def test_embedded_quote_doubled(self):
+        self.assertEqual(build_match_expression(['a"b']), '"a""b"')
+
+    def test_untokenizable_returns_none(self):
+        for terms in (['"'], ['***'], [], ['  '], ['"', '*']):
+            self.assertIsNone(build_match_expression(terms), terms)
+
+    def test_untokenizable_terms_dropped_when_others_remain(self):
+        self.assertEqual(build_match_expression(['***', 'ok']), '"ok"')
+
+
+class TestRepoFilter(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db = Database(os.path.join(self.tmpdir, 't.db'))
+        self.db.create_schema()
+        for i, key in enumerate(['/src/acme/webapp', '/src/other/webapp', '/src/acme/web',
+                                 '/src/acme/we_app', '/src/acme/50%', None]):
+            self.db.archive_session({'id': 'c%d' % i, 'folder': '/f', 'cwd': '/w',
+                                     'started_at': None, 'last_active': None,
+                                     'repo_key': key, 'source_path': None}, [])
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _match(self, repo, col='c.repo_key'):
+        sql, params = self.db._repo_filter(repo, col)
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                "SELECT c.repo_key FROM conversations c WHERE " + sql + " ORDER BY c.id", params
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def test_exact_key(self):
+        self.assertEqual(self._match('/src/acme/webapp'), ['/src/acme/webapp'])
+
+    def test_basename_matches_every_repo_with_that_name(self):
+        self.assertEqual(self._match('webapp'), ['/src/acme/webapp', '/src/other/webapp'])
+
+    def test_basename_is_not_a_suffix_of_component(self):
+        self.assertEqual(self._match('app'), [])
+
+    def test_wildcards_match_nothing_extra(self):
+        for arg in ('web%', 'web_pp', '%', '_', '\\'):
+            self.assertEqual(self._match(arg), [], arg)
+        self.assertEqual(self._match('we_app'), ['/src/acme/we_app'])
+        self.assertEqual(self._match('50%'), ['/src/acme/50%'])
+
+    def test_trailing_slash_ignored(self):
+        self.assertEqual(self._match('/src/acme/webapp/'), ['/src/acme/webapp'])
+        self.assertEqual(self._match('webapp/'), ['/src/acme/webapp', '/src/other/webapp'])
+
+    def test_empty_matches_nothing(self):
+        self.assertEqual(self._match(''), [])
+
+    def test_custom_column(self):
+        sql, params = self.db._repo_filter('webapp', 'x.k')
+        self.assertIn('x.k', sql)
+        self.assertNotIn('c.repo_key', sql)
+
+    def test_fully_parameterized(self):
+        sql, params = self.db._repo_filter("x'; DROP TABLE conversations; --")
+        self.assertNotIn('DROP', sql)
+        self.assertEqual(sql.count('?'), len(params))
+
+
+class _FailingMatchConn:
+    """Connection proxy that raises a chosen OperationalError for FTS MATCH queries."""
+    def __init__(self, conn, message):
+        self.conn, self.message = conn, message
+
+    def execute(self, sql, *args):
+        if 'MATCH' in sql:
+            raise sqlite3.OperationalError(self.message)
+        return self.conn.execute(sql, *args)
+
+
+class TestSearchArchive(unittest.TestCase):
+    def _conv(self, cid, cwd='/w/app', repo='/src/app', started='2026-01-01T00:00:00Z'):
+        return {'id': cid, 'folder': '/f', 'cwd': cwd, 'started_at': started,
+                'last_active': started, 'repo_key': repo, 'source_path': None}
+
+    def _m(self, role, text):
+        return {'role': role, 'ts': None, 'text': text}
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 't.db')
+        self.db = Database(self.db_path)
+        self.db.create_schema()
+        # s1: text-only hit in an assistant turn (seq 3), no metadata
+        self.db.archive_session(self._conv('s1', started='2026-01-01T00:00:00Z'), [
+            self._m('user', 'how do hooks work?'), self._m('assistant', 'they run'),
+            self._m('user', 'and recursion?'),
+            self._m('assistant', 'The recursion guard stops the stop hook from re-entering.')])
+        # s2: keyword metadata match plus a text hit
+        self.db.archive_session(self._conv('s2', cwd='/w/other', repo='/src/other',
+                                           started='2026-01-02T00:00:00Z'), [
+            self._m('user', 'unrelated'), self._m('assistant', 'recursion')])
+        self.db.upsert_conversation({
+            'id': 's2', 'folder': '/f', 'cwd': '/w/other', 'started_at': '2026-01-02T00:00:00Z',
+            'last_active': '2026-01-02T00:00:00Z', 'title': 'Other title', 'summary': 'sum',
+            'topics': ['misc'], 'keywords': ['recursion-guard']})
+        # s3: metadata-only (keyword), no matching text
+        self.db.archive_session(self._conv('s3', started='2026-01-03T00:00:00Z'), [
+            self._m('user', 'first user words'), self._m('assistant', 'ok')])
+        self.db.upsert_conversation({
+            'id': 's3', 'folder': '/f', 'cwd': '/w/app', 'started_at': '2026-01-03T00:00:00Z',
+            'last_active': '2026-01-03T00:00:00Z', 'title': 'T3', 'summary': 'sum3',
+            'topics': [], 'keywords': ['recursion']})
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _ids(self, results):
+        return [r['id'] for r in results]
+
+    def test_hostile_terms_return_list_and_do_not_raise(self):
+        for t in ['"', '*', 'NEAR(', 'AND', 'OR', 'NOT', 'a"b', '"unbalanced', ')', '^x', 'col:x', "'"]:
+            for scope in ('all', 'text'):
+                self.assertIsInstance(self.db.search_archive([t], scope=scope), list, t)
+
+    def test_untokenizable_term_returns_empty(self):
+        self.assertEqual(self.db.search_archive(['***'], scope='text'), [])
+
+    def test_text_hit_has_snippet_and_seq(self):
+        res = self.db.search_archive(['guard'], scope='text')
+        self.assertEqual(self._ids(res), ['s1'])
+        self.assertEqual(res[0]['seq'], 3)
+        self.assertIn('[guard]', res[0]['snippet'])
+        self.assertIsInstance(res[0]['score'], float)
+
+    def test_phrase_argument_is_exact_vs_and(self):
+        self.assertEqual(self._ids(self.db.search_archive(['stop hook'], scope='text')), ['s1'])
+        self.assertEqual(self.db.search_archive(['hook stop'], scope='text'), [])
+        self.assertEqual(self._ids(self.db.search_archive(['hook', 'stop'], scope='text')), ['s1'])
+
+    def test_or_mode(self):
+        res = self.db.search_archive(['guard', 'unrelated'], mode='or', scope='text')
+        self.assertEqual(set(self._ids(res)), {'s1', 's2'})
+
+    def test_tiering_metadata_above_text_only(self):
+        res = self.db.search_archive(['recursion'])
+        ids = self._ids(res)
+        self.assertEqual(set(ids), {'s1', 's2', 's3'})
+        self.assertEqual(ids[-1], 's1')  # text-only ranks last
+        by = {r['id']: r for r in res}
+        self.assertEqual(by['s2']['seq'], 1)  # metadata + text keeps its text hit
+        self.assertIsNotNone(by['s2']['score'])
+        self.assertIsNone(by['s3']['seq'])
+        self.assertIsNone(by['s3']['score'])
+        self.assertEqual(by['s3']['snippet'], '')
+
+    def test_scope_text_ignores_metadata(self):
+        self.assertEqual(self.db.search_archive(['recursion-guard'], scope='text'), [])
+
+    def test_scope_metadata_reproduces_old_search(self):
+        old = self.db.search(['recursion'], mode='and', include_keywords=True)
+        new = self.db.search_archive(['recursion'], scope='metadata')
+        self.assertEqual([{k: r[k] for k in old[0]} for r in new], old)
+
+    def test_include_flags_apply_to_metadata_side(self):
+        self.assertNotIn('s3', self._ids(self.db.search_archive(['sum3'], scope='metadata')))
+        self.assertIn('s3', self._ids(self.db.search_archive(['sum3'], scope='metadata',
+                                                             include_summary=True)))
+
+    def test_one_result_per_conversation(self):
+        self.db.archive_session(self._conv('s4'), [self._m('user', 'dup'),
+                                                   self._m('assistant', 'dup dup')])
+        self.assertEqual(self._ids(self.db.search_archive(['dup'], scope='text')), ['s4'])
+
+    def test_repo_filter_exact_and_basename(self):
+        self.assertEqual(set(self._ids(self.db.search_archive(['recursion'], repo='/src/other'))), {'s2'})
+        self.assertEqual(set(self._ids(self.db.search_archive(['recursion'], repo='app'))), {'s1', 's3'})
+        self.assertEqual(self.db.search_archive(['recursion'], repo='app%'), [])
+        self.assertEqual(self._ids(self.db.search_archive(['recursion'], repo='other', scope='metadata')), ['s2'])
+
+    def test_folder_filter(self):
+        self.assertEqual(set(self._ids(self.db.search_archive(['recursion'], folder='/w/app'))), {'s1', 's3'})
+
+    def test_null_title_falls_back_to_first_user_message_80_chars(self):
+        self.assertEqual(self.db.search_archive(['guard'], scope='text')[0]['title'], 'how do hooks work?')
+        self.db.archive_session(self._conv('s5'), [self._m('assistant', 'zzq first'),
+                                                   self._m('user', 'u' * 200)])
+        self.assertEqual(self.db.search_archive(['zzq'], scope='text')[0]['title'], 'u' * 80)
+
+    def test_existing_title_kept(self):
+        res = self.db.search_archive(['recursion'])
+        self.assertEqual({r['id']: r['title'] for r in res}['s2'], 'Other title')
+
+    def test_forgotten_session_not_resurrected(self):
+        with self.db.connect() as conn:
+            conn.execute("INSERT INTO forgotten (id) VALUES ('s1')")
+            conn.execute("DELETE FROM conversations WHERE id = 's1'")
+        self.assertNotIn('s1', self._ids(self.db.search_archive(['guard'])))
+        self.assertEqual(self.db.search_archive(['guard'], scope='text'), [])
+
+    def test_limit(self):
+        self.assertEqual(len(self.db.search_archive(['recursion'], limit=2)), 2)
+
+    def _with_failing_match(self, message):
+        real_connect = Database.connect
+
+        @contextlib.contextmanager
+        def connect(db):
+            with real_connect(db) as conn:
+                yield _FailingMatchConn(conn, message)
+        return unittest.mock.patch.object(Database, 'connect', connect)
+
+    def test_other_operational_errors_propagate(self):
+        with self._with_failing_match('database is locked'):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.db.search_archive(['guard'], scope='text')
+
+    def test_fts_syntax_error_returns_empty(self):
+        with self._with_failing_match('fts5: syntax error near "x"'):
+            self.assertEqual(self.db.search_archive(['guard'], scope='text'), [])
+
+    def test_query_plan_uses_fts_index(self):
+        sql, params = self.db._text_match_query(None, None)
+        with self.db.connect() as conn:
+            plan = ' '.join(r[3] for r in conn.execute(
+                'EXPLAIN QUERY PLAN ' + sql, ['"guard"'] + params))
+        self.assertIn('messages_fts', plan)
+        self.assertNotRegex(plan, r'SCAN m\b')
 
 
 if __name__ == '__main__':

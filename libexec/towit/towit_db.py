@@ -121,6 +121,19 @@ def message_hash(role: str, text: str) -> str:
     return hashlib.sha256((role + "\0" + text).encode('utf-8')).hexdigest()
 
 
+def build_match_expression(terms: list, mode: str = 'and') -> str | None:
+    """Build an FTS5 MATCH expression from user terms, or None if nothing is searchable.
+
+    Each term becomes a quoted FTS5 phrase (embedded '"' doubled), so operators,
+    column filters and punctuation in user input are always literal. Terms with
+    no letter or digit cannot produce a token and are dropped.
+    """
+    phrases = ['"%s"' % t.replace('"', '""') for t in terms if any(ch.isalnum() for ch in t)]
+    if not phrases:
+        return None
+    return (' OR ' if mode == 'or' else ' AND ').join(phrases)
+
+
 class Database:
     def __init__(self, db_path=None):
         self.db_path = db_path if db_path is not None else config.db_path
@@ -420,6 +433,148 @@ class Database:
             )
             rows = conn.execute(sql, params).fetchall()
             return [self._row_to_dict(r) for r in rows]
+
+    def _repo_filter(self, repo: str, col: str = 'c.repo_key') -> tuple:
+        """Return (sql, params) matching rows whose `col` equals repo exactly or whose
+        final path component equals repo.
+
+        `col` is a hardcoded column reference supplied by the caller (never user input).
+        The basename test compares a suffix with substr(), not LIKE, so '%', '_' and
+        '\\' in repo are literal. A trailing slash on repo is ignored.
+        """
+        stripped = repo.rstrip('/')
+        if not stripped:
+            return '1 = 0', []
+        sql = f"({col} = ? OR {col} = ?"
+        params = [repo, stripped]
+        if '/' not in stripped:
+            sql += f" OR substr({col}, -length(?)) = ?"
+            params += ['/' + stripped, '/' + stripped]
+        return sql + ')', params
+
+    def _text_match_query(self, folder, repo) -> tuple:
+        """SQL + params (after the MATCH expression) for message-text hits, best bm25 first."""
+        sql = (
+            "SELECT m.conversation_id AS id, m.seq AS seq,"
+            " snippet(messages_fts, 0, '[', ']', '…', 12) AS snippet,"
+            " bm25(messages_fts) AS score"
+            " FROM messages_fts"
+            " JOIN messages m ON m.id = messages_fts.rowid"
+            " JOIN conversations c ON c.id = m.conversation_id"
+            " WHERE messages_fts MATCH ?"
+        )
+        params = []
+        if folder:
+            sql += " AND c.cwd = ?"
+            params.append(folder)
+        if repo:
+            frag, rparams = self._repo_filter(repo)
+            sql += " AND " + frag
+            params += rparams
+        return sql + " ORDER BY score", params
+
+    def search_archive(self, terms: list, mode: str = 'and', folder: str = None,
+                       repo: str = None, scope: str = 'all', include_topics: bool = False,
+                       include_summary: bool = False, include_title: bool = False,
+                       limit: int = 50) -> list:
+        """
+        Search archived message text and/or conversation metadata.
+
+        scope='all'      — metadata (as `search`) plus message text; a conversation with
+                           a metadata match ranks above a text-only match, then bm25
+                           (lower is better), then recency
+        scope='text'     — message text only
+        scope='metadata' — exactly `search` (keywords plus the include_* fields)
+
+        One result per conversation: its best-matching message (seq, snippet, score), or
+        seq=None, snippet='', score=None for a metadata-only hit. A null title falls back
+        to the first user message (80 chars). limit=None means unlimited.
+        """
+        self.validate()
+        meta = []
+        if scope in ('all', 'metadata'):
+            meta = self.search(terms, mode=mode, folder=folder, include_keywords=True,
+                               include_topics=include_topics, include_summary=include_summary,
+                               include_title=include_title)
+
+        with self.connect() as conn:
+            if repo and meta:
+                frag, rparams = self._repo_filter(repo)
+                keep = {r['id'] for r in conn.execute(
+                    f"SELECT c.id FROM conversations c WHERE {frag}", rparams)}
+                meta = [r for r in meta if r['id'] in keep]
+
+            if scope == 'metadata':
+                results = [dict(r, seq=None, snippet='', score=None) for r in meta]
+                results = results[:limit] if limit else results
+                self._fill_title_fallback(conn, results)
+                return results
+
+            hits = {}  # conversation id -> best text row (rows arrive best-first)
+            expr = build_match_expression(terms, mode)
+            if expr is not None:
+                sql, params = self._text_match_query(folder, repo)
+                try:
+                    for row in conn.execute(sql, [expr] + params):
+                        hits.setdefault(row['id'], row)
+                except sqlite3.OperationalError as e:
+                    # A query FTS5 rejects despite quoting means "no text hits";
+                    # lock/IO errors must still propagate.
+                    msg = str(e).lower()
+                    if 'fts5' not in msg and 'syntax' not in msg:
+                        raise
+                    hits = {}
+
+            meta_by_id = {r['id']: r for r in meta}
+            order = list(meta_by_id.keys() | hits.keys())
+            started = {}
+            if order:
+                for i in range(0, len(order), 500):
+                    chunk = order[i:i + 500]
+                    started.update({r['id']: r['started_at'] or '' for r in conn.execute(
+                        "SELECT id, started_at FROM conversations WHERE id IN (%s)"
+                        % ','.join('?' for _ in chunk), chunk)})
+            order.sort(key=lambda i: started.get(i, ''), reverse=True)  # recency, then stable tiers
+            order.sort(key=lambda i: (
+                i not in meta_by_id,
+                i not in hits,
+                hits[i]['score'] if i in hits else 0.0,
+            ))
+            if limit:
+                order = order[:limit]
+
+            results = []
+            for conv_id in order:
+                base = meta_by_id.get(conv_id)
+                if base is None:
+                    base = self._get_summary_row(conn, conv_id)
+                hit = hits.get(conv_id)
+                results.append(dict(
+                    base,
+                    seq=hit['seq'] if hit else None,
+                    snippet=hit['snippet'] if hit else '',
+                    score=hit['score'] if hit else None,
+                ))
+            self._fill_title_fallback(conn, results)
+            return results
+
+    def _get_summary_row(self, conn, conv_id: str) -> dict:
+        row = conn.execute(
+            self._conversation_select() + " WHERE c.id = ? GROUP BY c.id", (conv_id,)
+        ).fetchone()
+        return self._row_to_dict(row)
+
+    def _fill_title_fallback(self, conn, results: list) -> None:
+        """Replace a null title with the first user message (80 chars), if one is archived."""
+        for r in results:
+            if r['title']:
+                continue
+            row = conn.execute(
+                "SELECT text FROM messages WHERE conversation_id = ? AND role = 'user' "
+                "ORDER BY seq LIMIT 1", (r['id'],)
+            ).fetchone()
+            if row:
+                r['title'] = row['text'][:80]
 
     def list_conversations(self, folder: str = None, topic: str = None, keyword: str = None) -> list:
         """Return all conversations, optionally filtered by folder, topic, and/or keyword."""
