@@ -105,11 +105,11 @@ teardown() {
   local cfg="${TEST_TMPDIR}/existing_config.toml"
   echo "# my custom config" > "${cfg}"
   local mtime_before
-  mtime_before="$(stat -f '%m' "${cfg}" 2>/dev/null || stat -c '%Y' "${cfg}")"
+  mtime_before="$(stat -c '%Y' "${cfg}" 2>/dev/null || stat -f '%m' "${cfg}")"
   TOWIT_CONFIG_PATH="${cfg}" run "${TOWIT}" setup --config
   [ "${status}" -eq 0 ]
   local mtime_after
-  mtime_after="$(stat -f '%m' "${cfg}" 2>/dev/null || stat -c '%Y' "${cfg}")"
+  mtime_after="$(stat -c '%Y' "${cfg}" 2>/dev/null || stat -f '%m' "${cfg}")"
   [ "${mtime_before}" = "${mtime_after}" ] || {
     echo "Config file was overwritten — it should not be"; return 1
   }
