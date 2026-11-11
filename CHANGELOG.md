@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `towit search` ranks message hits without computing snippets for every matching message, and fetches summaries and fallback titles in batches instead of one query per result, so searches over a large archive do less work. Results, ordering and snippets are unchanged.
+
 ## [0.9.5] - 2026-11-11
 
 ### Fixed
