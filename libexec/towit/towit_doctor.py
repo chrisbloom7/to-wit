@@ -13,10 +13,13 @@ import shutil
 import sqlite3
 import sys
 import tomllib
+from urllib.parse import quote
 from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_config import _KNOWN_KEYS
+from towit_db import SCHEMA_VERSION
+from towit_install_hook import HOOK_EVENTS
 
 
 @dataclass
@@ -162,6 +165,14 @@ _REQUIRED_TABLES = {
 }
 
 
+def _connect_ro(db_path: str) -> sqlite3.Connection:
+    """Open a read-only raw connection (doctor must work on a broken DB and never alter it)."""
+    return sqlite3.connect(f'file:{quote(db_path)}?mode=ro', uri=True, timeout=5.0)
+
+
+_ARCHIVE_TABLES = ('messages', 'messages_fts')
+
+
 def check_db_exists(db_path: str) -> CheckResult:
     if not os.path.isfile(db_path):
         return CheckResult(
@@ -205,7 +216,7 @@ def check_db_dir_permissions(db_path: str) -> CheckResult:
 
 def check_db_tables(db_path: str) -> CheckResult:
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
+        conn = _connect_ro(db_path)
         try:
             rows = conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
@@ -233,7 +244,7 @@ def check_db_schema(db_path: str) -> CheckResult:
     """Check that incremental migrations have been applied."""
     issues = []
     try:
-        conn = sqlite3.connect(db_path, timeout=5.0)
+        conn = _connect_ro(db_path)
         try:
             cols = {row[1] for row in conn.execute('PRAGMA table_info(conversations)').fetchall()}
             if 'message_count' not in cols:
@@ -245,6 +256,9 @@ def check_db_schema(db_path: str) -> CheckResult:
                 issues.append('keywords table missing')
             if 'conversation_keywords' not in tables:
                 issues.append('conversation_keywords table missing')
+            for name in _ARCHIVE_TABLES:
+                if name not in tables:
+                    issues.append(f'{name} table missing')
         finally:
             conn.close()
     except sqlite3.Error as exc:
@@ -259,26 +273,130 @@ def check_db_schema(db_path: str) -> CheckResult:
     return CheckResult('PASS', 'Database schema is current')
 
 
+def check_fts5_available() -> CheckResult:
+    """Check that this SQLite build has FTS5 (needed for archive search)."""
+    try:
+        conn = sqlite3.connect(':memory:')
+        try:
+            conn.execute("CREATE VIRTUAL TABLE fts5_probe USING fts5(x)")
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        return CheckResult(
+            'FAIL',
+            f'SQLite FTS5 is not available: {exc}',
+            remediation="Use a Python/SQLite build compiled with FTS5 (e.g. Homebrew python3). Archive search needs it.",
+        )
+    return CheckResult('PASS', 'SQLite FTS5 is available')
+
+
+_INTEGRITY_TIMEOUT = 5.0
+
+
+def _is_corruption(exc: sqlite3.Error) -> bool:
+    name = getattr(exc, 'sqlite_errorname', '') or ''
+    return name.startswith('SQLITE_CORRUPT') or 'malformed' in str(exc).lower()
+
+
+def _fts_integrity_check(db_path: str) -> None:
+    """Run the FTS5 integrity-check; raises sqlite3.Error if the index is inconsistent.
+
+    rank=1 also compares the index with the external content table. The check is an
+    INSERT command, which SQLite refuses on a read-only handle, so
+    it runs on a rw handle inside a transaction that is always rolled back.
+    """
+    conn = sqlite3.connect(f'file:{quote(db_path)}?mode=rw', uri=True, timeout=_INTEGRITY_TIMEOUT)
+    try:
+        conn.execute("BEGIN")
+        try:
+            conn.execute("INSERT INTO messages_fts(messages_fts, rank) VALUES('integrity-check', 1)")
+        finally:
+            conn.rollback()
+    finally:
+        conn.close()
+
+
+def check_archive_schema(db_path: str) -> CheckResult:
+    """Check archive tables exist, user_version is current, and the FTS index is consistent."""
+    try:
+        conn = _connect_ro(db_path)
+        try:
+            tables = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
+            ).fetchall()}
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        return CheckResult('WARN', f'Could not verify archive schema: {exc}',
+                           remediation="Run 'towit setup' to apply migrations.")
+    missing = [t for t in _ARCHIVE_TABLES if t not in tables]
+    if missing:
+        return CheckResult(
+            'WARN',
+            f'Archive tables missing: {", ".join(missing)}',
+            remediation="Run 'towit setup' to apply pending schema migrations.",
+        )
+    if version < SCHEMA_VERSION:
+        return CheckResult(
+            'WARN',
+            f'Schema user_version is {version}, expected {SCHEMA_VERSION}',
+            remediation="Run 'towit setup' to apply pending schema migrations.",
+        )
+    try:
+        _fts_integrity_check(db_path)
+    except sqlite3.Error as exc:
+        if not _is_corruption(exc):
+            # busy/locked (live writer), read-only file, cannot open...: not evidence of damage
+            return CheckResult(
+                'WARN',
+                f'Could not run FTS integrity check: {exc}',
+                remediation='Retry later, or check that the database is writable and not in use.',
+            )
+        return CheckResult(
+            'FAIL',
+            f'FTS index integrity check failed: {exc}',
+            remediation="Rebuild the index: sqlite3 <db> \"INSERT INTO messages_fts(messages_fts) VALUES('rebuild')\"",
+        )
+    return CheckResult('PASS', f'Archive schema current (version {version}) and FTS index consistent')
+
+
 # ---------------------------------------------------------------------------
-# Stop hook checks
+# Hook checks (Stop, SessionEnd, SessionStart)
 # ---------------------------------------------------------------------------
 
 _HOOK_MARKER = 'towit_hook.py'
 
 
-def _find_hook_command(settings_path: str) -> str | None:
-    """Return the hook command string if our hook is installed, else None."""
+def _load_settings(settings_path: str) -> dict:
     try:
         with open(settings_path) as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
-        return None
-    for entry in data.get('hooks', {}).get('Stop', []):
-        for hook in entry.get('hooks', []):
-            cmd = hook.get('command', '')
-            if _HOOK_MARKER in cmd:
-                return cmd
-    return None
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _find_hook_commands(settings_path: str) -> dict:
+    """Return {event: first towit hook command} for each event where our hook is registered."""
+    hooks = _load_settings(settings_path).get('hooks', {})
+    if not isinstance(hooks, dict):
+        return {}
+    found = {}
+    for event in HOOK_EVENTS:
+        entries = hooks.get(event, [])
+        for entry in entries if isinstance(entries, list) else []:
+            inner = entry.get('hooks', []) if isinstance(entry, dict) else []
+            for hook in inner if isinstance(inner, list) else []:
+                cmd = hook.get('command', '') if isinstance(hook, dict) else ''
+                if isinstance(cmd, str) and _HOOK_MARKER in cmd:
+                    found.setdefault(event, cmd)
+    return found
+
+
+def _script_path(command: str) -> str | None:
+    # Command form: "python3 /abs/path/to/towit_hook.py"
+    return next((p for p in command.strip().split() if _HOOK_MARKER in p), None)
 
 
 def check_hook_settings_file(settings_path: str) -> CheckResult:
@@ -292,32 +410,71 @@ def check_hook_settings_file(settings_path: str) -> CheckResult:
 
 
 def check_hook_installed(settings_path: str) -> CheckResult:
+    """FAIL when no To Wit hook is registered for any event (partial installs: check_hook_events)."""
     if not os.path.isfile(settings_path):
-        return CheckResult('WARN', 'Cannot check hook — settings file absent (see above)')
-    cmd = _find_hook_command(settings_path)
-    if cmd is None:
+        return CheckResult('WARN', 'Cannot check hooks — settings file absent (see above)')
+    found = _find_hook_commands(settings_path)
+    if not found:
         return CheckResult(
             'FAIL',
-            f'To Wit stop hook not found in {settings_path}',
-            remediation="Run 'towit install-hook' to register the stop hook.",
+            f'To Wit hooks not found in {settings_path}',
+            remediation="Run 'towit install-hook' to register the hooks.",
         )
-    return CheckResult('PASS', f'Stop hook installed: {cmd}')
+    return CheckResult('PASS', f'To Wit hooks installed for: {", ".join(found)}')
 
 
-def check_hook_script_exists(hook_command: str) -> CheckResult:
-    """Given the raw hook command string, verify the script path exists on disk."""
-    # Command form: "python3 /abs/path/to/towit_hook.py"
-    parts = hook_command.strip().split()
-    script_path = next((p for p in parts if _HOOK_MARKER in p), None)
-    if script_path is None:
-        return CheckResult('WARN', 'Could not parse hook script path from command')
-    if not os.path.isfile(script_path):
+def check_hook_events(settings_path: str) -> CheckResult:
+    """WARN naming each of Stop, SessionEnd, SessionStart not registered with the towit hook."""
+    found = _find_hook_commands(settings_path)
+    missing = [ev for ev in HOOK_EVENTS if ev not in found]
+    if missing:
+        return CheckResult(
+            'WARN',
+            f'To Wit hook not registered for: {", ".join(missing)}',
+            remediation="Run 'towit install-hook' to register the missing hooks. "
+                        "Without them sessions are only archived when Stop fires.",
+        )
+    return CheckResult('PASS', f'To Wit hook registered for all events: {", ".join(HOOK_EVENTS)}')
+
+
+def check_hook_commands(settings_path: str) -> CheckResult:
+    """FAIL when no registered hook script exists; WARN when only some do or events point at different scripts."""
+    found = _find_hook_commands(settings_path)
+    if not found:
+        return CheckResult('PASS', 'No To Wit hook commands to verify')
+    paths = {ev: _script_path(cmd) for ev, cmd in found.items()}
+    missing = [f'{ev} ({p})' for ev, p in paths.items() if p is None or not os.path.isfile(p)]
+    if len(missing) == len(paths):  # nothing can run: capture is dead
         return CheckResult(
             'FAIL',
-            f'Hook script not found on disk: {script_path}',
+            f'Hook script not found on disk for: {", ".join(missing)}',
             remediation="Reinstall To Wit to restore the hook script, then run 'towit install-hook'.",
         )
-    return CheckResult('PASS', f'Hook script exists at {script_path}')
+    if missing:
+        return CheckResult(
+            'WARN',
+            f'Hook script not found on disk for: {", ".join(missing)}',
+            remediation="Reinstall To Wit to restore the hook script, then run 'towit install-hook'.",
+        )
+    distinct = sorted(set(paths.values()))
+    if len(distinct) > 1:
+        return CheckResult(
+            'WARN',
+            f'Hook events point at different towit_hook.py scripts: {", ".join(distinct)}',
+            remediation="Remove the stale hook entries from settings.json, then run 'towit install-hook'.",
+        )
+    return CheckResult('PASS', f'Hook script exists at {distinct[0]}')
+
+
+def check_hooks_not_disabled(settings_path: str) -> CheckResult:
+    """WARN when Claude Code's disableAllHooks is true (no hook, so no archiving, will fire)."""
+    if _load_settings(settings_path).get('disableAllHooks') is True:
+        return CheckResult(
+            'WARN',
+            'disableAllHooks is true in Claude Code settings; To Wit hooks will not run',
+            remediation='Set "disableAllHooks" to false (or remove it) in settings.json.',
+        )
+    return CheckResult('PASS', 'Hooks are not globally disabled')
 
 
 # ---------------------------------------------------------------------------
@@ -364,12 +521,19 @@ def main():
         if db_tables_result.status != 'FAIL':
             results.append(check_db_schema(db_path))
 
-    # --- Stop hook ---
+    results.append(check_fts5_available())
+    if os.path.isfile(db_path):
+        results.append(check_archive_schema(db_path))
+
+    # --- Hooks ---
     results.append(check_hook_settings_file(settings_path))
-    results.append(check_hook_installed(settings_path))
-    hook_cmd = _find_hook_command(settings_path)
-    if hook_cmd:
-        results.append(check_hook_script_exists(hook_cmd))
+    hook_result = check_hook_installed(settings_path)
+    results.append(hook_result)
+    if os.path.isfile(settings_path):
+        if hook_result.status == 'PASS':
+            results.append(check_hook_events(settings_path))
+            results.append(check_hook_commands(settings_path))
+        results.append(check_hooks_not_disabled(settings_path))
 
     # --- Print results ---
     for result in results:

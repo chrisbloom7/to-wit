@@ -236,7 +236,8 @@ class TestDatabaseChecks(unittest.TestCase):
 
     def test_db_schema_current_is_pass(self):
         from towit_doctor import check_db_schema
-        self._make_db()
+        from towit_db import Database
+        Database(self.db_path).create_schema()
         result = check_db_schema(self.db_path)
         self.assertEqual(result.status, 'PASS')
 
@@ -280,6 +281,156 @@ class TestDatabaseChecks(unittest.TestCase):
         self.assertIn('towit setup', result.remediation)
 
 
+class TestArchiveSchemaChecks(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _legacy_db(self):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.executescript("""
+                CREATE TABLE conversations (id TEXT PRIMARY KEY, folder TEXT NOT NULL,
+                    cwd TEXT, started_at TEXT, last_active TEXT, title TEXT, summary TEXT,
+                    message_count INTEGER, indexed_at TEXT NOT NULL DEFAULT (datetime('now')));
+                CREATE TABLE topics (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL COLLATE NOCASE);
+                CREATE TABLE conversation_topics (conversation_id TEXT NOT NULL,
+                    topic_id INTEGER NOT NULL, PRIMARY KEY (conversation_id, topic_id));
+                CREATE TABLE keywords (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL COLLATE NOCASE);
+                CREATE TABLE conversation_keywords (conversation_id TEXT NOT NULL,
+                    keyword_id INTEGER NOT NULL, PRIMARY KEY (conversation_id, keyword_id));
+            """)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _migrated_db(self):
+        from towit_db import Database
+        Database(self.db_path).create_schema()
+
+    def test_fts5_available_passes_on_this_machine(self):
+        from towit_doctor import check_fts5_available
+        self.assertEqual(check_fts5_available().status, 'PASS')
+
+    def test_fts5_unavailable_fails(self):
+        from towit_doctor import check_fts5_available
+        with patch('towit_doctor.sqlite3.connect',
+                   side_effect=sqlite3.OperationalError('no such module: fts5')):
+            result = check_fts5_available()
+        self.assertEqual(result.status, 'FAIL')
+        self.assertIn('FTS5', result.label)
+        self.assertTrue(result.remediation)
+
+    def test_fts5_missing_module_during_create_fails(self):
+        from towit_doctor import check_fts5_available
+
+        class FakeConn:
+            def execute(self, sql, *a):
+                raise sqlite3.OperationalError('no such module: fts5')
+
+            def close(self):
+                pass
+        with patch('towit_doctor.sqlite3.connect', return_value=FakeConn()):
+            self.assertEqual(check_fts5_available().status, 'FAIL')
+
+    def test_archive_schema_warns_on_legacy_db(self):
+        from towit_doctor import check_archive_schema
+        self._legacy_db()
+        result = check_archive_schema(self.db_path)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('messages', result.label)
+        self.assertIn('towit setup', result.remediation)
+
+    def test_archive_schema_passes_after_migration(self):
+        from towit_doctor import check_archive_schema
+        self._migrated_db()
+        self.assertEqual(check_archive_schema(self.db_path).status, 'PASS')
+
+    def test_archive_schema_warns_when_user_version_behind(self):
+        from towit_doctor import check_archive_schema
+        self._migrated_db()
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA user_version = 0")
+        conn.commit()
+        conn.close()
+        result = check_archive_schema(self.db_path)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('user_version', result.label)
+
+    def test_archive_schema_fails_when_fts_index_is_inconsistent(self):
+        from towit_doctor import check_archive_schema
+        self._migrated_db()
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("INSERT INTO conversations (id, folder, archived) VALUES ('c', '/x', 1)")
+        conn.execute("INSERT INTO messages (conversation_id, seq, role, text) "
+                     "VALUES ('c', 0, 'user', 'hello world')")
+        # desynchronise the external-content index: a message the index never saw
+        conn.execute("DROP TRIGGER messages_ai")
+        conn.execute("INSERT INTO messages (conversation_id, seq, role, text) "
+                     "VALUES ('c', 1, 'user', 'unindexed words')")
+        conn.commit()
+        conn.close()
+        result = check_archive_schema(self.db_path)
+        self.assertEqual(result.status, 'FAIL')
+        self.assertIn('integrity', result.label.lower())
+        self.assertIn('rebuild', result.remediation.lower())
+
+    def test_archive_schema_warns_not_fails_when_db_is_locked_by_writer(self):
+        from towit_doctor import check_archive_schema
+        self._migrated_db()
+        writer = sqlite3.connect(self.db_path, timeout=0.1)
+        writer.execute("BEGIN IMMEDIATE")
+        try:
+            with patch('towit_doctor._INTEGRITY_TIMEOUT', 0.1):
+                result = check_archive_schema(self.db_path)
+        finally:
+            writer.rollback()
+            writer.close()
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('Could not run FTS integrity check', result.label)
+        self.assertNotIn('rebuild', result.remediation.lower())
+
+    def test_archive_schema_warns_not_fails_on_read_only_file(self):
+        from towit_doctor import check_archive_schema
+        self._migrated_db()
+        os.chmod(self.db_path, 0o400)
+        result = check_archive_schema(self.db_path)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('Could not run FTS integrity check', result.label)
+        self.assertNotIn('rebuild', result.remediation.lower())
+
+    def test_archive_schema_check_does_not_modify_db(self):
+        from towit_doctor import check_archive_schema
+        self._migrated_db()
+        with open(self.db_path, 'rb') as f:
+            before = f.read()
+        check_archive_schema(self.db_path)
+        with open(self.db_path, 'rb') as f:
+            self.assertEqual(f.read(), before)
+
+    def test_db_schema_warns_when_archive_tables_missing(self):
+        from towit_doctor import check_db_schema
+        self._legacy_db()
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA user_version = 1")  # irrelevant to this check
+        conn.commit()
+        conn.close()
+        result = check_db_schema(self.db_path)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('messages', result.label)
+
+    def test_archive_schema_on_garbage_file_does_not_raise(self):
+        from towit_doctor import check_archive_schema
+        with open(self.db_path, 'wb') as f:
+            f.write(b'not a sqlite database at all' * 10)
+        self.assertIn(check_archive_schema(self.db_path).status, ('WARN', 'FAIL'))
+
+
 class TestHookChecks(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -305,34 +456,114 @@ class TestHookChecks(unittest.TestCase):
         result = check_hook_settings_file(self.settings_path)
         self.assertEqual(result.status, 'PASS')
 
-    def test_hook_not_installed_is_fail(self):
+    def _hooks(self, events, script=None, extra=None):
+        script = script or self.hook_script
+        data = {'hooks': {ev: [{'matcher': '', 'hooks': [
+            {'type': 'command', 'command': f'python3 {script}'}]}] for ev in events}}
+        data.update(extra or {})
+        self._write_settings(data)
+
+    def test_no_hooks_registered_is_fail(self):
         from towit_doctor import check_hook_installed
         self._write_settings({'hooks': {'Stop': []}})
         result = check_hook_installed(self.settings_path)
         self.assertEqual(result.status, 'FAIL')
+        self.assertIn('hooks not found', result.label)
         self.assertIn('towit install-hook', result.remediation)
 
     def test_hook_installed_is_pass(self):
         from towit_doctor import check_hook_installed
-        data = {'hooks': {'Stop': [{'matcher': '', 'hooks': [
-            {'type': 'command', 'command': f'python3 {self.hook_script}'}
-        ]}]}}
-        self._write_settings(data)
+        self._hooks(['Stop'])
         result = check_hook_installed(self.settings_path)
         self.assertEqual(result.status, 'PASS')
 
-    def test_hook_script_missing_from_disk_is_fail(self):
-        from towit_doctor import check_hook_script_exists
-        command = f'python3 /no/such/towit_hook.py'
-        result = check_hook_script_exists(command)
+    def test_all_three_events_registered_is_pass(self):
+        from towit_doctor import check_hook_events
+        self._hooks(['Stop', 'SessionEnd', 'SessionStart'])
+        self.assertEqual(check_hook_events(self.settings_path).status, 'PASS')
+
+    def test_only_stop_registered_warns_naming_missing_events(self):
+        from towit_doctor import check_hook_events
+        self._hooks(['Stop'])
+        result = check_hook_events(self.settings_path)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('SessionEnd', result.label)
+        self.assertIn('SessionStart', result.label)
+        self.assertNotIn('Stop', result.label.replace('SessionStart', ''))
+        self.assertIn('towit install-hook', result.remediation)
+
+    def test_non_towit_hook_does_not_count_as_registered(self):
+        from towit_doctor import check_hook_events
+        self._write_settings({'hooks': {ev: [{'matcher': '', 'hooks': [
+            {'type': 'command', 'command': 'echo hi'}]}]
+            for ev in ('Stop', 'SessionEnd', 'SessionStart')}})
+        self.assertEqual(check_hook_events(self.settings_path).status, 'WARN')
+
+    def test_disable_all_hooks_true_is_warn(self):
+        from towit_doctor import check_hooks_not_disabled
+        self._hooks(['Stop', 'SessionEnd', 'SessionStart'], extra={'disableAllHooks': True})
+        result = check_hooks_not_disabled(self.settings_path)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('disableAllHooks', result.label)
+
+    def test_disable_all_hooks_absent_is_pass(self):
+        from towit_doctor import check_hooks_not_disabled
+        self._hooks(['Stop'])
+        self.assertEqual(check_hooks_not_disabled(self.settings_path).status, 'PASS')
+
+    def test_hook_commands_all_existing_and_same_path_is_pass(self):
+        from towit_doctor import check_hook_commands
+        open(self.hook_script, 'w').close()
+        self._hooks(['Stop', 'SessionEnd', 'SessionStart'])
+        self.assertEqual(check_hook_commands(self.settings_path).status, 'PASS')
+
+    def test_all_hook_scripts_missing_is_fail_naming_path(self):
+        from towit_doctor import check_hook_commands
+        self._hooks(['Stop', 'SessionEnd'], script='/no/such/towit_hook.py')
+        result = check_hook_commands(self.settings_path)
         self.assertEqual(result.status, 'FAIL')
         self.assertIn('/no/such/towit_hook.py', result.label)
+        self.assertIn('towit install-hook', result.remediation)
 
-    def test_hook_script_exists_on_disk_is_pass(self):
-        from towit_doctor import check_hook_script_exists
+    def test_some_events_pointing_at_a_missing_path_is_warn_not_fail(self):
+        from towit_doctor import check_hook_commands
         open(self.hook_script, 'w').close()
-        result = check_hook_script_exists(f'python3 {self.hook_script}')
-        self.assertEqual(result.status, 'PASS')
+        self._hooks(['Stop', 'SessionStart'])
+        with open(self.settings_path) as f:
+            data = json.load(f)
+        data['hooks']['SessionEnd'] = [{'matcher': '', 'hooks': [
+            {'type': 'command', 'command': 'python3 /old/place/towit_hook.py'}]}]
+        self._write_settings(data)
+        result = check_hook_commands(self.settings_path)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('SessionEnd', result.label)
+        self.assertNotIn('SessionStart', result.label)
+
+    def test_malformed_hook_settings_do_not_crash(self):
+        from towit_doctor import check_hook_events, check_hook_installed, check_hook_commands
+        self._write_settings({'hooks': {'Stop': 'oops', 'SessionEnd': [None, 5, {'hooks': 'x'}],
+                                        'SessionStart': [{'hooks': [None, {'command': 7}]}]}})
+        self.assertEqual(check_hook_installed(self.settings_path).status, 'FAIL')
+        self.assertEqual(check_hook_events(self.settings_path).status, 'WARN')
+        self.assertEqual(check_hook_commands(self.settings_path).status, 'PASS')
+        self._write_settings({'hooks': ['not', 'a', 'dict']})
+        self.assertEqual(check_hook_events(self.settings_path).status, 'WARN')
+
+    def test_mixed_existing_hook_paths_is_warn(self):
+        from towit_doctor import check_hook_commands
+        other = os.path.join(self.tmpdir, 'moved', 'towit_hook.py')
+        os.makedirs(os.path.dirname(other))
+        open(other, 'w').close()
+        open(self.hook_script, 'w').close()
+        self._hooks(['Stop', 'SessionStart'])
+        with open(self.settings_path) as f:
+            data = json.load(f)
+        data['hooks']['SessionEnd'] = [{'matcher': '', 'hooks': [
+            {'type': 'command', 'command': f'python3 {other}'}]}]
+        self._write_settings(data)
+        result = check_hook_commands(self.settings_path)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('different', result.label)
 
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -375,6 +606,16 @@ class TestDoctorMain(unittest.TestCase):
             capture_output=True, text=True, env=env,
         )
 
+    def _fake_claude_env(self):
+        """PATH with a stub `claude` first, so doctor never needs the real CLI."""
+        bin_dir = os.path.join(self.tmpdir, 'fakebin')
+        os.makedirs(bin_dir, exist_ok=True)
+        stub = os.path.join(bin_dir, 'claude')
+        with open(stub, 'w') as f:
+            f.write('#!/bin/sh\nexit 0\n')
+        os.chmod(stub, 0o755)
+        return {'PATH': bin_dir + os.pathsep + os.environ.get('PATH', '')}
+
     def _write_config(self):
         with open(self.config_path, 'w') as f:
             f.write(f'[database]\npath = "{self.db_path}"\n')
@@ -403,10 +644,10 @@ class TestDoctorMain(unittest.TestCase):
         os.chmod(self.db_path, 0o600)
         os.chmod(self.tmpdir, 0o700)
 
-    def _install_hook(self, hook_script_path):
-        data = {'hooks': {'Stop': [{'matcher': '', 'hooks': [
+    def _install_hook(self, hook_script_path, events=('Stop', 'SessionEnd', 'SessionStart')):
+        data = {'hooks': {ev: [{'matcher': '', 'hooks': [
             {'type': 'command', 'command': f'python3 {hook_script_path}'}
-        ]}]}}
+        ]}] for ev in events}}
         with open(self.settings_path, 'w') as f:
             json.dump(data, f)
 
@@ -436,21 +677,47 @@ class TestDoctorMain(unittest.TestCase):
         result = self._run()
         self.assertEqual(result.returncode, 1)
         self.assertIn('[FAIL]', result.stdout)
-        self.assertIn('stop hook not found', result.stdout.lower())
+        self.assertIn('hooks not found', result.stdout.lower())
         self.assertIn('failure(s)', result.stdout)
 
     def test_all_ok_prints_pass_lines_and_exits_zero(self):
         self._write_config()
-        self._make_db()
+        sys.path.insert(0, HELPERS_DIR)
+        from towit_db import Database
+        Database(self.db_path).create_schema()
+        os.chmod(self.db_path, 0o600)
+        os.chmod(self.tmpdir, 0o700)
         hook_script = os.path.join(
             PROJECT_ROOT, 'libexec', 'towit', 'towit_hook.py'
         )
         self._install_hook(hook_script)
-        result = self._run()
+        result = self._run(self._fake_claude_env())
         self.assertEqual(result.returncode, 0, f"Expected exit 0, got output:\n{result.stdout}")
         self.assertNotIn('[FAIL]', result.stdout)
         self.assertIn('[PASS]', result.stdout)
         self.assertIn('All checks passed', result.stdout)
+
+    def test_only_stop_hook_registered_warns_but_exits_zero(self):
+        self._write_config()
+        sys.path.insert(0, HELPERS_DIR)
+        from towit_db import Database
+        Database(self.db_path).create_schema()
+        os.chmod(self.db_path, 0o600)
+        os.chmod(self.tmpdir, 0o700)
+        self._install_hook(os.path.join(HELPERS_DIR, 'towit_hook.py'), events=('Stop',))
+        result = self._run(self._fake_claude_env())
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('[WARN]', result.stdout)
+        self.assertIn('SessionEnd', result.stdout)
+        self.assertIn('SessionStart', result.stdout)
+
+    def test_legacy_db_gets_archive_schema_warning(self):
+        self._write_config()
+        self._make_db()
+        self._install_hook(os.path.join(HELPERS_DIR, 'towit_hook.py'))
+        result = self._run()
+        self.assertIn('messages', result.stdout)
+        self.assertIn('[WARN]', result.stdout)
 
     def test_missing_claude_cli_prints_fail_and_exits_one(self):
         self._write_config()

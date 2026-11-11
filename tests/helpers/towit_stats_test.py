@@ -131,6 +131,57 @@ class TestTowitStats(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
 
 
+class TestStatsArchive(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        self.db = Database(self.db_path)
+        self.db.create_schema()
+        folder = os.path.join(self.tmpdir, 'proj')
+        os.makedirs(folder)
+        for cid, n in (('arch-1', 3), ('arch-2', 2)):
+            self.db.archive_session(
+                {'id': cid, 'folder': folder, 'cwd': self.tmpdir,
+                 'started_at': '2026-01-15T10:00:00Z', 'last_active': '2026-01-15T10:30:00Z',
+                 'repo_key': None, 'source_path': None},
+                [{'role': 'user', 'ts': None, 'text': f'message {i}'} for i in range(n)],
+            )
+            open(os.path.join(folder, f'{cid}.jsonl'), 'w').close()
+        self.db.upsert_conversation({
+            'id': 'meta-1', 'folder': folder, 'cwd': self.tmpdir,
+            'started_at': '2026-01-16T10:00:00Z', 'last_active': '2026-01-16T10:30:00Z',
+            'title': 'Meta', 'summary': '', 'topics': []
+        })
+        open(os.path.join(folder, 'meta-1.jsonl'), 'w').close()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_shows_archive_counts_and_size(self):
+        result = run_stats(self.config_path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = {l.split(':')[0].strip(): l.split(':', 1)[1].strip()
+                 for l in result.stdout.splitlines() if ':' in l and not l.startswith(' ')}
+        self.assertEqual(lines['Archived conversations'], '2')
+        self.assertEqual(lines['Metadata-only conversations'], '1')
+        self.assertEqual(lines['Archived messages'], '5')
+        self.assertRegex(lines['Database size'], r'^\d+(\.\d+)? (B|KB|MB|GB)$')
+
+    def test_archive_stats_dict(self):
+        stats = self.db.archive_stats()
+        self.assertEqual(
+            {k: stats[k] for k in ('archived', 'metadata_only', 'messages')},
+            {'archived': 2, 'metadata_only': 1, 'messages': 5})
+        self.assertGreater(stats['db_bytes'], 0)
+
+    def test_pruneable_ignores_archived_rows(self):
+        # archived rows are never pruned by default, so they are not "pruneable"
+        os.remove(os.path.join(self.tmpdir, 'proj', 'arch-2.jsonl'))
+        result = run_stats(self.config_path)
+        self.assertNotIn('Pruneable', result.stdout)
+
+
 class TestStatsHelp(unittest.TestCase):
     def test_help_flag_exits_zero(self):
         result = subprocess.run(

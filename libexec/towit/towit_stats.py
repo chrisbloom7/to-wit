@@ -14,6 +14,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_db import Database
 
 
+def _format_bytes(n: int) -> str:
+    size = float(n)
+    for unit in ('B', 'KB', 'MB'):
+        if size < 1024:
+            return f"{int(size)} B" if unit == 'B' else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
 def main():
     argparse.ArgumentParser(
         description='Show statistics about the To Wit catalog.'
@@ -52,18 +61,25 @@ def main():
             "SELECT COUNT(DISTINCT cwd) AS n FROM conversations WHERE cwd IS NOT NULL AND cwd != ''"
         ).fetchone()['n']
 
-    # Count pruneable entries (transcript missing from disk)
+    # Count pruneable entries: what a default `towit prune` removes (archived rows are kept)
     stubs = db.all_conversation_stubs()
     pruneable = sum(
         1 for s in stubs
-        if not os.path.isfile(os.path.join(s['folder'], f"{s['id']}.jsonl"))
+        if not s['archived']
+        and not os.path.isfile(os.path.join(s['folder'], f"{s['id']}.jsonl"))
     )
+    archive = db.archive_stats()
 
     print(f"Conversations indexed : {total}")
     print(f"Date range            : {oldest or 'n/a'} — {newest or 'n/a'}")
     print(f"Unique projects       : {unique_projects}")
     if pruneable:
         print(f"Pruneable entries     : {pruneable}  (run: towit prune)")
+    print()
+    print(f"Archived conversations      : {archive['archived']}")
+    print(f"Metadata-only conversations : {archive['metadata_only']}")
+    print(f"Archived messages           : {archive['messages']}")
+    print(f"Database size               : {_format_bytes(archive['db_bytes'])}")
     print()
 
     if top_topics:

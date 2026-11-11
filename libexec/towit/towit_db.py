@@ -749,16 +749,32 @@ class Database:
             return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
     def all_conversation_stubs(self) -> list:
-        """Return (id, folder) for every conversation — used by prune."""
+        """Return (id, folder, cwd, archived) for every conversation — used by prune and stats."""
         self.validate()
         with self.connect() as conn:
             rows = conn.execute(
-                "SELECT id, folder FROM conversations ORDER BY started_at DESC"
+                "SELECT id, folder, cwd, archived FROM conversations ORDER BY started_at DESC"
             ).fetchall()
-            return [{'id': r['id'], 'folder': r['folder']} for r in rows]
+            return [{'id': r['id'], 'folder': r['folder'], 'cwd': r['cwd'],
+                     'archived': bool(r['archived'])}
+                    for r in rows]
+
+    def archive_stats(self) -> dict:
+        """Return archived/metadata-only conversation counts, archived message count, and DB size."""
+        self.validate()
+        with self.connect() as conn:
+            archived = conn.execute(
+                "SELECT COUNT(*) FROM conversations WHERE archived = 1").fetchone()[0]
+            total = conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
+            messages = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+            pages = conn.execute("PRAGMA page_count").fetchone()[0]
+            page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+        return {'archived': archived, 'metadata_only': total - archived,
+                'messages': messages, 'db_bytes': pages * page_size}
 
     def delete_conversation(self, conv_id: str):
-        """Delete a conversation and its topic associations (via CASCADE)."""
+        """Delete a conversation and its topic/keyword associations and archived messages
+        (via CASCADE; the messages_ad trigger removes the FTS rows). Leaves no tombstone."""
         self.validate()
         with self.connect() as conn:
             conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
