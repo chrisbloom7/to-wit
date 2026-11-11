@@ -657,11 +657,35 @@ class TestArchiveSession(unittest.TestCase):
         self.assertEqual([r[3] for r in self._rows()], ['m0', 'm1', 'different tail'])
         self.assertEqual(self._conv_row()['tail_hash'], message_hash('user', 'different tail'))
 
-    def test_fewer_messages_rewrites(self):
+    def test_fewer_messages_with_different_content_rewrites(self):
         self.db.archive_session(dict(self.CONV), self._msgs(4))
-        self.assertEqual(self.db.archive_session(dict(self.CONV), self._msgs(2)), 'rewritten')
+        self.assertEqual(self.db.archive_session(dict(self.CONV), self._msgs(2, 'x')), 'rewritten')
         self.assertEqual([r[0] for r in self._rows()], [0, 1])
         self.assertEqual(self._conv_row()['archived_message_count'], 2)
+
+    def test_older_shorter_snapshot_of_a_longer_archive_is_unchanged(self):
+        early = self._msgs(6)
+        self.db.archive_session(dict(self.CONV), early)
+        self.db.archive_session(dict(self.CONV), self._msgs(8))
+        before = self._conv_row()
+        conv = dict(self.CONV, last_active='2026-03-03T00:00:00Z')
+        self.assertEqual(self.db.archive_session(conv, early), 'unchanged')
+        rows = self._rows()
+        self.assertEqual([r[0] for r in rows], list(range(8)))
+        after = self._conv_row()
+        self.assertEqual(after['archived_message_count'], 8)
+        self.assertEqual(after['tail_hash'], message_hash('assistant', 'm7'))
+        self.assertEqual(after['last_active'], before['last_active'])
+        self._fts_consistent()
+
+    def test_genuine_rewind_with_different_tail_still_rewrites(self):
+        self.db.archive_session(dict(self.CONV), self._msgs(8))
+        rewound = self._msgs(6)
+        rewound[5]['text'] = 'compacted tail'
+        self.assertEqual(self.db.archive_session(dict(self.CONV), rewound), 'rewritten')
+        self.assertEqual([r[3] for r in self._rows()][-1], 'compacted tail')
+        self.assertEqual(len(self._rows()), 6)
+        self.assertEqual(self._conv_row()['archived_message_count'], 6)
 
     def test_llm_metadata_survives_all_outcomes(self):
         self.db.upsert_conversation({

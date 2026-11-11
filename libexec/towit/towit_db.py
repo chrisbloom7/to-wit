@@ -1001,7 +1001,8 @@ class Database:
 
         Returns 'ingested' (not previously archived), 'appended' (stored messages
         are a prefix of messages), 'rewritten' (stored messages diverged),
-        'unchanged', or 'forgotten' (id is tombstoned; nothing written). LLM
+        'unchanged' (including an older, shorter snapshot of a longer archive; nothing
+        written), or 'forgotten' (id is tombstoned; nothing written). LLM
         metadata (title, summary, message_count, topics, keywords) is never touched. One BEGIN IMMEDIATE transaction; any
         exception rolls everything back.
         """
@@ -1027,6 +1028,16 @@ class Database:
                     outcome = 'unchanged' if stored == len(messages) else 'appended'
                     start = stored
                 else:
+                    if row['archived'] and stored > len(messages) > 0:
+                        # An older, shorter snapshot of a longer archive (e.g. a stale reader
+                        # racing a newer ingest) must not truncate it. Only a stored message at
+                        # the snapshot's tail position that differs marks a genuine rewrite.
+                        at_tail = conn.execute(
+                            "SELECT role, text FROM messages WHERE conversation_id = ? AND seq = ?",
+                            (conv_id, len(messages) - 1)).fetchone()
+                        if at_tail and message_hash(at_tail['role'], at_tail['text']) == tail_hash:
+                            conn.rollback()
+                            return 'unchanged'
                     outcome, start = 'rewritten', 0
 
                 params = {
