@@ -9,11 +9,13 @@ Can be used as a module (imported by backfill and hook) or run standalone:
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from towit_db import Database
+from towit_db import Database, is_missing_forgotten_table
+from towit_redact import redact
 from towit_config import config as _config, safe_subprocess_env
 
 
@@ -259,6 +261,19 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
     else:
         db = Database(db_path)
 
+    # A forgotten session is never re-indexed (the tombstone wins).
+    try:
+        if db.is_forgotten(session_id):
+            return 'skipped'
+    except SystemExit:
+        return 'skipped'  # DB file missing: nothing to index into
+    except sqlite3.OperationalError as exc:
+        # Only an un-migrated DB (nothing can be forgotten yet) is safe to ignore;
+        # anything else (locked, I/O) must stop indexing rather than risk enriching
+        # a forgotten session.
+        if not is_missing_forgotten_table(exc):
+            raise
+
     # Parse first so we can compare message count for staleness detection
     messages = parse_jsonl(jsonl_path)
     current_count = len(messages)
@@ -288,9 +303,22 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
     if not should_index(messages):
         return 'skipped'
 
-    transcript = build_transcript(messages, max_chars=_config.indexing_transcript_max_chars)
+    # Redact before building so truncation cannot split a secret, and so no
+    # unredacted text reaches Claude. Only the text sent out is redacted here.
+    if _config.ingest_redact:
+        extra = _config.ingest_extra_patterns
+        sendable = [dict(m, content=redact(m['content'], extra)) for m in messages]
+    else:
+        sendable = messages
+    transcript = build_transcript(sendable, max_chars=_config.indexing_transcript_max_chars)
     existing_topics = existing['topics'] if existing else None
     existing_keywords = existing['keywords'] if existing else None
+    if _config.ingest_redact:
+        extra = _config.ingest_extra_patterns
+        if existing_topics:
+            existing_topics = [redact(t, extra) for t in existing_topics]
+        if existing_keywords:
+            existing_keywords = [redact(k, extra) for k in existing_keywords]
     analysis = analyze_with_claude(transcript, existing_topics=existing_topics,
                                    existing_keywords=existing_keywords)
 
@@ -317,7 +345,8 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
         'message_count': current_count,
     }
 
-    db.upsert_conversation(data)
+    if not db.upsert_conversation(data):
+        return 'skipped'  # forgotten while Claude was analyzing
 
     return 'indexed'
 

@@ -107,6 +107,15 @@ CREATE INDEX IF NOT EXISTS idx_ck_conv               ON conversation_keywords(co
 """
 
 
+def is_missing_forgotten_table(exc: Exception) -> bool:
+    """True if exc is the error from an un-migrated DB lacking the forgotten table.
+
+    Nothing can be forgotten there, so callers treat it as not-forgotten; every
+    other OperationalError (locked, I/O) must still fail closed.
+    """
+    return isinstance(exc, sqlite3.OperationalError) and 'no such table: forgotten' in str(exc)
+
+
 def message_hash(role: str, text: str) -> str:
     """sha256 hex digest of a message, used to detect whether an archive is a prefix of a transcript."""
     return hashlib.sha256((role + "\0" + text).encode('utf-8')).hexdigest()
@@ -192,7 +201,10 @@ class Database:
 
     def upsert_conversation(self, data: dict):
         """
-        Insert or replace a conversation record and its topic associations.
+        Insert or update a conversation record and its topic/keyword associations.
+
+        Returns False (writing nothing) if the id is in the forgotten table,
+        checked under the write lock so a concurrent `towit forget` wins; else True.
 
         Expected keys in data:
             id, folder, cwd, started_at, last_active, title, summary,
@@ -202,6 +214,17 @@ class Database:
         keywords = data.get('keywords', [])
 
         with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                forgotten = conn.execute(
+                    "SELECT 1 FROM forgotten WHERE id = ?", (data['id'],)).fetchone()
+            except sqlite3.OperationalError as exc:
+                if not is_missing_forgotten_table(exc):
+                    raise
+                forgotten = None  # un-migrated DB: nothing can be forgotten
+            if forgotten:
+                conn.rollback()
+                return False
             conn.execute(
                 """
                 INSERT INTO conversations
@@ -279,6 +302,7 @@ class Database:
                         "(conversation_id, keyword_id) VALUES (?, ?)",
                         (data['id'], row['id'])
                     )
+        return True
 
     # ------------------------------------------------------------------
     # Private helper — builds the base query and returns (sql, params)
@@ -527,16 +551,17 @@ class Database:
             )
 
     def is_indexed(self, conv_id: str) -> bool:
-        """Return True if the session ID already exists in the DB."""
+        """Return True if the session has LLM metadata (a title); archive-only rows do not count."""
         self.validate()
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT 1 FROM conversations WHERE id = ?", (conv_id,)
+                "SELECT 1 FROM conversations WHERE id = ? AND title IS NOT NULL", (conv_id,)
             ).fetchone()
             return row is not None
 
     def is_forgotten(self, conv_id: str) -> bool:
         """Return True if the session ID is in the forgotten tombstone table."""
+        self.validate()
         with self.connect() as conn:
             row = conn.execute(
                 "SELECT 1 FROM forgotten WHERE id = ?", (conv_id,)
