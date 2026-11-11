@@ -149,7 +149,7 @@ _setup_isolated_home() {
     echo "Expected config at ${TOWIT_CONFIG_PATH}; output: ${output}"; return 1
   }
   local mode
-  mode="$(stat -f '%Lp' "${TOWIT_CONFIG_PATH}" 2>/dev/null || stat -c '%a' "${TOWIT_CONFIG_PATH}")"
+  mode="$(stat -c '%a' "${TOWIT_CONFIG_PATH}" 2>/dev/null || stat -f '%Lp' "${TOWIT_CONFIG_PATH}")"
   [ "${mode}" = "600" ] || { echo "Expected mode 600, got ${mode}"; return 1; }
   [[ "${output}" == *"Config file created at"* ]] || { echo "${output}"; return 1; }
   [[ "${output}" == *"Database initialized"* ]] || { echo "${output}"; return 1; }
