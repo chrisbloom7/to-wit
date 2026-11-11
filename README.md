@@ -63,7 +63,7 @@ Subcommands:
                                   --hook    also installs the Claude Code hooks
                                   --config  generate ~/.towit/config.toml (skips if already exists)
   search <terms...>             Search message text, keywords, titles, and summaries
-    [--or]                        Match any term instead of all (default: AND)
+    [--or]                        Match any term instead of all (default: AND, with an automatic OR retry)
     [--topic]                     Also search conversation topics
     [--all]                       Search topics too (and, with --only metadata, summaries and titles)
     [--summary]                   Also search conversation summaries
@@ -143,7 +143,7 @@ towit search recursion
 towit show aaaaaaaa-1111-2222-3333-444444444444 --around 1 --context 1
 ```
 
-- Every argument is a term and terms are combined with AND (`--or` for OR). An argument that contains a space is an exact phrase: `towit search "stop hook"`. Punctuation and FTS5 operators in your input are treated literally.
+- Every argument is a term and terms are combined with AND (`--or` for OR). If an AND search finds nothing and there are two or more terms, it is retried with OR and `No results for all terms; showing results matching any term.` is printed to stderr (so `--format json` and `csv` output on stdout stays parseable). The retry does not apply with `--or` or `--only metadata`. An argument that contains a space is an exact phrase: `towit search "stop hook"`. Punctuation and FTS5 operators in your input are treated literally.
 - `--only text` searches message text alone. `--only metadata` restores the pre-archive scope: keywords only, plus titles, summaries, and topics when you add `--title`, `--summary`, `--all`, or `--topic`. `--topic` adds topics to any scope.
 - Text matches are capped at 50 conversations. Metadata matches are never capped.
 - `--folder` matches a conversation's working directory exactly. `--repo` matches a repo by its key (the exact path) or by its final path component, e.g. `--repo to-wit`.
