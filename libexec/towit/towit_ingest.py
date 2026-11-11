@@ -7,12 +7,15 @@ keeps one-line stubs for tool calls and failed tool results so the archive is
 searchable by what was run, not just what was said.
 """
 
+import fnmatch
 import json
 import os
 import subprocess
 from dataclasses import dataclass, field
 
-from towit_config import safe_subprocess_env
+from towit_config import config, is_valid_session_id, safe_subprocess_env
+from towit_db import Database
+from towit_redact import redact
 
 MAX_MESSAGE_CHARS = 50_000
 STUB_VALUE_CHARS = 200
@@ -169,3 +172,54 @@ def resolve_repo_key(cwd: str) -> str:
     if os.path.basename(common) == '.git':
         return os.path.dirname(common)
     return common
+
+
+def _sanitize(text: str) -> str:
+    """Replace characters SQLite cannot encode (e.g. lone surrogates) with '?'."""
+    return text.encode('utf-8', 'replace').decode('utf-8')
+
+
+def ingest_transcript(jsonl_path: str, db: Database | None = None) -> str:
+    """Archive one transcript. Never raises for bad input; DB errors propagate.
+
+    Returns 'ingested' | 'appended' | 'rewritten' | 'unchanged' | 'skipped' | 'forgotten'.
+    """
+    if os.path.islink(jsonl_path):
+        return 'skipped'
+    path = os.path.abspath(jsonl_path)
+    if '/subagents/' in path and not config.ingest_include_subagents:
+        return 'skipped'
+    folder = os.path.dirname(path)
+    folders = config.ingest_folders
+    if folders and not any(fnmatch.fnmatch(folder, pat) for pat in folders):
+        return 'skipped'
+
+    session_id = os.path.splitext(os.path.basename(path))[0]
+    if not is_valid_session_id(session_id):
+        return 'skipped'
+
+    db = db or Database()
+    if db.is_forgotten(session_id):
+        return 'forgotten'
+
+    parsed = parse_transcript(path)
+    if sum(1 for m in parsed.messages if m.role == 'user') < 2:
+        return 'skipped'
+
+    extra = config.ingest_extra_patterns
+    do_redact = config.ingest_redact
+    messages = []
+    for m in parsed.messages:
+        text = redact(m.text, extra) if do_redact else m.text
+        messages.append({'role': m.role, 'ts': m.ts, 'text': _sanitize(text)})
+
+    conv = {
+        'id': session_id,
+        'folder': folder,
+        'cwd': _sanitize(parsed.cwd),
+        'started_at': parsed.started_at,
+        'last_active': parsed.last_active,
+        'repo_key': _sanitize(resolve_repo_key(parsed.cwd)),
+        'source_path': path,
+    }
+    return db.archive_session(conv, messages)

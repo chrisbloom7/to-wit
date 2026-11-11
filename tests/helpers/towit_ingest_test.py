@@ -9,6 +9,7 @@ import shutil
 import sys
 import subprocess
 import tempfile
+import threading
 import unittest
 import unittest.mock
 
@@ -16,7 +17,9 @@ HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'
 sys.path.insert(0, HELPERS_DIR)
 
 import towit_ingest
-from towit_ingest import MAX_MESSAGE_CHARS, parse_transcript, resolve_repo_key
+from towit_db import Database
+from towit_ingest import (MAX_MESSAGE_CHARS, ingest_transcript, parse_transcript,
+                          resolve_repo_key)
 
 
 def _write_jsonl(path, entries):
@@ -182,6 +185,181 @@ class TestResolveRepoKey(unittest.TestCase):
 
     def test_empty_cwd_returns_empty(self):
         self.assertEqual(resolve_repo_key(''), '')
+
+
+class TestIngestTranscript(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.folder = os.path.join(self.tmp, 'projects', '-work-Robinina')
+        os.makedirs(self.folder)
+        self.path = os.path.join(self.folder, 'sess-0001.jsonl')
+        self.db = Database(os.path.join(self.tmp, 'catalog.db'))
+        self.db.create_schema()
+        self._turns = [_entry('user', 'first question'),
+                       _entry('assistant', 'an answer'),
+                       _entry('user', 'second question')]
+        _write_jsonl(self.path, self._turns)
+        for name, value in (('ingest_redact', True), ('ingest_extra_patterns', []),
+                            ('ingest_include_subagents', False), ('ingest_folders', [])):
+            patcher = unittest.mock.patch.object(
+                type(towit_ingest.config), name, new_callable=unittest.mock.PropertyMock,
+                return_value=value)
+            setattr(self, name, patcher.start())
+            self.addCleanup(patcher.stop)
+
+    def _rows(self, conv_id='sess-0001'):
+        with self.db.connect() as conn:
+            return conn.execute(
+                'SELECT seq, role, text FROM messages WHERE conversation_id = ? ORDER BY seq',
+                (conv_id,)).fetchall()
+
+    def _conv(self, conv_id='sess-0001'):
+        with self.db.connect() as conn:
+            return conn.execute('SELECT * FROM conversations WHERE id = ?',
+                                (conv_id,)).fetchone()
+
+    def test_fresh_transcript_ingested_with_repo_key_and_folder(self):
+        with unittest.mock.patch.object(towit_ingest, 'resolve_repo_key',
+                                        return_value='/repo/root'):
+            self.assertEqual(ingest_transcript(self.path, self.db), 'ingested')
+        conv = self._conv()
+        self.assertEqual(conv['repo_key'], '/repo/root')
+        self.assertEqual(conv['folder'], self.folder)
+        self.assertEqual(conv['cwd'], '/work/proj')
+        self.assertEqual(len(self._rows()), 3)
+
+    def test_second_call_unchanged_then_appended(self):
+        self.assertEqual(ingest_transcript(self.path, self.db), 'ingested')
+        self.assertEqual(ingest_transcript(self.path, self.db), 'unchanged')
+        _write_jsonl(self.path, self._turns + [_entry('assistant', 'more')])
+        self.assertEqual(ingest_transcript(self.path, self.db), 'appended')
+        self.assertEqual(len(self._rows()), 4)
+
+    def test_fewer_than_two_user_messages_skipped(self):
+        _write_jsonl(self.path, [_entry('user', 'only one'), _entry('assistant', 'a'),
+                                 _entry('assistant', 'b')])
+        self.assertEqual(ingest_transcript(self.path, self.db), 'skipped')
+        self.assertEqual(self._rows(), [])
+        self.assertIsNone(self._conv())
+
+    def test_missing_file_skipped(self):
+        missing = os.path.join(self.folder, 'nope.jsonl')
+        self.assertEqual(ingest_transcript(missing, self.db), 'skipped')
+
+    def test_empty_parse_never_calls_archive_session(self):
+        _write_jsonl(self.path, [])
+        with unittest.mock.patch.object(Database, 'archive_session') as archive:
+            self.assertEqual(ingest_transcript(self.path, self.db), 'skipped')
+        archive.assert_not_called()
+
+    def test_subagent_path_skipped_unless_included(self):
+        sub = os.path.join(self.folder, 'sess-0001', 'subagents')
+        os.makedirs(sub)
+        sub_path = os.path.join(sub, 'agent-0001.jsonl')
+        _write_jsonl(sub_path, self._turns)
+        self.assertEqual(ingest_transcript(sub_path, self.db), 'skipped')
+        self.assertEqual(self._rows('agent-0001'), [])
+        self.ingest_include_subagents.return_value = True
+        self.assertEqual(ingest_transcript(sub_path, self.db), 'ingested')
+        self.assertEqual(len(self._rows('agent-0001')), 3)
+
+    def test_symlinked_transcript_skipped(self):
+        link = os.path.join(self.folder, 'linked-session.jsonl')
+        os.symlink(self.path, link)
+        self.assertEqual(ingest_transcript(link, self.db), 'skipped')
+        self.assertEqual(self._rows('linked-session'), [])
+
+    def test_forgotten_session_returns_forgotten(self):
+        with self.db.connect() as conn:
+            conn.execute('INSERT INTO forgotten (id) VALUES (?)', ('sess-0001',))
+        self.assertEqual(ingest_transcript(self.path, self.db), 'forgotten')
+        self.assertEqual(self._rows(), [])
+
+    def test_folder_filter(self):
+        self.ingest_folders.return_value = ['*Other*']
+        self.assertEqual(ingest_transcript(self.path, self.db), 'skipped')
+        self.assertEqual(self._rows(), [])
+        self.ingest_folders.return_value = ['*Robinina*']
+        self.assertEqual(ingest_transcript(self.path, self.db), 'ingested')
+        self.assertEqual(len(self._rows()), 3)
+
+    def test_secret_redacted_by_default(self):
+        secret = 'AKIA' + 'A' * 16
+        _write_jsonl(self.path, [_entry('user', f'key {secret}'), _entry('assistant', 'ok'),
+                                 _entry('user', 'again')])
+        ingest_transcript(self.path, self.db)
+        text = self._rows()[0]['text']
+        self.assertNotIn(secret, text)
+        self.assertIn('[REDACTED:', text)
+
+    def test_secret_stored_raw_when_redact_disabled(self):
+        secret = 'AKIA' + 'A' * 16
+        self.ingest_redact.return_value = False
+        _write_jsonl(self.path, [_entry('user', f'key {secret}'), _entry('assistant', 'ok'),
+                                 _entry('user', 'again')])
+        ingest_transcript(self.path, self.db)
+        self.assertIn(secret, self._rows()[0]['text'])
+
+    def test_extra_patterns_passed_to_redact(self):
+        self.ingest_extra_patterns.return_value = [r'hunter\d+']
+        _write_jsonl(self.path, [_entry('user', 'pw hunter42'), _entry('assistant', 'ok'),
+                                 _entry('user', 'again')])
+        ingest_transcript(self.path, self.db)
+        self.assertNotIn('hunter42', self._rows()[0]['text'])
+
+    def test_lone_surrogate_message_ingests(self):
+        raw = ('{"type":"user","timestamp":"2026-01-01T00:00:00Z","cwd":"/w",'
+               '"message":{"role":"user","content":"bad \\ud800 char"}}')
+        _write_jsonl(self.path, [raw, _entry('assistant', 'ok'), _entry('user', 'again')])
+        self.assertEqual(ingest_transcript(self.path, self.db), 'ingested')
+        self.assertIn('bad', self._rows()[0]['text'])
+        self.assertEqual(ingest_transcript(self.path, self.db), 'unchanged')
+
+    def test_invalid_session_id_skipped(self):
+        for stem in ('bad id!', 'short'):
+            bad = os.path.join(self.folder, stem + '.jsonl')
+            _write_jsonl(bad, self._turns)
+            with unittest.mock.patch.object(towit_ingest, 'parse_transcript') as parse:
+                self.assertEqual(ingest_transcript(bad, self.db), 'skipped')
+            parse.assert_not_called()
+            self.assertEqual(self._rows(stem), [])
+            self.assertIsNone(self._conv(stem))
+
+    def test_forgotten_race_after_early_check(self):
+        with self.db.connect() as conn:
+            conn.execute('INSERT INTO forgotten (id) VALUES (?)', ('sess-0001',))
+        with unittest.mock.patch.object(Database, 'is_forgotten', return_value=False):
+            self.assertEqual(ingest_transcript(self.path, self.db), 'forgotten')
+        self.assertEqual(self._rows(), [])
+        self.assertIsNone(self._conv())
+
+    def test_concurrent_ingest_of_same_file(self):
+        dbs = [Database(self.db.db_path), Database(self.db.db_path)]
+        results, errors = [], []
+
+        def run(db):
+            try:
+                results.append(ingest_transcript(self.path, db))
+            except Exception as exc:  # surfaced via the assertion below
+                errors.append(exc)
+
+        barrier = threading.Barrier(2)
+        real_archive = Database.archive_session
+
+        def synced(db_self, conv, messages):
+            barrier.wait(timeout=10)  # both threads reach the transaction together
+            return real_archive(db_self, conv, messages)
+
+        threads = [threading.Thread(target=run, args=(d,)) for d in dbs]
+        with unittest.mock.patch.object(Database, 'archive_session', synced):
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(sorted(results), ['ingested', 'unchanged'])
+        self.assertEqual(len(self._rows()), len(parse_transcript(self.path).messages))
 
 
 if __name__ == '__main__':

@@ -10,6 +10,7 @@ This module is imported by other towit scripts; it is not run directly.
 """
 
 import os
+import re
 import sys
 
 try:
@@ -220,6 +221,14 @@ def safe_subprocess_env(extra: dict | None = None) -> dict:
     if extra:
         env.update(extra)
     return env
+
+
+SESSION_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{8,}\Z')
+
+
+def is_valid_session_id(session_id: str) -> bool:
+    """True if `session_id` is safe to use in paths and SQL keys."""
+    return bool(SESSION_ID_RE.match(session_id))
 
 
 config = Config()

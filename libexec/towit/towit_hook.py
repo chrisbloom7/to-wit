@@ -11,15 +11,15 @@ Always exits 0 to avoid interrupting Claude Code.
 import sys
 import os
 import json
-import re
 import subprocess
+
+from towit_config import is_valid_session_id
 
 # Guard against recursive calls triggered by towit's own Claude invocations
 if os.environ.get('TOWIT_INDEXING'):
     sys.exit(0)
 
 _EXPECTED_ROOT = os.path.realpath(os.path.expanduser('~/.claude/projects'))
-_SESSION_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{8,}$')
 
 
 def _validate_jsonl_path(path):
@@ -66,7 +66,7 @@ def main():
                 sys.exit(0)
         elif session_id and cwd:
             # Validate session_id format before using it in path construction
-            if not _SESSION_ID_RE.match(session_id):
+            if not is_valid_session_id(session_id):
                 sys.exit(0)
             # Derive path from cwd encoding
             encoded = cwd.replace('/', '-').lstrip('-')

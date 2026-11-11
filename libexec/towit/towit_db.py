@@ -551,9 +551,9 @@ class Database:
         Each message: role, ts, text (stored verbatim).
 
         Returns 'ingested' (not previously archived), 'appended' (stored messages
-        are a prefix of messages), 'rewritten' (stored messages diverged), or
-        'unchanged'. LLM metadata (title, summary, message_count, topics,
-        keywords) is never touched. One BEGIN IMMEDIATE transaction; any
+        are a prefix of messages), 'rewritten' (stored messages diverged),
+        'unchanged', or 'forgotten' (id is tombstoned; nothing written). LLM
+        metadata (title, summary, message_count, topics, keywords) is never touched. One BEGIN IMMEDIATE transaction; any
         exception rolls everything back.
         """
         conv_id = conv['id']
@@ -561,6 +561,10 @@ class Database:
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
+                # Re-check under the write lock so a concurrent `towit forget` always wins.
+                if conn.execute("SELECT 1 FROM forgotten WHERE id = ?", (conv_id,)).fetchone():
+                    conn.rollback()
+                    return 'forgotten'
                 row = conn.execute(
                     "SELECT archived, archived_message_count, tail_hash FROM conversations WHERE id = ?",
                     (conv_id,)
