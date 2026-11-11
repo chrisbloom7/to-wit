@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-11-11
+
 ### Added
 
 - Homebrew installation: `brew install chrisbloom7/tap/towit` (formula in the `chrisbloom7/homebrew-tap` repository). The README documents installing, upgrading, switching from a source install, and uninstalling with Homebrew.
