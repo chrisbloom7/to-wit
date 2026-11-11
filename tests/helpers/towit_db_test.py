@@ -14,7 +14,7 @@ import sys
 HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
 sys.path.insert(0, HELPERS_DIR)
 
-from towit_db import Database
+from towit_db import Database, message_hash
 
 SAMPLE_CONV = {
     'id': 'test-session-001',
@@ -530,6 +530,154 @@ class TestArchiveSchema(unittest.TestCase):
         self.assertEqual(self._match(conn, 'TOWIT_INDEXING'), [mid])
         self.assertEqual(self._match(conn, 'reindex'), [])
         conn.close()
+
+
+class TestArchiveSession(unittest.TestCase):
+    CONV = {
+        'id': 'arc-1', 'folder': '/f', 'cwd': '/w', 'started_at': '2026-01-01T00:00:00Z',
+        'last_active': '2026-01-01T01:00:00Z', 'repo_key': 'repo', 'source_path': '/p/arc-1.jsonl',
+    }
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 'catalog.db')
+        self.db = Database(self.db_path)
+        self.db.create_schema()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _msgs(self, n, prefix='m'):
+        return [{'role': 'user' if i % 2 == 0 else 'assistant',
+                 'ts': '2026-01-01T00:0%d:00Z' % i, 'text': '%s%d' % (prefix, i)} for i in range(n)]
+
+    def _rows(self):
+        conn = sqlite3.connect(self.db_path)
+        rows = conn.execute(
+            "SELECT seq, role, ts, text FROM messages WHERE conversation_id='arc-1' ORDER BY seq"
+        ).fetchall()
+        conn.close()
+        return rows
+
+    def _conv_row(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM conversations WHERE id='arc-1'").fetchone()
+        conn.close()
+        return row
+
+    def _fts(self, term):
+        conn = sqlite3.connect(self.db_path)
+        rows = conn.execute("SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?",
+                            ('"%s"' % term,)).fetchall()
+        conn.close()
+        return rows
+
+    def _fts_consistent(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')")
+        conn.close()
+
+    def test_message_hash_is_sha256_of_role_nul_text(self):
+        import hashlib
+        self.assertEqual(message_hash('user', 'hi'),
+                         hashlib.sha256(b'user\x00hi').hexdigest())
+
+    def test_first_call_ingests(self):
+        msgs = self._msgs(3)
+        self.assertEqual(self.db.archive_session(dict(self.CONV), msgs), 'ingested')
+        self.assertEqual([r[0] for r in self._rows()], [0, 1, 2])
+        row = self._conv_row()
+        self.assertEqual(row['archived'], 1)
+        self.assertEqual(row['archived_message_count'], 3)
+        self.assertEqual(row['tail_hash'], message_hash('user', 'm2'))
+        self.assertEqual(row['repo_key'], 'repo')
+        self.assertEqual(row['source_path'], '/p/arc-1.jsonl')
+        self.assertIsNone(row['title'])
+        self.assertIsNone(row['summary'])
+
+    def test_same_messages_unchanged(self):
+        msgs = self._msgs(3)
+        self.db.archive_session(dict(self.CONV), msgs)
+        self.assertEqual(self.db.archive_session(dict(self.CONV), msgs), 'unchanged')
+        self.assertEqual(len(self._rows()), 3)
+
+    def test_extra_messages_append(self):
+        self.db.archive_session(dict(self.CONV), self._msgs(3))
+        self.assertEqual(self.db.archive_session(dict(self.CONV), self._msgs(5)), 'appended')
+        rows = self._rows()
+        self.assertEqual([r[0] for r in rows], [0, 1, 2, 3, 4])
+        self.assertEqual(self._conv_row()['archived_message_count'], 5)
+        self.assertEqual(self._conv_row()['tail_hash'], message_hash('user', 'm4'))
+
+    def test_same_count_different_tail_rewrites(self):
+        self.db.archive_session(dict(self.CONV), self._msgs(3))
+        new = self._msgs(3)
+        new[2]['text'] = 'different tail'
+        self.assertEqual(self.db.archive_session(dict(self.CONV), new), 'rewritten')
+        self.assertEqual([r[3] for r in self._rows()], ['m0', 'm1', 'different tail'])
+        self.assertEqual(self._conv_row()['tail_hash'], message_hash('user', 'different tail'))
+
+    def test_fewer_messages_rewrites(self):
+        self.db.archive_session(dict(self.CONV), self._msgs(4))
+        self.assertEqual(self.db.archive_session(dict(self.CONV), self._msgs(2)), 'rewritten')
+        self.assertEqual([r[0] for r in self._rows()], [0, 1])
+        self.assertEqual(self._conv_row()['archived_message_count'], 2)
+
+    def test_llm_metadata_survives_all_outcomes(self):
+        self.db.upsert_conversation({
+            'id': 'arc-1', 'folder': '/f', 'cwd': '/w', 'started_at': None,
+            'last_active': None, 'title': 'T', 'summary': 'S', 'message_count': 7,
+            'topics': ['Topic A'], 'keywords': ['kw-one']})
+        steps = [self._msgs(3), self._msgs(3), self._msgs(5), self._msgs(2, 'x')]
+        for msgs in steps:
+            self.db.archive_session(dict(self.CONV), msgs)
+            row = self._conv_row()
+            self.assertEqual((row['title'], row['summary'], row['message_count']), ('T', 'S', 7))
+            conn = sqlite3.connect(self.db_path)
+            self.assertEqual(conn.execute("SELECT count(*) FROM conversation_topics").fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT count(*) FROM conversation_keywords").fetchone()[0], 1)
+            conn.close()
+
+    def test_conversation_metadata_updated(self):
+        self.db.archive_session(dict(self.CONV), self._msgs(2))
+        conv = dict(self.CONV, last_active='2026-02-02T00:00:00Z', cwd='/new', repo_key='r2')
+        self.db.archive_session(conv, self._msgs(2))
+        row = self._conv_row()
+        self.assertEqual((row['last_active'], row['cwd'], row['repo_key']),
+                         ('2026-02-02T00:00:00Z', '/new', 'r2'))
+
+    def test_fts_finds_appended_and_drops_rewritten_text(self):
+        self.db.archive_session(dict(self.CONV), self._msgs(2, 'alpha'))
+        self.db.archive_session(dict(self.CONV), self._msgs(3, 'alpha') )
+        self.assertEqual(len(self._fts('alpha2')), 1)
+        self.db.archive_session(dict(self.CONV), self._msgs(1, 'beta'))
+        self.assertEqual(self._fts('alpha2'), [])
+        self.assertEqual(self._fts('alpha1'), [])
+        self.assertEqual(len(self._fts('beta0')), 1)
+        self._fts_consistent()
+
+    def test_failed_write_rolls_back_everything(self):
+        self.db.archive_session(dict(self.CONV), self._msgs(3))
+        before_rows = self._rows()
+        before_conv = dict(self._conv_row())
+        bad = self._msgs(2, 'new')
+        bad.append({'role': 'bogus', 'ts': None, 'text': 'boom'})  # violates CHECK mid-write
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.archive_session(dict(self.CONV, last_active='later'), bad)
+        self.assertEqual(self._rows(), before_rows)
+        self.assertEqual(dict(self._conv_row()), before_conv)
+        self.assertEqual(len(self._fts('m1')), 1)
+        self.assertEqual(self._fts('new0'), [])
+        self._fts_consistent()
+
+    def test_is_forgotten(self):
+        self.assertFalse(self.db.is_forgotten('arc-1'))
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("INSERT INTO forgotten (id) VALUES ('arc-1')")
+        conn.commit()
+        conn.close()
+        self.assertTrue(self.db.is_forgotten('arc-1'))
 
 
 if __name__ == '__main__':
