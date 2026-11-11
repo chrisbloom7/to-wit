@@ -26,7 +26,16 @@ towit resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
 
 ## Installation
 
-> Homebrew tap coming soon. For now, clone and run the install script.
+### Homebrew
+
+```bash
+brew install chrisbloom7/tap/towit
+towit setup --hook
+```
+
+This installs To Wit and a Homebrew Python (Python 3.11+ with SQLite FTS5). Installing by the full name trusts only this formula. Homebrew requires explicit trust for third-party taps, so if you run `brew tap chrisbloom7/tap` first, trust the formula with `brew trust --formula chrisbloom7/tap/towit` before installing. Claude Code is optional (see Requirements).
+
+### From source
 
 ```bash
 git clone https://github.com/chrisbloom7/to-wit.git ~/path/to/to-wit
@@ -41,13 +50,15 @@ By default, `install` links into `~/.local/bin` (creating it if needed) and tell
 
 ## Upgrading
 
-`install` symlinks into your clone, so updating the code is a `git pull`; there is nothing to reinstall:
+**Homebrew:** `brew upgrade towit`. The hooks point at Homebrew's version-independent path, so they keep working across upgrades. Your database upgrades itself the first time any `towit` command runs.
+
+**From source:** `install` symlinks into your clone, so updating the code is a `git pull`; there is nothing to reinstall:
 
 ```bash
 git -C ~/path/to/to-wit pull
 ```
 
-Your database upgrades itself the first time any `towit` command runs, and your config and existing data are kept. Coming from 0.8.x or earlier, also run:
+Your database upgrades itself the first time any `towit` command runs, and your config and existing data are kept. Coming from 0.8.x or earlier (either way), also run:
 
 ```bash
 towit install-hook   # adds the SessionEnd and SessionStart hooks; keeps your Stop hook
@@ -57,7 +68,9 @@ towit doctor         # confirms hooks, FTS5, and the archive schema
 
 If you move your clone, re-run `towit install-hook`: it repairs hooks that point at the old location.
 
-New `[ingest]` and `[indexing]` settings use their defaults until you add them; see [Configuration](#configuration). If you originally installed into `/usr/local/bin`, the symlink keeps working, but `towit implode --install-dir /usr/local/bin` (or `./uninstall /usr/local/bin`) needs the directory spelled out now that the default is `~/.local/bin`.
+New `[ingest]` and `[indexing]` settings use their defaults until you add them; see [Configuration](#configuration). **Switching from a source install to Homebrew:** your data and config are kept. Remove the old symlink (`rm ~/.local/bin/towit`; do not run `./uninstall`, which also deletes the archive), then run `towit install-hook` to point the hooks at the Homebrew install.
+
+If you originally installed into `/usr/local/bin`, the symlink keeps working, but `towit implode --install-dir /usr/local/bin` (or `./uninstall /usr/local/bin`) needs the directory spelled out now that the default is `~/.local/bin`.
 
 ## Quick start
 
@@ -278,6 +291,8 @@ To do a full uninstall in one step — removes the hooks, database (including th
 ```bash
 towit implode
 ```
+
+With a Homebrew install, `towit implode` removes the hooks and database, then reminds you to finish with `brew uninstall towit`.
 
 Or to remove just the hooks and database while leaving the binary in place:
 
