@@ -906,9 +906,11 @@ class Database:
                 conn.rollback()
                 raise
         if forgotten:
+            quoted_path = "'" + self.db_path.replace("'", "'\\''") + "'"  # shell-safe
             self.cleanup_warning = self.purge_free_space(
                 first_id, None if tombstone else
-                "Any later `towit forget` finishes the cleanup once no other towit process is active.")
+                f"When no other towit process is active, run: sqlite3 {quoted_path} "
+                f"'VACUUM; PRAGMA wal_checkpoint(TRUNCATE);'")
         return forgotten
 
     def forget_conversation(self, conv_id: str) -> bool:

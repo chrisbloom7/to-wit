@@ -88,12 +88,19 @@ def main():
             transcript = os.path.join(s['folder'], f"{s['id']}.jsonl")
             print(f"  would remove: {s['id']}  (transcript: {transcript})")
     elif removable:
-        # Same physical removal as `forget` (FTS merge, VACUUM, WAL truncate), minus the
-        # tombstone: a pruned session can be archived again if its transcript returns.
+        # Archived rows get the same physical removal as `forget` (FTS merge, VACUUM, WAL
+        # truncate) minus the tombstone, so a pruned session can be archived again if its
+        # transcript returns. Metadata-only rows hold no message text: a plain delete is enough.
         try:
-            db.forget_conversations([s['id'] for s in removable], tombstone=False)
+            for s in removable:
+                if not s['archived']:
+                    db.delete_conversation(s['id'])
+            archived_ids = [s['id'] for s in removable if s['archived']]
+            if archived_ids:
+                db.forget_conversations(archived_ids, tombstone=False)
         except sqlite3.Error as exc:
-            print(f"Error: could not prune ({exc}); nothing was deleted.", file=sys.stderr)
+            print(f"Error: could not prune ({exc}); some entries may not have been deleted.",
+                  file=sys.stderr)
             sys.exit(1)
         for s in removable:
             print(f"  removed: {s['id']}")

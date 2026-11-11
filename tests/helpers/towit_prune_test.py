@@ -270,6 +270,39 @@ class TestTowitPruneArchive(unittest.TestCase):
         self.assertNotIn('[y/N]', result.stdout)
         self.assertFalse(self._exists('meta-only'))
 
+    def _run_inprocess(self, args):
+        import io, contextlib, unittest.mock as mock, towit_prune
+        with mock.patch.object(towit_prune, 'Database', return_value=self.db), \
+                mock.patch.object(sys, 'argv', ['towit_prune.py'] + args), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            towit_prune.main()
+
+    def test_default_prune_of_metadata_only_rows_skips_the_expensive_purge(self):
+        import unittest.mock as mock
+        with mock.patch.object(Database, 'purge_free_space') as purge, \
+                mock.patch.object(Database, '_optimize_fts') as optimize:
+            self._run_inprocess([])
+        self.assertFalse(self._exists('meta-only'))
+        self.assertTrue(self._exists('arch-kept'))
+        purge.assert_not_called()
+        optimize.assert_not_called()
+
+    def test_pruning_archived_rows_runs_the_physical_purge(self):
+        import unittest.mock as mock
+        with mock.patch.object(Database, 'purge_free_space', return_value=None) as purge:
+            self._run_inprocess(['--archive', '--yes'])
+        self.assertFalse(self._exists('arch-kept'))
+        self.assertFalse(self._exists('meta-only'))
+        purge.assert_called_once()
+
+    def test_incomplete_cleanup_warning_names_a_runnable_command(self):
+        import unittest.mock as mock
+        with mock.patch.object(Database, '_purge_free_space', return_value=False):
+            self.db.forget_conversations(['arch-kept'], tombstone=False)
+        warning = self.db.cleanup_warning
+        self.assertIn("sqlite3 '%s' 'VACUUM; PRAGMA wal_checkpoint(TRUNCATE);'" % self.db_path, warning)
+        self.assertNotIn('towit forget', warning)
+
     def test_archive_prune_physically_removes_text_and_leaves_no_tombstone(self):
         marker = 'QZXPRUNE' + 'marker8h3k'
         self._archive('arch-marker', self.projects_dir, 'hello ' + marker + ' world')
