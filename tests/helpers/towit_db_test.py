@@ -15,7 +15,7 @@ import sys
 HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
 sys.path.insert(0, HELPERS_DIR)
 
-from towit_db import Database, message_hash, build_match_expression
+from towit_db import Database, message_hash, build_match_expression, is_fts_query_error
 
 SAMPLE_CONV = {
     'id': 'test-session-001',
@@ -924,7 +924,8 @@ class TestSearchArchive(unittest.TestCase):
         self.assertEqual(self.db.search_archive(['guard'], scope='text'), [])
 
     def test_limit(self):
-        self.assertEqual(len(self.db.search_archive(['recursion'], limit=2)), 2)
+        # limit caps text-only rows; both metadata hits (s2, s3) are kept
+        self.assertEqual(set(self._ids(self.db.search_archive(['recursion'], limit=1))), {'s2', 's3', 's1'})
 
     def _with_failing_match(self, message):
         real_connect = Database.connect
@@ -940,9 +941,60 @@ class TestSearchArchive(unittest.TestCase):
             with self.assertRaises(sqlite3.OperationalError):
                 self.db.search_archive(['guard'], scope='text')
 
-    def test_fts_syntax_error_returns_empty(self):
-        with self._with_failing_match('fts5: syntax error near "x"'):
-            self.assertEqual(self.db.search_archive(['guard'], scope='text'), [])
+    def test_fts_query_errors_return_empty(self):
+        for msg in ('fts5: syntax error near "x"', 'unterminated string',
+                    'no such column: foo', 'unknown special query: '):
+            with self._with_failing_match(msg):
+                self.assertEqual(self.db.search_archive(['guard'], scope='text'), [], msg)
+
+    def test_non_fts_syntax_error_propagates(self):
+        with self._with_failing_match('near "X": syntax error'):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.db.search_archive(['guard'], scope='text')
+
+    def test_real_sqlite_fts_error_forms_are_recognised(self):
+        # Guard against SQLite changing its messages: provoke each form unquoted.
+        with self.db.connect() as conn:
+            for bad in ('a AND', '"abc', 'foo:bar', '*'):
+                with self.assertRaises(sqlite3.OperationalError) as cm:
+                    conn.execute("SELECT 1 FROM messages_fts WHERE messages_fts MATCH ?", (bad,))
+                self.assertTrue(is_fts_query_error(cm.exception), str(cm.exception))
+
+    def test_limit_caps_only_text_only_rows(self):
+        for i in range(5):
+            self.db.upsert_conversation({
+                'id': 'k%d' % i, 'folder': '/f', 'cwd': '/w/k', 'started_at': '2026-02-0%dT00:00:00Z' % (i + 1),
+                'last_active': None, 'title': 't', 'summary': 's', 'topics': [], 'keywords': ['capkw']})
+        for i in range(3):
+            self.db.archive_session(self._conv('x%d' % i, started='2026-04-0%dT00:00:00Z' % (i + 1)),
+                                    [self._m('user', 'q'), self._m('assistant', 'capkw text')])
+        res = self.db.search_archive(['capkw'], limit=2)
+        ids = self._ids(res)
+        self.assertEqual(len([i for i in ids if i.startswith('k')]), 5)  # all metadata kept
+        text_only = [i for i in ids if i.startswith('x')]
+        self.assertEqual(len(text_only), 2)  # capped
+        self.assertTrue(all(i.startswith('k') for i in ids[:5]))  # metadata tier first
+
+    def test_metadata_overflow_plus_one_text_hit(self):
+        for i in range(60):
+            self.db.upsert_conversation({
+                'id': 'm%02d' % i, 'folder': '/f', 'cwd': '/w/k', 'started_at': None,
+                'last_active': None, 'title': 't', 'summary': 's', 'topics': [], 'keywords': ['overflowkw']})
+        self.db.archive_session(self._conv('tx'), [self._m('user', 'q'),
+                                                   self._m('assistant', 'overflowkw here')])
+        res = self.db.search_archive(['overflowkw'])  # default limit 50
+        self.assertEqual(len(res), 61)
+        self.assertEqual(res[-1]['id'], 'tx')
+
+    def test_ties_ordered_deterministically_by_started_at_then_id(self):
+        for cid in ('t3', 't1', 't2'):
+            self.db.upsert_conversation({
+                'id': cid, 'folder': '/f', 'cwd': '/w/k', 'started_at': '2026-05-01T00:00:00Z',
+                'last_active': None, 'title': 't', 'summary': 's', 'topics': [], 'keywords': ['tiekw']})
+        first = self._ids(self.db.search_archive(['tiekw'], scope='metadata'))
+        order = self._ids(self.db.search_archive(['tiekw']))
+        self.assertEqual(order, ['t1', 't2', 't3'])
+        self.assertEqual(sorted(first), ['t1', 't2', 't3'])
 
     def test_query_plan_uses_fts_index(self):
         sql, params = self.db._text_match_query(None, None)
@@ -950,7 +1002,7 @@ class TestSearchArchive(unittest.TestCase):
             plan = ' '.join(r[3] for r in conn.execute(
                 'EXPLAIN QUERY PLAN ' + sql, ['"guard"'] + params))
         self.assertIn('messages_fts', plan)
-        self.assertNotRegex(plan, r'SCAN m\b')
+        self.assertNotRegex(plan, r'SCAN (TABLE )?m\b|SCAN TABLE messages\b')
 
 
 if __name__ == '__main__':

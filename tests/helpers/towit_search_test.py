@@ -183,7 +183,7 @@ class TestTowitSearch(unittest.TestCase):
 
     def test_default_does_not_match_summary_only(self):
         # "burndown" is only in conv-d's summary, not any topic
-        result = run_search(self.config_path, ['burndown'])
+        result = run_search(self.config_path, ['burndown', '--only', 'metadata'])
         self.assertEqual(result.returncode, 0)
         self.assertNotIn('conv-d', result.stdout)
 
@@ -199,9 +199,28 @@ class TestTowitSearch(unittest.TestCase):
         self.assertIn('conv-d', result.stdout)
 
     def test_default_does_not_match_title_only(self):
-        result = run_search(self.config_path, ['Velocity'])
+        result = run_search(self.config_path, ['Velocity', '--only', 'metadata'])
         self.assertEqual(result.returncode, 0)
         self.assertNotIn('conv-d', result.stdout)
+
+    def test_default_scope_matches_summary_only(self):
+        result = run_search(self.config_path, ['burndown'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-d', result.stdout)
+
+    def test_default_scope_matches_title_only(self):
+        result = run_search(self.config_path, ['Velocity'])
+        self.assertEqual(result.returncode, 0)
+        self.assertIn('conv-d', result.stdout)
+
+    def test_default_scope_still_excludes_topic_only(self):
+        result = run_search(self.config_path, ['activerecord'])
+        self.assertNotIn('conv-b', result.stdout)
+
+    def test_only_text_ignores_title_and_summary(self):
+        for term in ('Velocity', 'burndown'):
+            result = run_search(self.config_path, [term, '--only', 'text'])
+            self.assertNotIn('conv-d', result.stdout)
 
     def test_stem_matches_hyphenated_topic_with_topic_flag(self):
         # "estimate" (stem "estimat") should match topic "project-estimation" when --topic included
@@ -402,6 +421,17 @@ class TestTowitSearchArchive(unittest.TestCase):
         r = run_search(self.config_path, ['"', '--format', 'json'])
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), '[]')
+
+    def test_default_cli_returns_all_metadata_hits_past_50(self):
+        import json
+        db = Database(self.db_path)
+        for i in range(55):
+            db.upsert_conversation({
+                'id': 'bulk-%02d' % i, 'folder': '/f', 'cwd': '/w/bulk',
+                'started_at': '2026-03-01T00:%02d:00Z' % i, 'last_active': None,
+                'title': 'Bulk %d' % i, 'summary': 's', 'topics': [], 'keywords': ['bulkkw']})
+        r = run_search(self.config_path, ['bulkkw', '--format', 'json'])
+        self.assertEqual(len(json.loads(r.stdout)), 55)
 
     def test_csv_includes_seq_and_snippet(self):
         r = run_search(self.config_path, ['recursion', '--format', 'csv'])

@@ -12,6 +12,7 @@
 #                                   --config  generate ~/.towit/config.toml (skips if already exists)
 #   search <terms...> [--or] [--topic] [--all | --summary | --title] [--only text|metadata]
 #                 [--format json|csv] [--folder <path>] [--repo <path|name>]
+#                                 Default: message text plus keywords, titles, summaries
 #   list [--format json|csv] [--folder <path>] [--topic <name>] [--keyword <name>]
 #   resume <session-id> [--force] Resume a session in its original working directory
 #   prune [--dry-run]             Remove entries whose transcripts no longer exist

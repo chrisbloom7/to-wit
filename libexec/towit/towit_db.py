@@ -121,6 +121,18 @@ def message_hash(role: str, text: str) -> str:
     return hashlib.sha256((role + "\0" + text).encode('utf-8')).hexdigest()
 
 
+# Message prefixes SQLite emits when FTS5 rejects a MATCH query (verified by provoking
+# each unquoted: 'a AND', '"abc', 'foo:bar', '*'). Only meaningful for errors raised
+# by the MATCH execution itself.
+FTS_QUERY_ERROR_PREFIXES = ('fts5: ', 'unterminated string', 'no such column: ',
+                            'unknown special query')
+
+
+def is_fts_query_error(exc: Exception) -> bool:
+    """True if exc is an FTS5 query-parse error (as opposed to a lock, I/O or SQL bug)."""
+    return isinstance(exc, sqlite3.OperationalError) and str(exc).startswith(FTS_QUERY_ERROR_PREFIXES)
+
+
 def build_match_expression(terms: list, mode: str = 'and') -> str | None:
     """Build an FTS5 MATCH expression from user terms, or None if nothing is searchable.
 
@@ -488,7 +500,8 @@ class Database:
 
         One result per conversation: its best-matching message (seq, snippet, score), or
         seq=None, snippet='', score=None for a metadata-only hit. A null title falls back
-        to the first user message (80 chars). limit=None means unlimited.
+        to the first user message (80 chars). limit caps text-only rows (metadata
+        hits are never dropped); limit=None means unlimited.
         """
         self.validate()
         meta = []
@@ -519,14 +532,13 @@ class Database:
                         hits.setdefault(row['id'], row)
                 except sqlite3.OperationalError as e:
                     # A query FTS5 rejects despite quoting means "no text hits";
-                    # lock/IO errors must still propagate.
-                    msg = str(e).lower()
-                    if 'fts5' not in msg and 'syntax' not in msg:
+                    # lock/IO errors and non-FTS SQL errors must still propagate.
+                    if not is_fts_query_error(e):
                         raise
                     hits = {}
 
             meta_by_id = {r['id']: r for r in meta}
-            order = list(meta_by_id.keys() | hits.keys())
+            order = list(meta_by_id.keys() | hits.keys())  # sorted deterministically below
             started = {}
             if order:
                 for i in range(0, len(order), 500):
@@ -534,14 +546,16 @@ class Database:
                     started.update({r['id']: r['started_at'] or '' for r in conn.execute(
                         "SELECT id, started_at FROM conversations WHERE id IN (%s)"
                         % ','.join('?' for _ in chunk), chunk)})
-            order.sort(key=lambda i: started.get(i, ''), reverse=True)  # recency, then stable tiers
+            order.sort(key=lambda i: i)  # id, then recency: a deterministic base for the tier sort
+            order.sort(key=lambda i: started.get(i, ''), reverse=True)
             order.sort(key=lambda i: (
                 i not in meta_by_id,
                 i not in hits,
                 hits[i]['score'] if i in hits else 0.0,
             ))
             if limit:
-                order = order[:limit]
+                # Cap text-only rows; every metadata-tier row is kept (tier 0 sorts first).
+                order = order[:len(meta_by_id) + limit]
 
             results = []
             for conv_id in order:

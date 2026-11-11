@@ -3,7 +3,7 @@
 towit_search — Search cataloged Claude conversations.
 
 Usage:
-    python3 towit_search.py [--or] [--topic] [--all | --summary] [--all | --title] [--format json|csv] [--folder <path>] <terms...>
+    python3 towit_search.py [--or] [--topic] [--all | --summary | --title] [--only text|metadata] [--format json|csv] [--folder <path>] [--repo <path|name>] <terms...>
 """
 
 import argparse
@@ -179,18 +179,20 @@ def main():
                         help='Also search conversation topics')
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument('--all', action='store_true',
-                       help='Search keywords, topics, summaries, and titles')
+                       help='Search keywords, topics, summaries, and titles (with --only metadata; otherwise only adds topics)')
     scope.add_argument('--summary', action='store_true',
-                       help='Also search conversation summaries')
+                       help='Also search conversation summaries (default unless --only metadata)')
     scope.add_argument('--title', action='store_true',
-                       help='Also search conversation titles')
+                       help='Also search conversation titles (default unless --only metadata)')
     parser.add_argument('--format', choices=['json', 'csv'], metavar='FORMAT',
                         help='Output format: json or csv')
     parser.add_argument('--folder', metavar='PATH',
                         help='Restrict search to a specific project folder')
     parser.add_argument('--only', choices=['text', 'metadata'], metavar='text|metadata',
-                        help='Search only message text, or only keywords/topics/titles/summaries '
-                             '(metadata results are not capped; text results are capped at 50)')
+                        help='Search only message text, or only metadata (keywords, plus '
+                             'topics/summaries/titles with their flags). Default: message text '
+                             'plus keywords, titles and summaries. Text-only results are '
+                             'capped at 50; metadata results are never capped')
     parser.add_argument('--repo', metavar='PATH|NAME',
                         help='Restrict search to a repo (its key, or its directory name)')
     args = parser.parse_args()
@@ -204,6 +206,9 @@ def main():
     mode = 'or' if args.or_ else 'and'
     scope = args.only or 'all'
     show_text = scope != 'metadata'
+    if scope == 'all':
+        # Default scope: message text plus keywords, titles and summaries.
+        include_title = include_summary = True
     # --only metadata keeps the pre-archive behavior, including no result cap.
     results = db.search_archive(args.terms, mode=mode, folder=args.folder, repo=args.repo,
                                 scope=scope, include_topics=include_topics,
