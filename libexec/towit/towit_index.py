@@ -323,6 +323,8 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
                                    existing_keywords=existing_keywords)
 
     if analysis.get('skip'):
+        # Remember the count so an unchanged session is not re-sent to the LLM on every hook.
+        db.record_index_attempt(session_id, current_count)
         return 'skipped'
 
     first = messages[0] if messages else {}

@@ -183,9 +183,13 @@ class Database:
 
     def __init__(self, db_path=None):
         self.db_path = db_path if db_path is not None else config.db_path
+        self._schema_checked = False
 
     def validate(self):
-        """Check that the DB file exists and is readable/writable."""
+        """Check that the DB file exists and is readable/writable.
+
+        The schema check runs once per instance; the file checks run on every call.
+        """
         if not os.path.isfile(self.db_path):
             print(
                 f"Error: database not found at {self.db_path}.\n"
@@ -201,8 +205,11 @@ class Database:
             sys.exit(1)
         # Steady state costs one PRAGMA read; a DB from an older towit migrates
         # in place (a newer DB is left alone). Errors propagate to the caller.
+        if self._schema_checked:
+            return
         if self.schema_version() < SCHEMA_VERSION:
             self.run_migrations(only_if_stale=True)
+        self._schema_checked = True
 
     def schema_version(self) -> int:
         """Return the schema version stamped in PRAGMA user_version (0 if never stamped)."""
@@ -983,6 +990,23 @@ class Database:
                 WHERE id = ?
                 """,
                 (last_active, conv_id)
+            )
+
+    def record_index_attempt(self, conv_id: str, message_count: int):
+        """Record the prose message count of an index attempt that produced no metadata.
+
+        Touches only message_count and indexed_at, and only on an existing, non-forgotten
+        row; a missing row is left missing.
+        """
+        self.validate()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE conversations
+                SET message_count = ?, indexed_at = datetime('now')
+                WHERE id = ? AND id NOT IN (SELECT id FROM forgotten)
+                """,
+                (message_count, conv_id)
             )
 
     def is_indexed(self, conv_id: str) -> bool:

@@ -26,6 +26,14 @@ class TestCallClaudeEnvironment(unittest.TestCase):
         self.assertTrue('PATH' in env, 'PATH missing from claude env')
 
 
+class TestCallClaudeNoSessionPersistence(unittest.TestCase):
+    def test_call_claude_passes_no_session_persistence(self):
+        completed = MagicMock(returncode=0, stdout='summary\n', stderr='')
+        with patch('towit_export.subprocess.run', return_value=completed) as run:
+            towit_export._call_claude('prompt')
+        self.assertIn('--no-session-persistence', run.call_args.args[0])
+
+
 # Fake secrets are assembled from pieces so no scanner sees a literal token in this file.
 FAKE_KEY = 'sk-' + 'ant-' + 'api03-' + 'A1b2C3d4E5f6G7h8I9j0'
 EXTRA_SECRET = 'ZQX' + '-internal-' + 'codeword'
@@ -106,6 +114,16 @@ class TestSummarizeRedaction(unittest.TestCase):
              patch('builtins.print'):
             towit_export.export_topic(self.db, 'demo', 'md', True)
         self.assertIn(FAKE_KEY, self.sent_prompt(run))
+
+    def test_summarize_paths_pass_no_session_persistence(self):
+        self.patch_config()
+        self.add_session('sess-0001', ['a', 'b'])
+        for call in (lambda: towit_export.export_single(self.db, 'sess-0001', 'md', True),
+                     lambda: towit_export.export_topic(self.db, 'demo', 'md', True)):
+            with patch('towit_export.subprocess.run', return_value=self.completed) as run, \
+                 patch('builtins.print'):
+                call()
+            self.assertIn('--no-session-persistence', run.call_args.args[0])
 
     def test_non_summarize_export_is_not_redacted(self):
         self.patch_config()

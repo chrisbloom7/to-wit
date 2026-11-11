@@ -330,5 +330,39 @@ class TestImplodeUnderHomebrew(unittest.TestCase):
         self.assertNotIn('brew uninstall', result.stdout)
 
 
+class TestImplodeOrphanedSidecars(unittest.TestCase):
+    SUFFIXES = ('-wal', '-shm', '-journal')
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 'catalog.db')
+        self.install_dir = os.path.join(self.tmpdir, 'bin')
+        os.makedirs(self.install_dir)
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        for suffix in self.SUFFIXES:
+            with open(self.db_path + suffix, 'w') as fh:
+                fh.write('leftover')
+
+    def test_lists_sidecars_and_removes_them_with_yes(self):
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
+                             args=['--yes', '--install-dir', self.install_dir])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('Nothing to remove', result.stdout)
+        will_remove = result.stdout.split('The following will be removed:')[-1]
+        for suffix in self.SUFFIXES:
+            self.assertIn(self.db_path + suffix, will_remove)
+            self.assertFalse(os.path.exists(self.db_path + suffix),
+                             f'{suffix} sidecar left behind')
+        self.assertFalse(os.path.exists(self.db_path))
+
+    def test_declining_prompt_keeps_sidecars(self):
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
+                             args=['--install-dir', self.install_dir], stdin_input='n\n')
+        self.assertNotIn('Nothing to remove', result.stdout)
+        for suffix in self.SUFFIXES:
+            self.assertTrue(os.path.exists(self.db_path + suffix))
+
+
 if __name__ == '__main__':
     unittest.main()

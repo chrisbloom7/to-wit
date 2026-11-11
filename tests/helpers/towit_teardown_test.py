@@ -188,5 +188,34 @@ class TestTowitTeardown(unittest.TestCase):
         self.assertFalse(dir_contains(self.tmpdir, marker))
 
 
+class TestTowitTeardownOrphanedSidecars(unittest.TestCase):
+    SUFFIXES = ('-wal', '-shm', '-journal')
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 'catalog.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        for suffix in self.SUFFIXES:
+            with open(self.db_path + suffix, 'w') as fh:
+                fh.write('leftover')
+
+    def test_lists_sidecars_and_removes_them_with_yes(self):
+        result = run_teardown(self.db_path, self.config_path, self.tmpdir, args=['--yes'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('Nothing to tear down', result.stdout)
+        for suffix in self.SUFFIXES:
+            self.assertIn(self.db_path + suffix, result.stdout)
+            self.assertFalse(os.path.exists(self.db_path + suffix),
+                             f'{suffix} sidecar left behind')
+        self.assertFalse(os.path.exists(self.db_path))
+
+    def test_declining_prompt_keeps_sidecars(self):
+        result = run_teardown(self.db_path, self.config_path, self.tmpdir, stdin_input='n\n')
+        self.assertNotIn('Nothing to tear down', result.stdout)
+        for suffix in self.SUFFIXES:
+            self.assertTrue(os.path.exists(self.db_path + suffix))
+
+
 if __name__ == '__main__':
     unittest.main()

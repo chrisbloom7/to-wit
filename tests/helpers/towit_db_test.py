@@ -433,6 +433,54 @@ class TestDatabaseValidate(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
 
 
+class TestValidateCachesSchemaCheck(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 'catalog.db')
+        Database(self.db_path).create_schema()
+
+    def _counting(self):
+        real = Database.schema_version
+        return unittest.mock.patch.object(
+            Database, 'schema_version', autospec=True, side_effect=real)
+
+    def test_schema_version_checked_once_per_instance(self):
+        db = Database(self.db_path)
+        with self._counting() as sv:
+            db.validate()
+            db.validate()
+            db.get_for_reindex('nope-1')
+            db.get_for_reindex('nope-2')
+        self.assertEqual(sv.call_count, 1)
+
+    def test_fresh_instance_checks_again(self):
+        with self._counting() as sv:
+            Database(self.db_path).validate()
+            Database(self.db_path).validate()
+        self.assertEqual(sv.call_count, 2)
+
+    def test_missing_file_still_detected_after_successful_validate(self):
+        db = Database(self.db_path)
+        db.validate()
+        os.remove(self.db_path)
+        with self.assertRaises(SystemExit) as ctx, \
+                unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as err:
+            db.validate()
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn('database not found', err.getvalue())
+
+    def test_unreadable_file_still_detected_after_successful_validate(self):
+        db = Database(self.db_path)
+        db.validate()
+        with unittest.mock.patch('towit_db.os.access', return_value=False), \
+                self.assertRaises(SystemExit) as ctx, \
+                unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as err:
+            db.validate()
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn('not readable/writable', err.getvalue())
+
+
 class TestMeta(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()

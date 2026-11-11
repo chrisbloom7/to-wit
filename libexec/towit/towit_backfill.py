@@ -12,7 +12,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from towit_config import config
+from towit_config import config, is_subagent_path
 from towit_index import index_conversation, parse_jsonl, should_index
 from towit_ingest import ingest_transcript, should_skip_path
 from towit_db import Database
@@ -99,7 +99,7 @@ def main():
         if not config.indexing_enabled:
             print(f"  -> {status} (indexing disabled)")
             continue
-        if '/subagents/' in os.path.abspath(path):
+        if is_subagent_path(path):
             print(f"  -> {status} (subagent: not indexed)")
             continue
 

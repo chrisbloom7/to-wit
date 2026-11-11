@@ -794,6 +794,66 @@ class TestIndexConversationArchiveInteraction(unittest.TestCase):
         self.assertEqual(before[0], 1)
         self.assertTrue(self.db.is_indexed('arc-1'))
 
+    def _archive_row(self, sid, path):
+        """Create the archive-only row that ingest creates before indexing runs."""
+        self.db.archive_session(
+            {'id': sid, 'folder': self.tmpdir, 'cwd': '/Users/test', 'started_at': None,
+             'last_active': None, 'repo_key': 'repo-k', 'source_path': path},
+            [{'role': 'user', 'ts': 't0', 'text': 'one'},
+             {'role': 'assistant', 'ts': 't1', 'text': 'two'}])
+
+    def test_skip_result_is_recorded_so_second_call_does_not_call_llm(self):
+        path = self._write('skip-1', MINIMAL_MESSAGES)
+        self._archive_row('skip-1', path)
+        with patch('towit_index.analyze_with_claude', return_value={'skip': True}) as mock_an:
+            self.assertEqual(index_conversation(path, self.db), 'skipped')
+            self.assertEqual(mock_an.call_count, 1)
+        with patch('towit_index.analyze_with_claude', return_value={'skip': True}) as mock_an:
+            self.assertEqual(index_conversation(path, self.db), 'already_indexed')
+            mock_an.assert_not_called()
+
+    def test_skipped_session_gains_no_title_or_summary(self):
+        path = self._write('skip-2', MINIMAL_MESSAGES)
+        self._archive_row('skip-2', path)
+        with patch('towit_index.analyze_with_claude', return_value={'skip': True}):
+            index_conversation(path, self.db)
+        conn = sqlite3.connect(self.db_path)
+        title, summary = conn.execute(
+            "SELECT title, summary FROM conversations WHERE id='skip-2'").fetchone()
+        conn.close()
+        self.assertFalse(title)
+        self.assertFalse(summary)
+
+    def test_skipped_session_is_analyzed_again_after_reindex_delta_growth(self):
+        path = self._write('skip-3', MINIMAL_MESSAGES)
+        self._archive_row('skip-3', path)
+        with patch('towit_index.analyze_with_claude', return_value={'skip': True}):
+            index_conversation(path, self.db)
+        grown = MINIMAL_MESSAGES + [
+            {'role': 'user', 'content': 'Another question about WAL checkpointing behaviour?'},
+            {'role': 'assistant', 'content': 'Checkpointing copies WAL pages into the main db file.'},
+        ] * 3
+        path = self._write('skip-3', grown)
+        with patch.object(type(towit_index._config), 'indexing_reindex_delta',
+                          new_callable=lambda: property(lambda self: 1)), \
+             patch('towit_index.analyze_with_claude', return_value=self.ANALYSIS) as mock_an:
+            self.assertEqual(index_conversation(path, self.db), 'indexed')
+        mock_an.assert_called_once()
+
+    def test_forgotten_session_skip_does_not_touch_anything(self):
+        path = self._write('skip-4', MINIMAL_MESSAGES)
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("INSERT INTO forgotten (id) VALUES ('skip-4')")
+        conn.commit()
+        conn.close()
+        with patch('towit_index.analyze_with_claude') as mock_an:
+            self.assertEqual(index_conversation(path, self.db), 'skipped')
+            self.assertEqual(index_conversation(path, self.db), 'skipped')
+        mock_an.assert_not_called()
+        conn = sqlite3.connect(self.db_path)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM conversations").fetchone()[0], 0)
+        conn.close()
+
     def test_locked_db_on_forgotten_check_fails_closed(self):
         path = self._write('lock-1', MINIMAL_MESSAGES)
         with patch.object(self.db, 'is_forgotten',
