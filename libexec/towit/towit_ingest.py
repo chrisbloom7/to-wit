@@ -11,10 +11,13 @@ import fnmatch
 import json
 import os
 import subprocess
+import sys
 from dataclasses import dataclass, field
 
-from towit_config import config, is_valid_session_id, safe_subprocess_env
+from towit_config import (config, get_error_logger, is_valid_session_id,
+                          safe_subprocess_env, validate_jsonl_path)
 from towit_db import Database
+from towit_index import index_conversation
 from towit_redact import redact
 
 MAX_MESSAGE_CHARS = 50_000
@@ -179,20 +182,27 @@ def _sanitize(text: str) -> str:
     return text.encode('utf-8', 'replace').decode('utf-8')
 
 
+def should_skip_path(jsonl_path: str) -> bool:
+    """True if config/path rules exclude this transcript (symlink, subagent, folder filter)."""
+    if os.path.islink(jsonl_path):
+        return True
+    path = os.path.abspath(jsonl_path)
+    if '/subagents/' in path and not config.ingest_include_subagents:
+        return True
+    folder = os.path.dirname(path)
+    folders = config.ingest_folders
+    return bool(folders) and not any(fnmatch.fnmatch(folder, pat) for pat in folders)
+
+
 def ingest_transcript(jsonl_path: str, db: Database | None = None) -> str:
     """Archive one transcript. Never raises for bad input; DB errors propagate.
 
     Returns 'ingested' | 'appended' | 'rewritten' | 'unchanged' | 'skipped' | 'forgotten'.
     """
-    if os.path.islink(jsonl_path):
+    if should_skip_path(jsonl_path):
         return 'skipped'
     path = os.path.abspath(jsonl_path)
-    if '/subagents/' in path and not config.ingest_include_subagents:
-        return 'skipped'
     folder = os.path.dirname(path)
-    folders = config.ingest_folders
-    if folders and not any(fnmatch.fnmatch(folder, pat) for pat in folders):
-        return 'skipped'
 
     session_id = os.path.splitext(os.path.basename(path))[0]
     if not is_valid_session_id(session_id):
@@ -223,3 +233,36 @@ def ingest_transcript(jsonl_path: str, db: Database | None = None) -> str:
         'source_path': path,
     }
     return db.archive_session(conv, messages)
+
+
+def main():
+    """Detached entry point spawned by the stop hook: archive, then index.
+
+    Never raises or exits non-zero; failures are logged to ~/.towit/errors.log.
+    """
+    if os.environ.get('TOWIT_INDEXING'):
+        return  # recursive call from towit's own Claude invocation
+    if len(sys.argv) < 2:
+        return
+    try:
+        jsonl_path = validate_jsonl_path(sys.argv[1])
+        if jsonl_path is None:
+            get_error_logger().error("towit ingest: path outside ~/.claude/projects: %s",
+                                     sys.argv[1])
+            return
+        status = ingest_transcript(jsonl_path)
+        if status in ('forgotten', 'skipped') or not config.indexing_enabled:
+            return
+        if '/subagents/' in jsonl_path:
+            return  # archived only: subagent sessions stay out of the LLM-indexed catalog
+        index_conversation(jsonl_path)
+    except (Exception, SystemExit):
+        # SystemExit: Database.validate() exits when the DB is missing.
+        try:
+            get_error_logger().exception("towit ingest error")
+        except Exception:
+            pass
+
+
+if __name__ == '__main__':
+    main()

@@ -10,7 +10,7 @@ import shutil
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
 sys.path.insert(0, HELPERS_DIR)
@@ -128,6 +128,116 @@ class TestBackfillDryRun(unittest.TestCase):
         db = Database(self.db_path)
         # is_indexed should return False — nothing was written
         self.assertFalse(db.is_indexed('good-session-002'))
+
+
+class TestBackfillIngest(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.projects_dir = os.path.join(self.tmpdir, 'projects', 'my-project')
+        os.makedirs(self.projects_dir)
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        Database(self.db_path).create_schema()
+        # The shared `config` singleton is built at import; patch the class so
+        # ingest_transcript's Database() and indexing_enabled see this test's values.
+        from towit_config import Config
+        self.indexing_enabled = PropertyMock(return_value=True)
+        self.patches = [
+            patch('towit_index.index_conversation', return_value='indexed'),
+            patch.object(Config, 'db_path', new_callable=PropertyMock,
+                         return_value=self.db_path),
+            patch.object(Config, 'indexing_enabled', self.indexing_enabled),
+        ]
+        self.index = self.patches[0].start()
+        for p in self.patches[1:]:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _count(self):
+        import sqlite3
+        with sqlite3.connect(self.db_path) as conn:
+            return conn.execute('SELECT COUNT(*) FROM conversations').fetchone()[0]
+
+    def _write_session(self, session_id, messages=SUBSTANTIAL_MESSAGES, subdir=None):
+        folder = os.path.join(self.projects_dir, subdir) if subdir else self.projects_dir
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, f'{session_id}.jsonl')
+        write_jsonl(path, messages, session_id=session_id)
+        return path
+
+    def _run(self, extra=None, enabled=True):
+        self.indexing_enabled.return_value = enabled
+        return run_backfill(['--folder', self.projects_dir] + (extra or []),
+                            self.config_path, self.projects_dir)
+
+    def test_ingests_then_indexes_each_session(self):
+        self._write_session('good-session-001')
+        self._write_session('good-session-002')
+        output = self._run()
+        self.assertEqual(self._count(), 2)
+        self.assertEqual(self.index.call_count, 2)
+        self.assertIn('ingested', output)
+        self.assertIn('Archived: 2', output)
+        self.assertIn('Indexed: 2', output)
+
+    def test_indexing_disabled_archives_only(self):
+        self._write_session('good-session-001')
+        output = self._run(enabled=False)
+        self.assertEqual(self._count(), 1)
+        self.index.assert_not_called()
+        self.assertIn('Archived: 1', output)
+        self.assertIn('Indexed: 0', output)
+
+    def test_short_session_is_skipped_and_not_indexed(self):
+        self._write_session('short-session-001', TOO_SHORT_MESSAGES)
+        output = self._run()
+        self.index.assert_not_called()
+        self.assertIn('Skipped: 1', output)
+
+    def test_subagent_sessions_are_not_counted_or_printed(self):
+        self._write_session('sub-session-001', subdir='subagents')
+        output = self._run()
+        self.index.assert_not_called()
+        self.assertEqual(self._count(), 0)
+        self.assertNotIn('sub-session-001', output)
+        self.assertIn('No JSONL files found', output)
+
+    def test_included_subagent_is_archived_but_not_indexed(self):
+        from towit_config import Config
+        self._write_session('sub-session-001', subdir='subagents')
+        with patch.object(Config, 'ingest_include_subagents', new_callable=PropertyMock,
+                          return_value=True):
+            output = self._run()
+        self.assertEqual(self._count(), 1)
+        self.index.assert_not_called()
+        self.assertIn('-> ingested', output)
+
+    def test_symlinked_sessions_are_skipped(self):
+        real = os.path.join(self.tmpdir, 'outside', 'link-session-001.jsonl')
+        os.makedirs(os.path.dirname(real))
+        write_jsonl(real, SUBSTANTIAL_MESSAGES, session_id='link-session-001')
+        os.symlink(real, os.path.join(self.projects_dir, 'link-session-001.jsonl'))
+        self._write_session('good-session-001')
+        output = self._run()
+        self.assertEqual(self.index.call_count, 1)
+        self.assertEqual(self._count(), 1)
+        self.assertNotIn('link-session-001', output)
+        self.assertIn('[0/1]', output)
+
+    def test_per_file_line_shows_ingest_status(self):
+        self._write_session('good-session-001')
+        output = self._run()
+        self.assertIn('-> ingested', output)
+
+    def test_ingest_error_counts_and_continues(self):
+        self._write_session('good-session-001')
+        with patch('towit_ingest.ingest_transcript', side_effect=RuntimeError('boom')):
+            output = self._run()
+        self.assertIn('Errors: 1', output)
 
 
 if __name__ == '__main__':

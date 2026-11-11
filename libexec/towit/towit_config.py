@@ -231,4 +231,32 @@ def is_valid_session_id(session_id: str) -> bool:
     return bool(SESSION_ID_RE.match(session_id))
 
 
+def validate_jsonl_path(path: str) -> str | None:
+    """Return the realpath of `path` if it is under ~/.claude/projects/, else None."""
+    root = os.path.realpath(os.path.expanduser('~/.claude/projects'))
+    resolved = os.path.realpath(path)
+    if resolved.startswith(root + os.sep):
+        return resolved
+    return None
+
+
+def get_error_logger():
+    """Return a rotating logger that writes to ~/.towit/errors.log."""
+    import logging
+    import logging.handlers
+    log_dir = os.path.expanduser('~/.towit')
+    os.makedirs(log_dir, exist_ok=True)
+    logger = logging.getLogger('towit.hook')
+    if not logger.handlers:
+        handler = logging.handlers.RotatingFileHandler(
+            os.path.join(log_dir, 'errors.log'),
+            maxBytes=100_000,
+            backupCount=2,
+        )
+        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+        logger.addHandler(handler)
+        logger.setLevel(logging.ERROR)
+    return logger
+
+
 config = Config()
