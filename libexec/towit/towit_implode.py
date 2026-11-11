@@ -20,6 +20,11 @@ from towit_config import config, remove_database_files
 DEFAULT_INSTALL_DIR = os.path.expanduser('~/.local/bin')
 
 
+def is_homebrew_install(script_path):
+    """True when script_path lives inside a Homebrew Cellar (a whole /Cellar/ path component)."""
+    return '/Cellar/' in script_path
+
+
 def main():
     db_path = config.db_path
     data_dir = os.path.dirname(db_path)
@@ -33,20 +38,26 @@ def main():
                         help=f'Directory where towit binary was installed (default: {DEFAULT_INSTALL_DIR})')
     args = parser.parse_args()
 
+    # Under Homebrew the binary symlink belongs to brew; leave it for `brew uninstall`.
+    homebrew = is_homebrew_install(os.path.abspath(__file__))
     binary = os.path.join(args.install_dir, 'towit')
     hook_installed = _check_hook_installed()
     db_exists = os.path.exists(db_path)
-    binary_is_symlink = os.path.islink(binary)
-    binary_exists = os.path.exists(binary)
+    binary_is_symlink = not homebrew and os.path.islink(binary)
+    binary_exists = not homebrew and os.path.exists(binary)
 
     if not hook_installed and not db_exists and not binary_is_symlink:
-        if binary_exists:
+        if homebrew:
+            print("Nothing to remove — hook is not installed and database does not exist.")
+        elif binary_exists:
             print(f"Warning: '{binary}' exists but is not a symlink — not removing.")
             print("         Remove it manually if needed.")
         else:
             print("Nothing to remove — hook is not installed, database does not exist, "
                   f"and no symlink found at {binary}.")
         _print_data_dir(data_dir)
+        if homebrew:
+            _print_brew_hint()
         sys.exit(0)
 
     print("The following will be removed:")
@@ -80,6 +91,12 @@ def main():
 
     print("Implode complete.")
     _print_data_dir(data_dir)
+    if homebrew:
+        _print_brew_hint()
+
+
+def _print_brew_hint():
+    print("\nTo Wit was installed with Homebrew. To finish removing it, run: brew uninstall towit")
 
 
 def _print_data_dir(data_dir):

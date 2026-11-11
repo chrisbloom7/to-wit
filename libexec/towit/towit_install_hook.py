@@ -54,10 +54,35 @@ def stable_script_path(path):
 
 
 HOOK_SCRIPT = stable_script_path(os.path.join(SCRIPT_DIR, 'towit_hook.py'))
-HOOK_COMMAND = f"python3 {HOOK_SCRIPT}"
 HOOK_MARKER = 'towit_hook.py'  # substring used to identify our hook
 # Hook event -> matcher. towit_hook.py dispatches on the payload's hook_event_name.
 HOOK_EVENTS = {'Stop': '', 'SessionEnd': '', 'SessionStart': 'startup'}
+
+
+def hook_interpreter(env=None):
+    """Return the interpreter to write into the hook command.
+
+    TOWIT_PYTHON (from `env`, default os.environ) wins when it is an absolute, executable
+    path without whitespace (the command is split on whitespace). Otherwise falls back to
+    python3, with a warning on stderr if it was set but unusable.
+    """
+    raw = os.environ.get('TOWIT_PYTHON') if env is None else env.get('TOWIT_PYTHON')
+    if not raw:
+        return 'python3'
+    if (os.path.isabs(raw) and not re.search(r'\s', raw)
+            and os.path.isfile(raw) and os.access(raw, os.X_OK)):
+        return raw
+    print(
+        f"Warning: TOWIT_PYTHON={raw!r} is not an absolute, executable path without "
+        "whitespace; using python3 in the hook command.",
+        file=sys.stderr
+    )
+    return 'python3'
+
+
+def hook_command():
+    """The command registered for every To Wit hook event (may warn; call once per run)."""
+    return f"{hook_interpreter()} {HOOK_SCRIPT}"
 
 
 def _load_settings():
@@ -101,13 +126,14 @@ def _towit_hooks(settings, event):
             if HOOK_MARKER in hook.get('command', '')]
 
 
-def repair_commands(settings):
-    """Point every registered To Wit hook at HOOK_COMMAND; return how many changed."""
+def repair_commands(settings, command=None):
+    """Point every registered To Wit hook at `command` (default hook_command()); return how many changed."""
+    command = command or hook_command()
     repaired = 0
     for event in HOOK_EVENTS:
         for hook in _towit_hooks(settings, event):
-            if hook['command'] != HOOK_COMMAND:
-                hook['command'] = HOOK_COMMAND
+            if hook['command'] != command:
+                hook['command'] = command
                 repaired += 1
     return repaired
 
@@ -118,14 +144,15 @@ def main():
     ).parse_args()
     settings = _load_settings()
 
-    repaired = repair_commands(settings)
+    command = hook_command()
+    repaired = repair_commands(settings, command)
 
     if repaired == 0 and is_installed(settings):
         print("To Wit hooks are already installed.")
         sys.exit(0)
 
     if repaired:
-        print(f"To Wit hook command updated in {repaired} place(s) to: {HOOK_COMMAND}")
+        print(f"To Wit hook command updated in {repaired} place(s) to: {command}")
 
     hooks = settings.setdefault('hooks', {})
     added = False
@@ -134,7 +161,7 @@ def main():
             continue
         added = True
         event_hooks = hooks.setdefault(event, [])
-        new_hook = {"type": "command", "command": HOOK_COMMAND}
+        new_hook = {"type": "command", "command": command}
 
         # Merge into an existing entry with the same matcher rather than appending a
         # new one, so that all global hooks for an event share a single entry.

@@ -437,24 +437,41 @@ def check_hook_events(settings_path: str) -> CheckResult:
     return CheckResult('PASS', f'To Wit hook registered for all events: {", ".join(HOOK_EVENTS)}')
 
 
+def _interpreter(command: str) -> str | None:
+    """First token of a hook command when it is an absolute path (bare names are PATH-resolved)."""
+    tokens = command.split()
+    return tokens[0] if tokens and os.path.isabs(tokens[0]) else None
+
+
+def _interpreter_unrunnable(interp: str | None) -> bool:
+    return interp is not None and not (os.path.isfile(interp) and os.access(interp, os.X_OK))
+
+
 def check_hook_commands(settings_path: str) -> CheckResult:
-    """FAIL when no registered hook script exists; WARN when only some do or events point at different scripts."""
+    """FAIL when no registered hook can run (script or absolute interpreter missing); WARN when only some can
+    or events point at different scripts."""
     found = _find_hook_commands(settings_path)
     if not found:
         return CheckResult('PASS', 'No To Wit hook commands to verify')
     paths = {ev: _script_path(cmd) for ev, cmd in found.items()}
-    missing = [f'{ev} ({p})' for ev, p in paths.items() if p is None or not os.path.isfile(p)]
-    if len(missing) == len(paths):  # nothing can run: capture is dead
+    interps = {ev: _interpreter(cmd) for ev, cmd in found.items()}
+    no_script = [f'{ev} ({p})' for ev, p in paths.items() if p is None or not os.path.isfile(p)]
+    no_interp = [f'{ev} ({i})' for ev, i in interps.items() if _interpreter_unrunnable(i)]
+    broken = {ev for ev in found
+              if paths[ev] is None or not os.path.isfile(paths[ev]) or _interpreter_unrunnable(interps[ev])}
+    if broken:
+        parts = []
+        if no_script:
+            parts.append(f'Hook script not found on disk for: {", ".join(no_script)}')
+        if no_interp:
+            parts.append(f'Hook interpreter not found or not executable for: {", ".join(no_interp)}')
+        remediation = ("Reinstall To Wit to restore the hook script, then run 'towit install-hook'."
+                       if no_script else
+                       "Run 'towit install-hook' to rewrite the hook command with a working interpreter.")
         return CheckResult(
-            'FAIL',
-            f'Hook script not found on disk for: {", ".join(missing)}',
-            remediation="Reinstall To Wit to restore the hook script, then run 'towit install-hook'.",
-        )
-    if missing:
-        return CheckResult(
-            'WARN',
-            f'Hook script not found on disk for: {", ".join(missing)}',
-            remediation="Reinstall To Wit to restore the hook script, then run 'towit install-hook'.",
+            'FAIL' if len(broken) == len(found) else 'WARN',  # FAIL: nothing can run, capture is dead
+            '; '.join(parts),
+            remediation=remediation,
         )
     distinct = sorted(set(paths.values()))
     if len(distinct) > 1:
