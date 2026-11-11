@@ -579,8 +579,22 @@ EOF
 # end-to-end archive flow
 # ---------------------------------------------------------------------------
 
+# Assert the conversations and messages tables are both empty
+_assert_archive_empty() {
+  run python3 -c '
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+print(con.execute("SELECT COUNT(*) FROM conversations").fetchone()[0],
+      con.execute("SELECT COUNT(*) FROM messages").fetchone()[0])
+' "${TOWIT_DB_PATH}"
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "0 0" ] || { echo "Expected empty conversations/messages, got: ${output}"; return 1; }
+}
+
 @test "towit: end-to-end archive flow (backfill, search, show, redaction, forget)" {
-  # Never call the real claude: indexing is disabled and claude is absent from PATH
+  # Indexing is disabled; a stub claude on PATH fails and leaves a marker if ever called
+  printf '#!/usr/bin/env bash\ntouch "%s/claude_called"\nexit 1\n' "${TEST_TMPDIR}" > "${TEST_TMPDIR}/mock_bin/claude"
+  chmod +x "${TEST_TMPDIR}/mock_bin/claude"
   ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
   export HOME="${TEST_TMPDIR}/home"
   mkdir -p "${HOME}"
@@ -625,12 +639,17 @@ print("\n".join(r[0] for r in con.execute("SELECT text FROM messages")))
   [ "${status}" -eq 0 ]
 
   run "${TOWIT}" search "zephyr marker"
-  [[ "${output}" != *"session-e2e-0001"* ]] || { echo "Forgotten session still found: ${output}"; return 1; }
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"No conversations found."* ]] || { echo "Forgotten session still found: ${output}"; return 1; }
+  _assert_archive_empty
 
   run "${TOWIT}" backfill --folder "${sessions}"
   [ "${status}" -eq 0 ]
   run "${TOWIT}" search "zephyr marker"
-  [[ "${output}" != *"session-e2e-0001"* ]] || { echo "Backfill restored forgotten session: ${output}"; return 1; }
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"No conversations found."* ]] || { echo "Backfill restored forgotten session: ${output}"; return 1; }
+  _assert_archive_empty
+  [ ! -e "${TEST_TMPDIR}/claude_called" ] || { echo "claude was invoked"; return 1; }
 }
 
 @test "towit: setup migrates a v0.8.2 database and keeps rows searchable by metadata" {
@@ -666,12 +685,12 @@ CREATE TABLE conversation_keywords (
   PRIMARY KEY (conversation_id, keyword_id)
 );
 INSERT INTO conversations (id, folder, cwd, started_at, last_active, title, summary, message_count)
-VALUES ("legacy-session-0001", "-work-legacy", "/work/legacy", "2025-12-01T10:00:00Z",
-        "2025-12-01T11:00:00Z", "Quokka migration notes", "Discussed marsupial schemas.", 4);
-INSERT INTO topics (name) VALUES ("legacy-topic");
-INSERT INTO conversation_topics VALUES ("legacy-session-0001", 1);
-INSERT INTO keywords (name) VALUES ("marsupial");
-INSERT INTO conversation_keywords VALUES ("legacy-session-0001", 1);
+VALUES ('legacy-session-0001', '-work-legacy', '/work/legacy', '2025-12-01T10:00:00Z',
+        '2025-12-01T11:00:00Z', 'Quokka migration notes', 'Discussed marsupial schemas.', 4);
+INSERT INTO topics (name) VALUES ('legacy-topic');
+INSERT INTO conversation_topics VALUES ('legacy-session-0001', 1);
+INSERT INTO keywords (name) VALUES ('marsupial');
+INSERT INTO conversation_keywords VALUES ('legacy-session-0001', 1);
 """)
 con.commit()
 PYEOF
@@ -694,4 +713,22 @@ PYEOF
 
   run "${TOWIT}" stats
   [ "${status}" -eq 0 ]
+
+  # Archive schema was added and the legacy row is marked not archived
+  run python3 - "${TOWIT_DB_PATH}" "${HELPERS_DIR}" <<'PYEOF'
+import sqlite3, sys
+sys.path.insert(0, sys.argv[2])
+from towit_db import SCHEMA_VERSION
+con = sqlite3.connect(sys.argv[1])
+names = {r[0] for r in con.execute("SELECT name FROM sqlite_master")}
+missing = {"messages", "messages_fts", "forgotten", "meta"} - names
+assert not missing, "missing tables: %s" % missing
+version = con.execute("PRAGMA user_version").fetchone()[0]
+assert version == SCHEMA_VERSION, "user_version %s != %s" % (version, SCHEMA_VERSION)
+archived = con.execute(
+    "SELECT archived FROM conversations WHERE id = 'legacy-session-0001'").fetchone()[0]
+assert archived == 0, "archived = %s" % archived
+print("ok")
+PYEOF
+  [ "${status}" -eq 0 ] || { echo "Migration assertions failed: ${output}"; return 1; }
 }
