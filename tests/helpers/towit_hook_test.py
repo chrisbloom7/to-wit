@@ -11,6 +11,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from unittest.mock import patch
 
 HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
@@ -49,6 +50,57 @@ class TestHook(unittest.TestCase):
         argv = popen.call_args[0][0]
         self.assertEqual(os.path.basename(argv[1]), 'towit_ingest.py')
         self.assertEqual(argv[2], os.path.realpath(self.transcript))
+
+    def test_stop_and_session_end_spawn_detached_ingest(self):
+        for event in ('Stop', 'SessionEnd'):
+            code, popen = self._run_hook({'hook_event_name': event,
+                                          'transcript_path': self.transcript})
+            self.assertEqual(code, 0, event)
+            popen.assert_called_once()
+            argv = popen.call_args[0][0]
+            self.assertEqual(os.path.basename(argv[1]), 'towit_ingest.py')
+            self.assertEqual(argv[2], os.path.realpath(self.transcript))
+            self.assertTrue(popen.call_args[1]['start_new_session'])
+
+    def test_session_start_spawns_catch_up_without_transcript(self):
+        code, popen = self._run_hook({'hook_event_name': 'SessionStart', 'source': 'startup'})
+        self.assertEqual(code, 0)
+        popen.assert_called_once()
+        argv = popen.call_args[0][0]
+        self.assertEqual(os.path.basename(argv[1]), 'towit_ingest.py')
+        self.assertEqual(argv[2:], ['--catch-up'])
+        self.assertTrue(popen.call_args[1]['start_new_session'])
+
+    def test_unknown_event_spawns_nothing(self):
+        code, popen = self._run_hook({'hook_event_name': 'PreToolUse',
+                                      'transcript_path': self.transcript})
+        self.assertEqual(code, 0)
+        popen.assert_not_called()
+
+    def test_invalid_transcript_for_session_end_spawns_nothing(self):
+        outside = os.path.join(self.tmpdir, 'elsewhere.jsonl')
+        with open(outside, 'w') as fh:
+            fh.write('{}\n')
+        for event, path in (('SessionEnd', outside), ('Stop', outside),
+                            ('SessionEnd', '../../etc/passwd'), ('Stop', '')):
+            code, popen = self._run_hook({'hook_event_name': event, 'transcript_path': path})
+            self.assertEqual(code, 0)
+            popen.assert_not_called()
+
+    def test_exception_is_logged_and_exit_is_zero(self):
+        with patch.dict(os.environ, {'HOME': self.tmpdir}):
+            os.environ.pop('TOWIT_INDEXING', None)
+            import towit_hook
+            towit_hook = importlib.reload(towit_hook)
+            logger = unittest.mock.MagicMock()
+            with patch('sys.stdin', io.StringIO('{not json')), \
+                 patch.object(towit_hook, 'get_error_logger', return_value=logger), \
+                 patch('subprocess.Popen') as popen:
+                with self.assertRaises(SystemExit) as cm:
+                    towit_hook.main()
+        self.assertEqual(cm.exception.code, 0)
+        logger.exception.assert_called_once()
+        popen.assert_not_called()
 
     def test_exits_zero_when_spawn_raises(self):
         code, popen = self._run_hook({'transcript_path': self.transcript},

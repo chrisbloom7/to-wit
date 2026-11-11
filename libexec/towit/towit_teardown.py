@@ -57,29 +57,19 @@ def main():
 
 
 def _check_hook_installed():
-    from towit_install_hook import _load_settings, is_installed
+    from towit_uninstall_hook import _load_settings, is_installed
     settings = _load_settings()
     return is_installed(settings)
 
 
 def _remove_hook():
-    from towit_uninstall_hook import _load_settings, _save_settings, is_installed, HOOK_MARKER, SETTINGS_PATH
+    from towit_uninstall_hook import _load_settings, _save_settings, remove_hooks, SETTINGS_PATH
     if not os.path.exists(SETTINGS_PATH):
         return
     settings = _load_settings()
-    stop_hooks = settings.get('hooks', {}).get('Stop', [])
-    cleaned = []
-    for entry in stop_hooks:
-        filtered = [h for h in entry.get('hooks', []) if HOOK_MARKER not in h.get('command', '')]
-        if filtered:
-            cleaned.append({**entry, 'hooks': filtered})
-    settings['hooks']['Stop'] = cleaned
-    if not settings['hooks']['Stop']:
-        del settings['hooks']['Stop']
-    if not settings['hooks']:
-        del settings['hooks']
+    remove_hooks(settings)
     _save_settings(settings)
-    print("To Wit stop hook removed.")
+    print("To Wit hooks removed.")
 
 
 if __name__ == '__main__':

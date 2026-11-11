@@ -209,5 +209,38 @@ class TestUninstallHookHelp(unittest.TestCase):
                          "--help should not create or modify settings file")
 
 
+class TestUninstallAllEvents(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.settings_path = os.path.join(self.tmpdir, SETTINGS_REL_PATH)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_removes_all_three_towit_entries_and_keeps_unrelated(self):
+        other = {"type": "command", "command": "echo other-tool"}
+        os.makedirs(os.path.dirname(self.settings_path))
+        with open(self.settings_path, 'w') as f:
+            json.dump({"theme": "dark", "hooks": {
+                "SessionEnd": [{"matcher": "", "hooks": [other]}],
+                "SessionStart": [{"matcher": "resume", "hooks": [other]}]}}, f)
+        run_install_hook(self.tmpdir)
+        result = run_uninstall_hook(self.tmpdir)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(self.settings_path) as f:
+            data = json.load(f)
+        self.assertNotIn('towit_hook.py', json.dumps(data))
+        self.assertEqual(data['theme'], 'dark')
+        self.assertEqual(data['hooks'], {
+            "SessionEnd": [{"matcher": "", "hooks": [other]}],
+            "SessionStart": [{"matcher": "resume", "hooks": [other]}]})
+
+    def test_only_towit_hooks_leaves_no_hooks_key(self):
+        run_install_hook(self.tmpdir)
+        run_uninstall_hook(self.tmpdir)
+        with open(self.settings_path) as f:
+            self.assertNotIn('hooks', json.load(f))
+
+
 if __name__ == '__main__':
     unittest.main()

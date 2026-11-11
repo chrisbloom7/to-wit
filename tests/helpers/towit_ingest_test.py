@@ -9,6 +9,8 @@ import shutil
 import sys
 import subprocess
 import tempfile
+import time
+from datetime import datetime
 import threading
 import unittest
 import unittest.mock
@@ -360,6 +362,135 @@ class TestIngestTranscript(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(sorted(results), ['ingested', 'unchanged'])
         self.assertEqual(len(self._rows()), len(parse_transcript(self.path).messages))
+
+
+class TestCatchUp(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.root = os.path.join(self.tmp, 'projects')
+        self.folder = os.path.join(self.root, '-work-proj')
+        os.makedirs(self.folder)
+        self.db = Database(os.path.join(self.tmp, 'catalog.db'))
+        self.db.create_schema()
+        self.paths = {}
+        for sid in ('sess-0001', 'sess-0002'):
+            p = os.path.join(self.folder, sid + '.jsonl')
+            _write_jsonl(p, [_entry('user', 'q one ' + sid), _entry('assistant', 'a'),
+                             _entry('user', 'q two')])
+            self.paths[sid] = p
+        for name, value in (('ingest_redact', True), ('ingest_extra_patterns', []),
+                            ('ingest_include_subagents', False), ('ingest_folders', [])):
+            patcher = unittest.mock.patch.object(
+                type(towit_ingest.config), name, new_callable=unittest.mock.PropertyMock,
+                return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        patcher = unittest.mock.patch.object(towit_ingest, 'index_conversation')
+        self.index = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _catch_up(self):
+        counts = towit_ingest.catch_up(root=self.root, db=self.db)
+        self.index.assert_not_called()
+        return counts
+
+    def test_first_run_ingests_everything_and_stamps(self):
+        self.assertIsNone(self.db.get_meta('last_catch_up'))
+        counts = self._catch_up()
+        self.assertEqual(counts, {'ingested': 2})
+        stamp = self.db.get_meta('last_catch_up')
+        self.assertIsNotNone(stamp)
+        self.assertEqual(datetime.fromisoformat(stamp).utcoffset().total_seconds(), 0)
+
+    def test_second_run_processes_nothing(self):
+        self._catch_up()
+        # make mtimes clearly older than the stamp minus slack
+        old = time.time() - 3600
+        for p in self.paths.values():
+            os.utime(p, (old, old))
+        counts = self._catch_up()
+        self.assertEqual(counts.get('ingested', 0) + counts.get('appended', 0), 0)
+        self.assertEqual(counts, {})
+
+    def test_touched_file_reprocessed_alone(self):
+        self._catch_up()
+        old = time.time() - 3600
+        for p in self.paths.values():
+            os.utime(p, (old, old))
+        with open(self.paths['sess-0002'], 'a') as fh:
+            fh.write(json.dumps(_entry('assistant', 'more')) + '\n')
+        counts = self._catch_up()
+        self.assertEqual(counts, {'appended': 1})
+
+    def test_mtime_within_slack_is_rechecked(self):
+        self._catch_up()
+        stamp = datetime.fromisoformat(self.db.get_meta('last_catch_up')).timestamp()
+        os.utime(self.paths['sess-0001'], (stamp - 30, stamp - 30))
+        old = stamp - 3600
+        os.utime(self.paths['sess-0002'], (old, old))
+        self.assertEqual(self._catch_up(), {'unchanged': 1})
+
+    def test_subagent_and_symlink_files_skipped(self):
+        sub = os.path.join(self.folder, 'sess-0001', 'subagents')
+        os.makedirs(sub)
+        _write_jsonl(os.path.join(sub, 'agent-x.jsonl'),
+                     [_entry('user', 'a'), _entry('assistant', 'b'), _entry('user', 'c')])
+        outside = os.path.join(self.tmp, 'real.jsonl')
+        _write_jsonl(outside, [_entry('user', 'a'), _entry('assistant', 'b'), _entry('user', 'c')])
+        os.symlink(outside, os.path.join(self.folder, 'linked-0003.jsonl'))
+        counts = self._catch_up()
+        self.assertEqual(counts.get('ingested'), 2)
+        self.assertEqual(sum(counts.values()), 2)
+
+    def test_one_bad_file_does_not_abort_scan(self):
+        real = towit_ingest.ingest_transcript
+
+        def flaky(path, db=None):
+            if path.endswith('sess-0001.jsonl'):
+                raise RuntimeError('boom')
+            return real(path, db)
+
+        with unittest.mock.patch.object(towit_ingest, 'ingest_transcript', side_effect=flaky):
+            counts = towit_ingest.catch_up(root=self.root, db=self.db)
+        self.assertEqual(counts, {'error': 1, 'ingested': 1})
+        self.assertIsNotNone(self.db.get_meta('last_catch_up'))
+
+    def test_missing_root_returns_empty(self):
+        self.assertEqual(towit_ingest.catch_up(root=os.path.join(self.tmp, 'nope'), db=self.db), {})
+
+    def test_missing_db_propagates_and_no_stamp(self):
+        db = Database(os.path.join(self.tmp, 'absent.db'))
+        with self.assertRaises(SystemExit):
+            towit_ingest.catch_up(root=self.root, db=db)
+
+
+class TestCatchUpMain(unittest.TestCase):
+    def setUp(self):
+        os.environ.pop('TOWIT_INDEXING', None)
+
+    def _main(self, side_effect=None):
+        with unittest.mock.patch.object(towit_ingest, 'catch_up', side_effect=side_effect) as cu, \
+             unittest.mock.patch.object(towit_ingest, 'ingest_transcript') as ing, \
+             unittest.mock.patch('sys.argv', ['towit_ingest.py', '--catch-up']):
+            towit_ingest.main()
+        return cu, ing
+
+    def test_catch_up_flag_runs_catch_up(self):
+        cu, ing = self._main()
+        cu.assert_called_once_with()
+        ing.assert_not_called()
+
+    def test_catch_up_systemexit_and_exception_swallowed(self):
+        for exc in (SystemExit(1), RuntimeError('x')):
+            with unittest.mock.patch.object(towit_ingest, 'get_error_logger') as lg:
+                self._main(side_effect=exc)
+            lg.return_value.exception.assert_called_once()
+
+    def test_catch_up_honors_indexing_guard(self):
+        with unittest.mock.patch.dict(os.environ, {'TOWIT_INDEXING': '1'}):
+            cu, _ = self._main()
+        cu.assert_not_called()
 
 
 class TestIngestMain(unittest.TestCase):

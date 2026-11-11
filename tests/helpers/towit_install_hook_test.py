@@ -126,6 +126,87 @@ class TestTowitInstallHook(unittest.TestCase):
         self.assertIn('permissions', data)
 
 
+class TestInstallHookEvents(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.settings_path = os.path.join(self.tmpdir, 'settings.local.json')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _read(self):
+        with open(self.settings_path) as f:
+            return json.load(f)
+
+    def _towit_entries(self, data, event):
+        return [(entry.get('matcher', ''), h['command'])
+                for entry in data.get('hooks', {}).get(event, [])
+                for h in entry.get('hooks', [])
+                if 'towit_hook.py' in h.get('command', '')]
+
+    def test_hook_events_constant(self):
+        import towit_install_hook
+        self.assertEqual(towit_install_hook.HOOK_EVENTS,
+                         {'Stop': '', 'SessionEnd': '', 'SessionStart': 'startup'})
+
+    def test_installs_one_entry_per_event_with_matcher(self):
+        run_install_hook(self.settings_path)
+        data = self._read()
+        for event, matcher in {'Stop': '', 'SessionEnd': '', 'SessionStart': 'startup'}.items():
+            entries = self._towit_entries(data, event)
+            self.assertEqual(len(entries), 1, f"{event}: {entries}")
+            self.assertEqual(entries[0][0], matcher)
+
+    def test_rerun_leaves_one_entry_per_event(self):
+        run_install_hook(self.settings_path)
+        result = run_install_hook(self.settings_path)
+        self.assertIn('already', (result.stdout + result.stderr).lower())
+        data = self._read()
+        for event in ('Stop', 'SessionEnd', 'SessionStart'):
+            self.assertEqual(len(self._towit_entries(data, event)), 1)
+
+    def test_upgrade_from_stop_only_adds_missing_events(self):
+        stop_only = {"hooks": {"Stop": [{"matcher": "", "hooks": [
+            {"type": "command", "command": "python3 /x/towit_hook.py"}]}]}}
+        with open(self.settings_path, 'w') as f:
+            json.dump(stop_only, f)
+        run_install_hook(self.settings_path)
+        data = self._read()
+        for event in ('Stop', 'SessionEnd', 'SessionStart'):
+            self.assertEqual(len(self._towit_entries(data, event)), 1, event)
+
+    def test_preserves_unrelated_hooks_under_all_events(self):
+        other = {"type": "command", "command": "echo other-tool"}
+        settings = {"hooks": {
+            "Stop": [{"matcher": "", "hooks": [other]}],
+            "SessionStart": [{"matcher": "startup", "hooks": [other]},
+                             {"matcher": "resume", "hooks": [other]}],
+            "PreToolUse": [{"matcher": "Bash", "hooks": [other]}],
+        }}
+        with open(self.settings_path, 'w') as f:
+            json.dump(settings, f)
+        run_install_hook(self.settings_path)
+        data = self._read()
+        for event in ('Stop', 'SessionStart'):
+            cmds = [h['command'] for e in data['hooks'][event] for h in e['hooks']]
+            self.assertIn('echo other-tool', cmds)
+        self.assertEqual(data['hooks']['PreToolUse'], settings['hooks']['PreToolUse'])
+        resume = [e for e in data['hooks']['SessionStart'] if e['matcher'] == 'resume']
+        self.assertEqual(resume, settings['hooks']['SessionStart'][1:])
+        self.assertEqual(len(self._towit_entries(data, 'SessionStart')), 1)
+
+    def test_write_is_atomic_via_os_replace(self):
+        import towit_install_hook
+        from unittest.mock import patch
+        with patch.object(towit_install_hook, 'SETTINGS_PATH', self.settings_path), \
+             patch('os.replace', side_effect=OSError('boom')) as rep:
+            with self.assertRaises(OSError):
+                towit_install_hook._save_settings({'a': 1})
+        rep.assert_called_once()
+        self.assertFalse(os.path.exists(self.settings_path))
+        self.assertEqual([f for f in os.listdir(self.tmpdir) if f.endswith('.tmp')], [])
+
+
 class TestInstallHookHelp(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()

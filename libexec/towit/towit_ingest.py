@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 
 from towit_config import (config, get_error_logger, is_valid_session_id,
@@ -21,6 +22,8 @@ from towit_index import index_conversation
 from towit_redact import redact
 
 MAX_MESSAGE_CHARS = 50_000
+CATCH_UP_SLACK_SECONDS = 60
+CATCH_UP_META_KEY = 'last_catch_up'
 STUB_VALUE_CHARS = 200
 ERROR_RESULT_CHARS = 300
 STUB_VALUE_KEYS = ('description', 'command', 'file_path', 'pattern',
@@ -235,8 +238,54 @@ def ingest_transcript(jsonl_path: str, db: Database | None = None) -> str:
     return db.archive_session(conv, messages)
 
 
+def catch_up(root: str | None = None, db: Database | None = None) -> dict[str, int]:
+    """Archive transcripts modified since the last catch-up scan (all, if never run).
+
+    Scans `root` (default ~/.claude/projects) for *.jsonl files with an mtime newer than
+    the `last_catch_up` stamp minus a 60 s slack. Never calls the LLM. Returns counts
+    keyed by ingest_transcript status, plus 'error' for files that raised. The stamp is
+    the scan start time, written only once the scan completes. A missing DB (SystemExit)
+    propagates: it is a global failure, not a per-file one.
+    """
+    root = root or os.path.expanduser('~/.claude/projects')
+    db = db or Database()
+    started = datetime.now(timezone.utc)
+    stamp = db.get_meta(CATCH_UP_META_KEY)
+    cutoff = None
+    if stamp:
+        try:
+            cutoff = datetime.fromisoformat(stamp).timestamp() - CATCH_UP_SLACK_SECONDS
+        except ValueError:
+            cutoff = None  # corrupt stamp: rescan everything
+
+    counts: dict[str, int] = {}
+    for dirpath, _dirs, files in os.walk(root):  # os.walk does not follow symlinked dirs
+        for name in files:
+            if not name.endswith('.jsonl'):
+                continue
+            path = os.path.join(dirpath, name)
+            if should_skip_path(path):
+                continue
+            try:
+                if cutoff is not None and os.stat(path).st_mtime < cutoff:
+                    continue
+                status = ingest_transcript(path, db)
+            except SystemExit:
+                raise
+            except Exception:
+                status = 'error'
+                try:
+                    get_error_logger().exception("towit catch-up error: %s", path)
+                except Exception:
+                    pass
+            counts[status] = counts.get(status, 0) + 1
+
+    db.set_meta(CATCH_UP_META_KEY, started.isoformat())
+    return counts
+
+
 def main():
-    """Detached entry point spawned by the stop hook: archive, then index.
+    """Detached entry point spawned by the hook: archive, then index (or `--catch-up`).
 
     Never raises or exits non-zero; failures are logged to ~/.towit/errors.log.
     """
@@ -245,6 +294,9 @@ def main():
     if len(sys.argv) < 2:
         return
     try:
+        if sys.argv[1] == '--catch-up':
+            catch_up()
+            return
         jsonl_path = validate_jsonl_path(sys.argv[1])
         if jsonl_path is None:
             get_error_logger().error("towit ingest: path outside ~/.claude/projects: %s",

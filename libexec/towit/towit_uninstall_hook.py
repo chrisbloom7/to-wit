@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-towit_uninstall_hook — remove the To Wit stop hook from Claude Code settings.
+towit_uninstall_hook — remove the To Wit hooks from Claude Code settings.
 
 Idempotent: does nothing if the hook is not installed.
 """
@@ -57,49 +57,53 @@ def _save_settings(settings):
 
 
 def is_installed(settings):
-    """Return True if our hook is already present."""
-    for entry in settings.get('hooks', {}).get('Stop', []):
-        for hook in entry.get('hooks', []):
-            if HOOK_MARKER in hook.get('command', ''):
-                return True
-    return False
+    """Return True if our hook is present under any event."""
+    return any(
+        HOOK_MARKER in hook.get('command', '')
+        for entries in settings.get('hooks', {}).values()
+        for entry in entries
+        for hook in entry.get('hooks', [])
+    )
+
+
+def remove_hooks(settings):
+    """Remove every To Wit hook from all events in place, preserving all others."""
+    hooks = settings.get('hooks', {})
+    for event in list(hooks):
+        cleaned = []
+        for entry in hooks[event]:
+            filtered_hooks = [
+                h for h in entry.get('hooks', [])
+                if HOOK_MARKER not in h.get('command', '')
+            ]
+            if filtered_hooks:
+                cleaned.append({**entry, 'hooks': filtered_hooks})
+            # If all hooks in this entry were ours, drop the whole entry
+        if cleaned:
+            hooks[event] = cleaned
+        else:
+            del hooks[event]  # clean up empty event sections
+    if not hooks:
+        settings.pop('hooks', None)
 
 
 def main():
     argparse.ArgumentParser(
-        description='Remove the To Wit stop hook from Claude Code settings.'
+        description='Remove the To Wit hooks from Claude Code settings.'
     ).parse_args()
     if not os.path.exists(SETTINGS_PATH):
-        print("No settings file found — hook was not installed.")
+        print("No settings file found — hooks were not installed.")
         sys.exit(0)
 
     settings = _load_settings()
 
     if not is_installed(settings):
-        print("To Wit stop hook is not installed.")
+        print("To Wit hooks are not installed.")
         sys.exit(0)
 
-    # Remove entries containing our hook marker; preserve all others
-    stop_hooks = settings.get('hooks', {}).get('Stop', [])
-    cleaned = []
-    for entry in stop_hooks:
-        filtered_hooks = [
-            h for h in entry.get('hooks', [])
-            if HOOK_MARKER not in h.get('command', '')
-        ]
-        if filtered_hooks:
-            cleaned.append({**entry, 'hooks': filtered_hooks})
-        # If all hooks in this entry were ours, drop the whole entry
-
-    settings['hooks']['Stop'] = cleaned
-    # Clean up empty hooks sections
-    if not settings['hooks']['Stop']:
-        del settings['hooks']['Stop']
-    if not settings['hooks']:
-        del settings['hooks']
-
+    remove_hooks(settings)
     _save_settings(settings)
-    print("To Wit stop hook removed.")
+    print("To Wit hooks removed.")
 
 
 if __name__ == '__main__':

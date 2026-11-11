@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-towit_install_hook — add the To Wit stop hook to Claude Code settings.
+towit_install_hook — add the To Wit hooks (Stop, SessionEnd, SessionStart) to Claude Code settings.
 
 Idempotent: does nothing if the hook is already installed.
 """
@@ -36,6 +36,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 HOOK_SCRIPT = os.path.join(SCRIPT_DIR, 'towit_hook.py')
 HOOK_COMMAND = f"python3 {HOOK_SCRIPT}"
 HOOK_MARKER = 'towit_hook.py'  # substring used to identify our hook
+# Hook event -> matcher. towit_hook.py dispatches on the payload's hook_event_name.
+HOOK_EVENTS = {'Stop': '', 'SessionEnd': '', 'SessionStart': 'startup'}
 
 
 def _load_settings():
@@ -60,44 +62,47 @@ def _save_settings(settings):
         raise
 
 
-def is_installed(settings):
-    """Return True if our hook is already present."""
-    for entry in settings.get('hooks', {}).get('Stop', []):
-        for hook in entry.get('hooks', []):
-            if HOOK_MARKER in hook.get('command', ''):
-                return True
-    return False
+def is_installed(settings, event=None):
+    """Return True if our hook is present for `event`, or for every event if None."""
+    events = HOOK_EVENTS if event is None else [event]
+    return all(
+        any(HOOK_MARKER in hook.get('command', '')
+            for entry in settings.get('hooks', {}).get(ev, [])
+            for hook in entry.get('hooks', []))
+        for ev in events
+    )
 
 
 def main():
     argparse.ArgumentParser(
-        description='Add the To Wit stop hook to Claude Code settings.'
+        description='Add the To Wit hooks (Stop, SessionEnd, SessionStart) to Claude Code settings.'
     ).parse_args()
     settings = _load_settings()
 
     if is_installed(settings):
-        print("To Wit stop hook is already installed.")
+        print("To Wit hooks are already installed.")
         sys.exit(0)
 
     hooks = settings.setdefault('hooks', {})
-    stop_hooks = hooks.setdefault('Stop', [])
-    new_hook = {"type": "command", "command": HOOK_COMMAND}
+    for event, matcher in HOOK_EVENTS.items():
+        if is_installed(settings, event):
+            continue
+        event_hooks = hooks.setdefault(event, [])
+        new_hook = {"type": "command", "command": HOOK_COMMAND}
 
-    # Merge into an existing empty-matcher entry rather than appending a new one,
-    # so that all global Stop hooks share a single entry in the settings file.
-    merged = False
-    for entry in stop_hooks:
-        if entry.get('matcher', '') == '':
-            entry.setdefault('hooks', []).append(new_hook)
-            merged = True
-            break
-
-    if not merged:
-        stop_hooks.append({"matcher": "", "hooks": [new_hook]})
+        # Merge into an existing entry with the same matcher rather than appending a
+        # new one, so that all global hooks for an event share a single entry.
+        for entry in event_hooks:
+            if entry.get('matcher', '') == matcher:
+                entry.setdefault('hooks', []).append(new_hook)
+                break
+        else:
+            event_hooks.append({"matcher": matcher, "hooks": [new_hook]})
 
     _save_settings(settings)
-    print(f"To Wit stop hook installed.")
+    print("To Wit hooks installed.")
     print(f"  Hook script: {HOOK_SCRIPT}")
+    print(f"  Events:      {', '.join(HOOK_EVENTS)}")
     print(f"  Settings:    {SETTINGS_PATH}")
 
 
