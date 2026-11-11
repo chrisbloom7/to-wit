@@ -25,10 +25,14 @@ REDACTION_PATTERNS = {
     'private_key': r'-----BEGIN [A-Z ]{0,30}PRIVATE KEY-----[A-Za-z0-9+/=\s]*(?:-----END [A-Z ]{0,30}PRIVATE KEY-----)?',
     'bearer_token': r'\b[Bb]earer[ \t]{1,5}(?P<secret>[A-Za-z0-9._~+/=-]{16,})',
     'url_credentials': r'://(?P<secret>[^\s/@:\[\]]{1,100}:[^\s/@\[\]]{1,200})@',
-    # Needs a digit in the value so code like max_tokens = some_long_name is left alone.
+    # Value: 16+ non-space chars excluding quotes, comma, semicolon and "[" (so a
+    # [REDACTED:...] marker is never re-matched). Bare-word values need a digit so
+    # code like max_tokens = some_long_name is left alone; keys containing
+    # password/passwd waive that (passphrases). Known limit: an all-letter value
+    # under a non-password key is not redacted.
     'secret_assignment': (
-        r'(?i:key|secret|token|password)\w{0,40}["\']?[ \t]*[=:][ \t]*["\']?'
-        r'(?P<secret>(?=[A-Za-z0-9_+/=.-]{0,200}\d)[A-Za-z0-9_+/=.-]{16,})'
+        r'(?:(?P<pw>(?i:password|passwd))|(?i:key|secret|token))\w{0,40}["\']?[ \t]*[=:][ \t]*["\']?'
+        r'(?P<secret>(?(pw)|(?=[^\s"\'`,;\[]{0,200}\d))[^\s"\'`,;\[]{16,})'
     ),
 }
 

@@ -64,6 +64,35 @@ class TestRedactKinds(unittest.TestCase):
         self.assertNotIn(value, redact('password: "%s"' % value))
         self.assertNotIn(value, redact("db_password = '%s'" % value))
 
+    def test_password_values_redacted_regardless_of_shape(self):
+        # Passphrases need no digit; special characters must not end the value early.
+        for value in ['correcthorsebatterystaple', 'Sup3r$' + 'ecretPassw0rd!xyz',
+                      'abcdefghij0123!' + 'tail9999']:
+            with self.subTest(value=value):
+                out = redact('PASSWORD=' + value)
+                self.assertEqual(out, 'PASSWORD=[REDACTED:secret_assignment]')
+                self.assertEqual(redact(out), out)
+
+    def test_secret_assignment_length_boundary(self):
+        self.assertEqual(redact('API_TOKEN=' + 'a1' * 7 + 'b'), 'API_TOKEN=' + 'a1' * 7 + 'b')  # 15 chars
+        out = redact('API_TOKEN=' + 'a1' * 8)  # 16 chars
+        self.assertEqual(out, 'API_TOKEN=[REDACTED:secret_assignment]')
+        self.assertEqual(redact(out), out)
+
+    def test_secret_assignment_digit_late_in_value(self):
+        out = redact('API_TOKEN=' + 'abcdefghijklmnopqrs' + '7')
+        self.assertEqual(out, 'API_TOKEN=[REDACTED:secret_assignment]')
+
+    def test_secret_assignment_special_chars_for_non_password_key(self):
+        out = redact('API_SECRET=' + 'ab$cd!ef#gh%ij1kl')
+        self.assertEqual(out, 'API_SECRET=[REDACTED:secret_assignment]')
+
+    def test_all_letter_bare_value_under_non_password_key_is_not_redacted(self):
+        # Known best-effort limit: without a digit, a bare-word value looks like
+        # an identifier (max_tokens = some_long_name), so it is left alone.
+        text = 'API_TOKEN=' + 'abcdefghijklmnopqrstuvwxyz'
+        self.assertEqual(redact(text), text)
+
     def test_bearer_keeps_prefix(self):
         out = redact('Authorization: Bearer ' + 'a1b2c3' * 6)
         self.assertEqual(out, 'Authorization: Bearer [REDACTED:bearer_token]')
