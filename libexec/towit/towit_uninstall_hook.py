@@ -58,33 +58,57 @@ def _save_settings(settings):
 
 def is_installed(settings):
     """Return True if our hook is present under any event."""
+    hooks = settings.get('hooks')
+    if not isinstance(hooks, dict):
+        return False
     return any(
-        HOOK_MARKER in hook.get('command', '')
-        for entries in settings.get('hooks', {}).values()
-        for entry in entries
-        for hook in entry.get('hooks', [])
+        isinstance(hook, dict) and HOOK_MARKER in str(hook.get('command', ''))
+        for entries in hooks.values() if isinstance(entries, list)
+        for entry in entries if isinstance(entry, dict)
+        for hook in (entry.get('hooks') if isinstance(entry.get('hooks'), list) else [])
     )
 
 
 def remove_hooks(settings):
-    """Remove every To Wit hook from all events in place, preserving all others."""
-    hooks = settings.get('hooks', {})
+    """Remove every To Wit hook from all events in place, preserving all others.
+
+    Only event lists that actually contained a To Wit hook are rewritten; other events,
+    non-list event values, and non-dict entries are left untouched. Never raises on odd shapes.
+    """
+    hooks = settings.get('hooks')
+    if not isinstance(hooks, dict):
+        return
+    removed_any = False
     for event in list(hooks):
+        entries = hooks[event]
+        if not isinstance(entries, list):
+            continue
         cleaned = []
-        for entry in hooks[event]:
-            filtered_hooks = [
-                h for h in entry.get('hooks', [])
-                if HOOK_MARKER not in h.get('command', '')
+        changed = False
+        for entry in entries:
+            inner = entry.get('hooks') if isinstance(entry, dict) else None
+            if not isinstance(inner, list):
+                cleaned.append(entry)
+                continue
+            filtered = [
+                h for h in inner
+                if not (isinstance(h, dict) and HOOK_MARKER in str(h.get('command', '')))
             ]
-            if filtered_hooks:
-                cleaned.append({**entry, 'hooks': filtered_hooks})
-            # If all hooks in this entry were ours, drop the whole entry
+            if len(filtered) == len(inner):
+                cleaned.append(entry)
+                continue
+            changed = True
+            if filtered:  # if all hooks in this entry were ours, drop the whole entry
+                cleaned.append({**entry, 'hooks': filtered})
+        if not changed:
+            continue
+        removed_any = True
         if cleaned:
             hooks[event] = cleaned
         else:
             del hooks[event]  # clean up empty event sections
-    if not hooks:
-        settings.pop('hooks', None)
+    if removed_any and not hooks:
+        del settings['hooks']
 
 
 def main():

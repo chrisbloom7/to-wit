@@ -241,6 +241,22 @@ class TestUninstallAllEvents(unittest.TestCase):
         with open(self.settings_path) as f:
             self.assertNotIn('hooks', json.load(f))
 
+    def test_remove_hooks_leaves_untouched_events_and_odd_shapes_alone(self):
+        import copy
+        import towit_uninstall_hook
+        untouched = {
+            "PreToolUse": [{"matcher": "x", "hooks": []}],
+            "Notification": "not-a-list",
+            "PostToolUse": ["str-entry", None, {"matcher": "", "hooks": "oops"}],
+        }
+        settings = {"hooks": {
+            **copy.deepcopy(untouched),
+            "Stop": [{"matcher": "", "hooks": [
+                {"type": "command", "command": "python3 /x/towit_hook.py"}]}],
+        }}
+        towit_uninstall_hook.remove_hooks(settings)  # must not raise
+        self.assertEqual(settings["hooks"], untouched)
+
 
 if __name__ == '__main__':
     unittest.main()

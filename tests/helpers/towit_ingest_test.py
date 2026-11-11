@@ -413,6 +413,12 @@ class TestCatchUp(unittest.TestCase):
         self.assertEqual(counts.get('ingested', 0) + counts.get('appended', 0), 0)
         self.assertEqual(counts, {})
 
+    def test_immediate_second_run_without_aging_is_all_unchanged(self):
+        self._catch_up()
+        counts = self._catch_up()  # mtimes fall inside the 60 s slack: rechecked, not rewritten
+        self.assertEqual(counts, {'unchanged': 2})
+        self.assertEqual(counts.get('ingested', 0) + counts.get('appended', 0), 0)
+
     def test_touched_file_reprocessed_alone(self):
         self._catch_up()
         old = time.time() - 3600
@@ -459,7 +465,7 @@ class TestCatchUp(unittest.TestCase):
     def test_missing_root_returns_empty(self):
         self.assertEqual(towit_ingest.catch_up(root=os.path.join(self.tmp, 'nope'), db=self.db), {})
 
-    def test_missing_db_propagates_and_no_stamp(self):
+    def test_missing_db_raises_systemexit_and_sets_no_stamp(self):
         db = Database(os.path.join(self.tmp, 'absent.db'))
         with self.assertRaises(SystemExit):
             towit_ingest.catch_up(root=self.root, db=db)
