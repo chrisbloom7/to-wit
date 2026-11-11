@@ -363,6 +363,26 @@ class TestImplodeOrphanedSidecars(unittest.TestCase):
         for suffix in self.SUFFIXES:
             self.assertTrue(os.path.exists(self.db_path + suffix))
 
+    def test_sidecars_only_reports_leftover_files_not_database_deleted(self):
+        self.assertFalse(os.path.exists(self.db_path))
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
+                             args=['--yes', '--install-dir', self.install_dir])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Leftover database files deleted', result.stdout)
+        self.assertNotIn('Database deleted', result.stdout)
+
+    def test_existing_database_still_reports_database_deleted(self):
+        for suffix in self.SUFFIXES:
+            os.remove(self.db_path + suffix)
+        run_setup(self.db_path, self.config_path, self.tmpdir)
+        self.assertTrue(os.path.exists(self.db_path))
+        result = run_implode(self.db_path, self.config_path, self.tmpdir,
+                             args=['--yes', '--install-dir', self.install_dir])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f'Database deleted: {self.db_path}', result.stdout)
+        self.assertNotIn('Leftover database files deleted', result.stdout)
+        self.assertFalse(os.path.exists(self.db_path))
+
 
 if __name__ == '__main__':
     unittest.main()
