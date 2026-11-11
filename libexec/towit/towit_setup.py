@@ -57,6 +57,26 @@ _CONFIG_TEMPLATE = """\
 # Longer transcripts cost more; the excerpt always keeps the first 30% and last 70%.
 # Default: 8000
 # transcript_max_chars = 8000
+
+# Set to false to stop the stop hook from running LLM analysis (title, summary,
+# topics). Archiving of message text continues. Default: true
+# enabled = true
+
+[ingest]
+# Redact secrets (API keys, tokens, private keys) from message text before it
+# is archived. Default: true
+# redact = true
+
+# Extra regex patterns to redact, in addition to the built-in set.
+# Default: []
+# extra_patterns = []
+
+# Also archive sessions found under subagents/ directories. Default: false
+# include_subagents = false
+
+# Only archive sessions from these folders. An empty list archives all folders.
+# Default: []
+# folders = []
 """
 
 
