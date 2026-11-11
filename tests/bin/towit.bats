@@ -475,3 +475,34 @@ EOF
   [ "${status}" -eq 0 ]
   [[ "${output}" == *"Conversations indexed : 2"* ]] || { echo "Expected 2 conversations in stats, got: ${output}"; return 1; }
 }
+
+# ---------------------------------------------------------------------------
+# show subcommand
+# ---------------------------------------------------------------------------
+
+@test "towit: show prints archived messages after the transcript is deleted" {
+  ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
+  export HOME="${TEST_TMPDIR}/home"
+  mkdir -p "${HOME}"
+  printf '[indexing]\nenabled = false\n' >> "${TOWIT_CONFIG_PATH}"
+  "${TOWIT}" setup
+  local sessions="${TEST_TMPDIR}/sessions"
+  write_fixture_session "${sessions}" "session-aaa-0001"
+  run "${TOWIT}" backfill --folder "${sessions}"
+  [ "${status}" -eq 0 ]
+  rm "${sessions}/session-aaa-0001.jsonl"
+
+  run "${TOWIT}" show session-aaa-0001
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"[0] user"* ]] || { echo "Expected seq 0, got: ${output}"; return 1; }
+  [[ "${output}" == *"Readers do not block the writer."* ]] || { echo "Expected message text, got: ${output}"; return 1; }
+
+  run "${TOWIT}" show session-aaa-0001 --around 1 --context 0
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *">> [1] assistant"* ]] || { echo "Expected marked seq 1, got: ${output}"; return 1; }
+  [[ "${output}" != *"[0] user"* ]] || { echo "Unexpected seq 0, got: ${output}"; return 1; }
+
+  run "${TOWIT}" show nonexistent-session
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"not found"* ]]
+}
