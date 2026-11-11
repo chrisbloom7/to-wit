@@ -17,7 +17,7 @@ sys.path.insert(0, SCRIPT_DIR)
 
 from towit_config import config, remove_database_files
 
-DEFAULT_INSTALL_DIR = '/usr/local/bin'
+DEFAULT_INSTALL_DIR = os.path.expanduser('~/.local/bin')
 
 
 def main():

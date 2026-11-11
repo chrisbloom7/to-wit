@@ -33,10 +33,10 @@ git clone https://github.com/chrisbloom7/to-wit.git ~/path/to/to-wit
 ~/path/to/to-wit/install
 ```
 
-By default, `install` links into `/usr/local/bin`. Pass a different directory as the first argument if needed:
+By default, `install` links into `~/.local/bin` (creating it if needed) and tells you if that directory is not on your `PATH`. Pass a different directory as the first argument if needed (for example `/usr/local/bin`, which is root-owned on Apple Silicon Macs, so it needs `sudo`):
 
 ```bash
-~/path/to/to-wit/install ~/.local/bin
+~/path/to/to-wit/install /some/other/dir
 ```
 
 ## Quick start
@@ -105,7 +105,7 @@ Subcommands:
   uninstall-hook                Remove the To Wit hooks from Claude Code settings
   teardown [--yes]              Remove hooks and delete database (including the archive)
   implode [--yes]               Full uninstall: remove hooks, database (including the archive), and binary symlink
-    [--install-dir <dir>]         Directory where towit was installed (default: /usr/local/bin)
+    [--install-dir <dir>]         Directory where towit was installed (default: ~/.local/bin)
   stats                         Show catalog statistics
   doctor                        Verify setup: config, database (FTS5, archive schema), and hooks
   help                          Show this message

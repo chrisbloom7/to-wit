@@ -60,7 +60,8 @@ EOF
   }
 }
 
-@test "uninstall: uses /usr/local/bin as default install dir" {
+@test "uninstall: uses ~/.local/bin as default install dir" {
+  export HOME="${TEST_TMPDIR}/home"
   local invocation_log="${TEST_TMPDIR}/towit_invocation"
   export INVOCATION_LOG="${invocation_log}"
   cat > "${TEST_TMPDIR}/mock_bin/towit" <<'EOF'
@@ -79,7 +80,7 @@ EOF
 
   local invocation
   invocation="$(cat "${invocation_log}")"
-  [[ "${invocation}" == *"/usr/local/bin"* ]] || {
-    echo "Expected '/usr/local/bin' in invocation log, got: ${invocation}"; return 1
+  [[ "${invocation}" == *"${HOME}/.local/bin"* ]] || {
+    echo "Expected '${HOME}/.local/bin' in invocation log, got: ${invocation}"; return 1
   }
 }

@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `install` now links into `~/.local/bin` (created if missing) by default instead of `/usr/local/bin`, which is root-owned on Apple Silicon Macs and made the documented install command fail with a bare "Permission denied". It also explains a non-writable install directory and warns when the directory is not on `PATH`. `uninstall` and `towit implode --install-dir` default to the same directory; if you installed into `/usr/local/bin`, pass `--install-dir /usr/local/bin` (or the argument to `uninstall`).
 - `towit setup --full` now generates `~/.towit/config.toml` as documented.
 - `towit teardown` and `towit implode` now also remove `catalog.db-wal`, `-shm` and `-journal` (a killed ingest could leave message text in the write-ahead log).
 - `~/.towit/errors.log` and its rotated copies are created owner-only (`0600`); looser existing files are tightened.

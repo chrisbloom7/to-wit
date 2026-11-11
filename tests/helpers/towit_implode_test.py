@@ -97,6 +97,11 @@ class TestTowitImplode(unittest.TestCase):
         open(target, 'w').close()
         os.symlink(target, self.binary)
 
+    def test_default_install_dir_is_user_local_bin(self):
+        import towit_implode
+        self.assertEqual(towit_implode.DEFAULT_INSTALL_DIR,
+                         os.path.expanduser('~/.local/bin'))
+
     def test_exits_0_with_message_when_nothing_to_implode(self):
         result = run_implode(self.db_path, self.config_path, self.tmpdir,
                              args=['--yes', '--install-dir', self.install_dir])

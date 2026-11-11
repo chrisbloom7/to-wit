@@ -4,17 +4,38 @@
 # Usage:
 #   ./install [<install-dir>]
 #
-# Default install directory: /usr/local/bin
+# Default install directory: ~/.local/bin (created if missing)
 
 set -euo pipefail
 
-INSTALL_DIR="${1:-/usr/local/bin}"
+DEFAULT_INSTALL_DIR="${HOME}/.local/bin"
+INSTALL_DIR="${1:-${DEFAULT_INSTALL_DIR}}"
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 if [[ ! -d "${INSTALL_DIR}" ]]; then
-  echo "Error: install directory '${INSTALL_DIR}' does not exist." >&2
+  if [[ "${INSTALL_DIR}" == "${DEFAULT_INSTALL_DIR}" ]]; then
+    mkdir -p "${INSTALL_DIR}"
+  else
+    echo "Error: install directory '${INSTALL_DIR}' does not exist." >&2
+    exit 1
+  fi
+fi
+
+if [[ ! -w "${INSTALL_DIR}" ]]; then
+  echo "Error: install directory '${INSTALL_DIR}' is not writable." >&2
+  echo "Install into a directory you own instead, e.g. ~/.local/bin:" >&2
+  echo "  ${REPO_DIR}/install ~/.local/bin" >&2
+  echo "or re-run with sudo to install system-wide." >&2
   exit 1
 fi
 
 ln -sf "${REPO_DIR}/bin/towit" "${INSTALL_DIR}/towit"
 echo "Installed: towit → ${INSTALL_DIR}/towit"
+
+case ":${PATH}:" in
+  *":${INSTALL_DIR}:"*) ;;
+  *)
+    echo "Note: ${INSTALL_DIR} is not on your PATH. Add it, e.g.:" >&2
+    echo "  export PATH=\"${INSTALL_DIR}:\$PATH\"" >&2
+    ;;
+esac
