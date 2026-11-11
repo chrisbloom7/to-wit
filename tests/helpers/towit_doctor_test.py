@@ -539,6 +539,21 @@ class TestHookChecks(unittest.TestCase):
         self.assertIn('SessionEnd', result.label)
         self.assertNotIn('SessionStart', result.label)
 
+    def test_install_hook_repairs_stale_paths_so_hook_commands_check_passes(self):
+        from towit_doctor import check_hook_commands
+        stale = 'python3 /old/clone/towit_hook.py'
+        self._write_settings({'hooks': {ev: [{'matcher': m, 'hooks': [
+            {'type': 'command', 'command': stale}]}]
+            for ev, m in (('Stop', ''), ('SessionEnd', ''), ('SessionStart', 'startup'))}})
+        self.assertEqual(check_hook_commands(self.settings_path).status, 'FAIL')
+        install_script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                      '..', '..', 'libexec', 'towit', 'towit_install_hook.py')
+        env = {**os.environ, 'TOWIT_SETTINGS_PATH': self.settings_path}
+        result = subprocess.run(['python3', install_script], env=env,
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(check_hook_commands(self.settings_path).status, 'PASS')
+
     def test_malformed_hook_settings_do_not_crash(self):
         from towit_doctor import check_hook_events, check_hook_installed, check_hook_commands
         self._write_settings({'hooks': {'Stop': 'oops', 'SessionEnd': [None, 5, {'hooks': 'x'}],

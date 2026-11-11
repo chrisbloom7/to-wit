@@ -2,12 +2,14 @@
 """
 towit_install_hook — add the To Wit hooks (Stop, SessionEnd, SessionStart) to Claude Code settings.
 
-Idempotent: does nothing if the hook is already installed.
+Idempotent: does nothing if the hooks are already installed with the current command.
+Re-running repairs hooks whose command points at a stale script path.
 """
 
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -33,7 +35,25 @@ def _resolve_settings_path():
 SETTINGS_PATH = _resolve_settings_path()
 # Hook script lives alongside this file
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-HOOK_SCRIPT = os.path.join(SCRIPT_DIR, 'towit_hook.py')
+
+
+def stable_script_path(path):
+    """Map a Homebrew Cellar path to its version-independent opt/ path, if that exists.
+
+    <prefix>/Cellar/<name>/<version>/<rest> -> <prefix>/opt/<name>/<rest>. The versioned
+    path breaks on `brew upgrade`; opt/<name> is repointed by Homebrew. Deliberately
+    avoids realpath, which would resolve opt/ straight back into the Cellar.
+    """
+    match = re.fullmatch(r'(.*)/Cellar/([^/]+)/[^/]+/(.+)', path)
+    if match:
+        prefix, name, rest = match.groups()
+        candidate = f"{prefix}/opt/{name}/{rest}"
+        if os.path.exists(candidate):
+            return candidate
+    return path
+
+
+HOOK_SCRIPT = stable_script_path(os.path.join(SCRIPT_DIR, 'towit_hook.py'))
 HOOK_COMMAND = f"python3 {HOOK_SCRIPT}"
 HOOK_MARKER = 'towit_hook.py'  # substring used to identify our hook
 # Hook event -> matcher. towit_hook.py dispatches on the payload's hook_event_name.
@@ -73,20 +93,46 @@ def is_installed(settings, event=None):
     )
 
 
+def _towit_hooks(settings, event):
+    """Return our hook dicts registered for `event` (mutating them edits settings)."""
+    return [hook
+            for entry in settings.get('hooks', {}).get(event, [])
+            for hook in entry.get('hooks', [])
+            if HOOK_MARKER in hook.get('command', '')]
+
+
+def repair_commands(settings):
+    """Point every registered To Wit hook at HOOK_COMMAND; return how many changed."""
+    repaired = 0
+    for event in HOOK_EVENTS:
+        for hook in _towit_hooks(settings, event):
+            if hook['command'] != HOOK_COMMAND:
+                hook['command'] = HOOK_COMMAND
+                repaired += 1
+    return repaired
+
+
 def main():
     argparse.ArgumentParser(
         description='Add the To Wit hooks (Stop, SessionEnd, SessionStart) to Claude Code settings.'
     ).parse_args()
     settings = _load_settings()
 
-    if is_installed(settings):
+    repaired = repair_commands(settings)
+
+    if repaired == 0 and is_installed(settings):
         print("To Wit hooks are already installed.")
         sys.exit(0)
 
+    if repaired:
+        print(f"To Wit hook command updated in {repaired} place(s) to: {HOOK_COMMAND}")
+
     hooks = settings.setdefault('hooks', {})
+    added = False
     for event, matcher in HOOK_EVENTS.items():
         if is_installed(settings, event):
             continue
+        added = True
         event_hooks = hooks.setdefault(event, [])
         new_hook = {"type": "command", "command": HOOK_COMMAND}
 
@@ -100,9 +146,10 @@ def main():
             event_hooks.append({"matcher": matcher, "hooks": [new_hook]})
 
     _save_settings(settings)
-    print("To Wit hooks installed.")
-    print(f"  Hook script: {HOOK_SCRIPT}")
-    print(f"  Events:      {', '.join(HOOK_EVENTS)}")
+    if added:
+        print("To Wit hooks installed.")
+        print(f"  Hook script: {HOOK_SCRIPT}")
+        print(f"  Events:      {', '.join(HOOK_EVENTS)}")
     print(f"  Settings:    {SETTINGS_PATH}")
 
 
