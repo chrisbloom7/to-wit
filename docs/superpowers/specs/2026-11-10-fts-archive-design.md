@@ -307,13 +307,13 @@ The maintainer picked 7 sessions and wrote a query for each; some queries were r
 
 | Session | Final query | Rank | Outcome |
 |---|---|---|---|
-| (retail) | `robinina.art retail` | 2 | found in top 3 |
-| (hooks) | `pre-push hook` | 1 | found in top 3 |
-| (overrides) | `package.json sets overrides` | 1 | found in top 3 |
+| (id not recorded) | `robinina.art retail` | 2 | found in top 3 |
+| (id not recorded) | `pre-push hook` | 1 | found in top 3 |
+| (id not recorded) | `package.json sets overrides` | 1 | found in top 3 |
 | c22b7b45 | `tangerine` | 3 (4 hits) | found in top 3 |
 | e7ded4ae | `show password` / `toggle` | 8 of 10 / 8 of 9 | miss: ranking bias |
 | 86db7390 | `openssl` | none | miss: vocabulary |
-| (24) | `notification versus email` | none | miss: vocabulary |
+| (id not recorded) | `notification versus email` | none | miss: vocabulary |
 
 - **Ranking bias (e7ded4ae).** `bm25` scores each message independently and rewards the shortest message containing the term, so short passing mentions in large sessions outrank the long, substantive message the query was about.
 - **Vocabulary (86db7390).** `openssl` is absent from the stored text; it is most likely in tool output, which is stored only as stubs of at most 200 characters. A first attempt, `railsway openssl`, also had a typo.
