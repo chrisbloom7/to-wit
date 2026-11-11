@@ -179,6 +179,15 @@ class TestAnalyzeWithClaude(unittest.TestCase):
                                 existing_keywords=existing_keywords)
         return mock_run.call_args[0][0][2]  # the prompt string
 
+    def test_subprocess_env_filtered_and_sets_towit_indexing(self):
+        with patch.dict(os.environ, {'AWS_SECRET_ACCESS_KEY': 'x', 'PATH': '/bin'}):
+            with patch('subprocess.run', return_value=self._mock_result()) as mock_run:
+                analyze_with_claude('some transcript')
+        env = mock_run.call_args.kwargs['env']
+        self.assertEqual(env['TOWIT_INDEXING'], '1')
+        self.assertNotIn('AWS_SECRET_ACCESS_KEY', env)
+        self.assertIn('PATH', env)
+
     def test_analyze_returns_keywords_in_result(self):
         with patch('subprocess.run', return_value=self._mock_result()):
             result = analyze_with_claude('some transcript')

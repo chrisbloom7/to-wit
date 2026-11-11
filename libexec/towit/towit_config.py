@@ -205,4 +205,21 @@ class Config:
         return os.path.expanduser(raw)
 
 
+_PASS_THROUGH_PREFIXES = (
+    'HOME', 'PATH', 'USER', 'TMPDIR', 'TERM', 'LANG', 'LC_',
+    'CLAUDE_', 'ANTHROPIC_',
+)
+
+
+def safe_subprocess_env(extra: dict | None = None) -> dict:
+    """Environment for subprocesses: allowlisted variables only, plus `extra`."""
+    env = {
+        k: v for k, v in os.environ.items()
+        if any(k.startswith(p) for p in _PASS_THROUGH_PREFIXES)
+    }
+    if extra:
+        env.update(extra)
+    return env
+
+
 config = Config()
