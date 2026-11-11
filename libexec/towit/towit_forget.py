@@ -49,9 +49,16 @@ def main():
             print("Error: no conversations match.", file=sys.stderr)
             sys.exit(1)
 
+    if args.repo is not None:
+        repos = db.repo_count_for_scope(repo=args.repo)
+        prompt = (f"Delete {len(ids)} conversation(s) across {repos} repo(s) "
+                  f"matching '{args.repo}'? [y/N] ")
+    else:
+        prompt = f"Delete {len(ids)} conversation(s)? [y/N] "
+
     if not args.yes:
         try:
-            answer = input(f"Delete {len(ids)} conversation(s)? [y/N] ").strip().lower()
+            answer = input(prompt).strip().lower()
         except (EOFError, KeyboardInterrupt):
             print("\nAborted.")
             sys.exit(1)
@@ -61,6 +68,8 @@ def main():
 
     count = db.forget_conversations(ids)
     print(f"Forgot {count} conversation(s).")
+    if db.cleanup_warning:
+        print(f"Warning: {db.cleanup_warning}", file=sys.stderr)
 
 
 if __name__ == '__main__':

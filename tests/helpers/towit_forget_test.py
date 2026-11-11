@@ -4,7 +4,9 @@
 #
 # Run with: python3 tests/helpers/towit_forget_test.py
 
+import contextlib
 import glob
+import io
 import json
 import os
 import shutil
@@ -19,6 +21,7 @@ HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'
 FORGET_SCRIPT = os.path.join(HELPERS_DIR, 'towit_forget.py')
 sys.path.insert(0, HELPERS_DIR)
 
+import towit_forget
 import towit_ingest
 from towit_db import Database
 from towit_ingest import ingest_transcript
@@ -156,37 +159,159 @@ class TestForgetConversation(ForgetBase):
 
 class TestRawBytesPurged(ForgetBase):
     MARKER = 'QZXWVMARKER' + 'k7q2p9d4'
+    LONG = 'filler words ' * 400  # > one page, so text spills onto overflow pages
 
     def _scan(self):
         hits = {}
         for path in glob.glob(self.db_path + '*'):
             with open(path, 'rb') as fh:
                 data = fh.read()
-            hits[os.path.basename(path)] = data.count(self.MARKER.encode())
+            # FTS5 stores lowercased tokens, so compare case-insensitively.
+            hits[os.path.basename(path)] = data.lower().count(self.MARKER.lower().encode())
         return hits
+
+    def _total(self):
+        return sum(self._scan().values())
+
+    def _archive(self, sid, texts):
+        return self.db.archive_session(
+            {'id': sid, 'folder': self.folder, 'cwd': '/w', 'repo_key': None, 'started_at': None,
+             'last_active': None, 'source_path': None},
+            [{'role': 'user' if i % 2 == 0 else 'assistant', 'ts': None, 'text': t}
+             for i, t in enumerate(texts)])
+
+    def _raw(self):
+        """A connection with secure_delete OFF, standing in for older/other writers."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute('PRAGMA secure_delete=OFF')
+        self.addCleanup(conn.close)
+        return conn
 
     def test_marker_absent_from_db_wal_and_shm_after_forget(self):
         self.db.upsert_conversation({'id': 'sess-0001', 'folder': self.folder, 'cwd': '/w',
                                      'title': 'title ' + self.MARKER, 'summary': 'sum ' + self.MARKER,
-                                     'topics': ['topic' + self.MARKER, 'final'], 'keywords': ['kw' + self.MARKER, 'final']})
+                                     'topics': ['topic' + self.MARKER], 'keywords': ['kw' + self.MARKER]})
         self.ingest('sess-0001', ['hello ' + self.MARKER + ' world', 'reply ' + self.MARKER, 'final'])
         self.ingest('sess-0002', ['keep this other conversation', 'and its reply', 'more'])
-        # Sanity: the marker is really on disk before the forget.
-        self.assertGreater(sum(self._scan().values()), 0)
+        self.assertGreater(self._total(), 0)
         self.assertTrue(self.db.forget_conversation('sess-0001'))
-        self.assertEqual(sum(self._scan().values()), 0, self._scan())
+        self.assertEqual(self._total(), 0, self._scan())
         self.assertEqual(len(self.db.search_archive(['keep'])), 1)
 
     def test_marker_absent_while_another_connection_keeps_wal_alive(self):
-        # An idle second connection stops SQLite deleting the WAL on close, so only the
-        # explicit checkpoint (not the implicit one at last-close) can purge the WAL.
         self.ingest('sess-0001', ['hello ' + self.MARKER + ' world', 'reply', 'final'])
         keeper = sqlite3.connect(self.db_path)
         self.addCleanup(keeper.close)
         keeper.execute('PRAGMA journal_mode=WAL')
-        self.assertGreater(sum(self._scan().values()), 0)
+        self.assertGreater(self._total(), 0)
         self.assertTrue(self.db.forget_conversation('sess-0001'))
-        self.assertEqual(sum(self._scan().values()), 0, self._scan())
+        self.assertEqual(self._total(), 0, self._scan())
+
+    def test_marker_rewritten_away_through_archive_session_is_purged(self):
+        self._archive('sess-0001', [self.LONG + self.MARKER + self.LONG, 'reply'])
+        self.assertEqual(self._archive('sess-0001', ['different one', 'different two']), 'rewritten')
+        self.assertTrue(self.db.forget_conversation('sess-0001'))
+        self.assertEqual(self._total(), 0, self._scan())
+
+    def test_residue_freed_without_secure_delete_is_purged(self):
+        self._archive('sess-0001', [self.LONG + self.MARKER + self.LONG, 'reply'])
+        raw = self._raw()
+        raw.execute("DELETE FROM messages WHERE conversation_id='sess-0001'")
+        raw.execute("INSERT INTO messages (conversation_id, seq, role, text) VALUES ('sess-0001', 0, 'user', 'x')")
+        raw.commit()
+        raw.close()
+        self.assertGreater(self._total(), 0)  # freed pages still hold the text
+        self.assertTrue(self.db.forget_conversation('sess-0001'))
+        self.assertEqual(self._total(), 0, self._scan())
+
+    def test_summary_reindexed_over_is_purged(self):
+        base = {'id': 'sess-0001', 'folder': self.folder, 'cwd': '/w', 'title': 't', 'topics': []}
+        self.db.upsert_conversation({**base, 'summary': self.LONG + self.MARKER + self.LONG})
+        self.db.upsert_conversation({**base, 'summary': 'short'})
+        self.assertTrue(self.db.forget_conversation('sess-0001'))
+        self.assertEqual(self._total(), 0, self._scan())
+
+    def test_summary_overwritten_without_secure_delete_is_purged(self):
+        base = {'id': 'sess-0001', 'folder': self.folder, 'cwd': '/w', 'title': 't', 'topics': []}
+        self.db.upsert_conversation({**base, 'summary': self.LONG + self.MARKER + self.LONG})
+        raw = self._raw()
+        raw.execute("UPDATE conversations SET summary='short' WHERE id='sess-0001'")
+        raw.commit()
+        raw.close()
+        self.assertGreater(self._total(), 0)
+        self.assertTrue(self.db.forget_conversation('sess-0001'))
+        self.assertEqual(self._total(), 0, self._scan())
+
+    def test_fts_optimize_is_load_bearing(self):
+        self.ingest('sess-0001', ['hello ' + self.MARKER + ' world', 'reply', 'final'])
+        with unittest.mock.patch.object(Database, '_optimize_fts', lambda self, conn: None):
+            self.assertTrue(self.db.forget_conversation('sess-0001'))
+        self.assertGreater(self._total(), 0, 'lowercase FTS token should survive without optimize')
+        self.ingest('sess-0003', ['hello ' + self.MARKER + ' world', 'reply', 'final'])
+        self.assertTrue(self.db.forget_conversation('sess-0003'))
+        self.assertEqual(self._total(), 0, self._scan())
+
+    def test_connect_enables_secure_delete(self):
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute('PRAGMA secure_delete').fetchone()[0], 1)
+
+
+class TestForgetCleanupWarnings(ForgetBase):
+    def setUp(self):
+        super().setUp()
+        self.ingest('sess-0001', ['zorblax question', 'an answer', 'follow up'])
+
+    def remaining(self):
+        return self.count("SELECT COUNT(*) FROM conversations")
+
+    def run_cli(self, args):
+        out, err = io.StringIO(), io.StringIO()
+        with unittest.mock.patch.object(towit_forget, 'Database', return_value=self.db), \
+                unittest.mock.patch.object(sys, 'argv', ['towit_forget.py'] + args), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            towit_forget.main()
+        return out.getvalue(), err.getvalue()
+
+    def test_clean_run_has_no_warning(self):
+        self.assertTrue(self.db.forget_conversation('sess-0001'))
+        self.assertIsNone(self.db.cleanup_warning)
+
+    def test_busy_checkpoint_with_open_reader_sets_warning(self):
+        reader = sqlite3.connect(self.db_path)
+        self.addCleanup(reader.close)
+        reader.execute('BEGIN')
+        reader.execute('SELECT COUNT(*) FROM messages').fetchone()
+        self.assertTrue(self.db.forget_conversation('sess-0001'))
+        self.assertEqual(self.remaining(), 0)
+        self.assertIn('write-ahead log', self.db.cleanup_warning)
+
+    def test_post_commit_failure_warns_and_exits_cleanly(self):
+        with unittest.mock.patch.object(Database, '_purge_free_space',
+                                        side_effect=sqlite3.OperationalError('disk I/O error')):
+            out, err = self.run_cli(['sess-0001', '--yes'])
+        self.assertIn('Forgot 1 conversation(s).', out)
+        self.assertIn('Warning:', err)
+        self.assertIn('physical cleanup', err)
+        self.assertEqual(self.remaining(), 0)
+        self.assertTrue(self.db.is_forgotten('sess-0001'))
+
+    def test_busy_reader_cli_warns_on_stderr(self):
+        reader = sqlite3.connect(self.db_path)
+        self.addCleanup(reader.close)
+        reader.execute('BEGIN')
+        reader.execute('SELECT COUNT(*) FROM messages').fetchone()
+        out, err = self.run_cli(['sess-0001', '--yes'])
+        self.assertIn('Forgot 1 conversation(s).', out)
+        self.assertIn('Warning: some deleted data may remain in the write-ahead log', err)
+
+    def test_optimize_failure_rolls_back_the_whole_forget(self):
+        with unittest.mock.patch.object(Database, '_optimize_fts',
+                                        side_effect=sqlite3.OperationalError('boom')):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.db.forget_conversation('sess-0001')
+        self.assertEqual(self.remaining(), 1)
+        self.assertFalse(self.db.is_forgotten('sess-0001'))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM messages"), 3)
 
 
 class TestForgetScope(ForgetBase):
@@ -272,6 +397,14 @@ class TestForgetCli(ForgetBase):
         self.assertTrue(self.db.is_forgotten('sess-0001'))
         self.assertEqual(self.remaining(), 1)
 
+    def test_repo_prompt_states_repo_span(self):
+        for sid, repo in (('sess-0001', '/home/a/api'), ('sess-0002', '/home/b/api')):
+            with self.db.connect() as conn:
+                conn.execute('UPDATE conversations SET repo_key=? WHERE id=?', (repo, sid))
+        r = self.run_forget(['--repo', 'api'], stdin='n\n')
+        self.assertIn("Delete 2 conversation(s) across 2 repo(s) matching 'api'? [y/N]", r.stdout)
+        self.assertEqual(self.remaining(), 2)
+
     def test_bulk_prompt_n_deletes_nothing(self):
         r = self.run_forget(['--folder', '/work/proj'], stdin='n\n')
         self.assertIn('Delete 1 conversation(s)? [y/N]', r.stdout)
@@ -288,6 +421,7 @@ class TestForgetCli(ForgetBase):
                      ['sess-0001', '--repo', 'x']):
             r = self.run_forget(args + ['--yes'])
             self.assertEqual(r.returncode, 2, args)
+            self.assertIn('usage', r.stderr.lower())
         self.assertEqual(self.remaining(), 2)
 
     def test_selector_matching_nothing_exits_1(self):

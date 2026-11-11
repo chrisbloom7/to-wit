@@ -511,6 +511,33 @@ EOF
   [[ "${output}" != *"session-aaa-0001"* ]] || { echo "Forgotten session listed: ${output}"; return 1; }
 }
 
+@test "towit: forget --folder forgets every session in that working directory only" {
+  ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
+  export HOME="${TEST_TMPDIR}/home"
+  mkdir -p "${HOME}"
+  printf '[indexing]\nenabled = false\n' >> "${TOWIT_CONFIG_PATH}"
+  "${TOWIT}" setup
+  local sessions="${TEST_TMPDIR}/sessions"
+  write_fixture_session "${sessions}" "session-aaa-0001"
+  write_fixture_session "${sessions}" "session-bbb-0002"
+  write_fixture_session "${sessions}" "session-ccc-0003"
+  sed -i.bak 's#/work/proj#/work/other#g' "${sessions}/session-ccc-0003.jsonl"
+  rm "${sessions}"/*.bak
+  run "${TOWIT}" backfill --folder "${sessions}"
+  [ "${status}" -eq 0 ]
+
+  run "${TOWIT}" forget --folder /work/proj --yes
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"Forgot 2 conversation(s)."* ]] || { echo "got: ${output}"; return 1; }
+
+  run "${TOWIT}" show session-aaa-0001
+  [ "${status}" -eq 1 ]
+  run "${TOWIT}" show session-bbb-0002
+  [ "${status}" -eq 1 ]
+  run "${TOWIT}" show session-ccc-0003
+  [ "${status}" -eq 0 ]
+}
+
 @test "towit: forget with no selector exits 2 and shows usage" {
   run "${TOWIT}" forget --yes
   [ "${status}" -eq 2 ]
