@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-11
+
 ### Fixed
 
 - `towit install-hook` now repairs hooks whose command points at a script that has moved or been removed (for example after moving your clone), instead of reporting "already installed" and leaving them broken; it rewrites only To Wit's own hook commands in place. This is the fix `towit doctor` suggests for a stale hook path.
