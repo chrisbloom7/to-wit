@@ -5,7 +5,7 @@ description: Use when releasing a new version of to-wit — when the user asks t
 
 # Release to-wit
 
-Release a new version of the to-wit CLI: check preconditions, determine version, audit docs, update CHANGELOG, commit on a release branch, open a PR, and (after the user merges it) tag and push the tag.
+Release a new version of the to-wit CLI: check preconditions, determine version, audit docs, update CHANGELOG, commit on a release branch, open a PR, (after the user merges it) tag and push the tag, and then update the Homebrew tap formula.
 
 Never run `wt merge` and never push `main`. All merges into `main` come from remote branches via PR, merged by the user.
 
@@ -19,7 +19,10 @@ git status --porcelain                     # must be empty
 git fetch origin && git status -sb         # main must not be behind (or ahead of) origin/main
 ./run-tests                                # full suite green
 TOWIT_RELEASE_CHECK=1 ./run-tests tests/helpers/docs_consistency_test.py   # docs consistency green
+gh api repos/chrisbloom7/to-wit -q '"stars=\(.stargazers_count) forks=\(.forks_count) watchers=\(.subscribers_count)"'   # informational
 ```
+
+The last command is not a gate: compare its numbers with the homebrew-core thresholds in `docs/homebrew-core.md` and tell the user if any is close to (or past) the bar. If the numbers changed since the table in that doc, mention it.
 
 ## Step 1 — Determine the Version
 
@@ -135,6 +138,47 @@ git push origin vX.Y.Z
 
 Confirm each command succeeded. Report the tag name and the commit SHA it points to.
 
+## Step 7 — Update the Homebrew Tap
+
+The formula lives in a separate repository, `chrisbloom7/homebrew-tap` (`Formula/towit.rb`, tap name `chrisbloom7/tap`). Nothing updates it automatically, so a release does not reach Homebrew users until this step is done. Do it right after the tag is pushed, and ask the user before pushing or opening the tap PR.
+
+The tap's local checkout is Homebrew's own: `$(brew --repository chrisbloom7/tap)`. If it is not tapped, run `brew tap chrisbloom7/tap` first.
+
+1. Make sure the tap checkout is clean and on `main`, then branch it (this is a normal branch, not a worktree):
+
+```bash
+TAP="$(brew --repository chrisbloom7/tap)"
+git -C "${TAP}" switch main && git -C "${TAP}" pull --ff-only
+git -C "${TAP}" switch -c towit-X.Y.Z
+```
+
+2. Rewrite the formula's `url` and `sha256` for the new tag (this downloads the tag tarball; it never runs git or commits):
+
+```bash
+.claude/skills/release-towit/bump-tap-formula X.Y.Z --tap-dir "${TAP}"
+```
+
+3. Verify the formula and show the diff to the user:
+
+```bash
+brew style chrisbloom7/tap/towit
+brew reinstall chrisbloom7/tap/towit && brew test chrisbloom7/tap/towit
+brew audit --strict --online chrisbloom7/tap/towit
+git -C "${TAP}" diff
+```
+
+4. After the user approves the diff, commit and open the tap PR (the commit message is `towit X.Y.Z`). The user merges it; the tap's own CI (`brew test-bot`) runs on the PR.
+
+```bash
+git -C "${TAP}" commit -am "towit X.Y.Z"
+git -C "${TAP}" push -u origin towit-X.Y.Z
+gh pr create -R chrisbloom7/homebrew-tap --base main --head towit-X.Y.Z --title "towit X.Y.Z" --body "Bump towit to vX.Y.Z"
+```
+
+5. After the user confirms the tap PR is merged: `git -C "${TAP}" switch main && git -C "${TAP}" pull --ff-only`, delete the branch, then `brew update && brew upgrade towit` and confirm `towit doctor` still passes (a failing `claude` check is expected only if Claude Code is not installed).
+
+Use `command cp -f` / `command rm -f` for any manual file replacement: `cp` and `rm` are interactive-aliased on the maintainer's machine and silently skip when there is no TTY.
+
 ## Done
 
-Summarize: version released, release PR, tag pushed, any README, SECURITY.md, or AGENTS.md changes made.
+Summarize: version released, release PR, tag pushed, tap PR (and whether it is merged), any README, SECURITY.md, or AGENTS.md changes made.

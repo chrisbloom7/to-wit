@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# bump-tap-formula - update the Homebrew tap formula for a new To Wit release.
+#
+# Usage:
+#   bump-tap-formula <version> [--tap-dir <dir>] [--tarball <file>]
+#
+#   <version>        X.Y.Z (no leading "v")
+#   --tap-dir <dir>  Local checkout of the tap (default: $(brew --repository chrisbloom7/tap))
+#   --tarball <file> Compute the sha256 from this local file instead of downloading
+#                    https://github.com/chrisbloom7/to-wit/archive/refs/tags/v<version>.tar.gz
+#
+# Rewrites only the top-level `url` and `sha256` lines of Formula/towit.rb (atomically).
+# It does NOT run git, commit, or push anything; reviewing and committing the tap
+# change is left to the caller.
+set -euo pipefail
+
+usage() {
+  echo "Usage: bump-tap-formula <version> [--tap-dir <dir>] [--tarball <file>]" >&2
+}
+
+die() {
+  echo "bump-tap-formula: $*" >&2
+  exit 1
+}
+
+version=""
+tap_dir=""
+tarball=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --tap-dir)
+      [ $# -ge 2 ] || { usage; die "--tap-dir requires a value"; }
+      tap_dir="$2"; shift 2 ;;
+    --tarball)
+      [ $# -ge 2 ] || { usage; die "--tarball requires a value"; }
+      tarball="$2"; shift 2 ;;
+    -h|--help)
+      usage; exit 0 ;;
+    --*)
+      usage; die "unknown option: $1" ;;
+    *)
+      [ -z "${version}" ] || { usage; die "unexpected argument: $1"; }
+      version="$1"; shift ;;
+  esac
+done
+
+if [ -z "${version}" ]; then
+  usage
+  die "missing version argument"
+fi
+if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  usage
+  die "invalid version '${version}' (expected X.Y.Z)"
+fi
+
+if [ -z "${tap_dir}" ]; then
+  tap_dir="$(brew --repository chrisbloom7/tap)" || die "could not locate the tap via brew; pass --tap-dir"
+fi
+[ -d "${tap_dir}" ] || die "tap directory not found: ${tap_dir}"
+formula="${tap_dir}/Formula/towit.rb"
+[ -f "${formula}" ] || die "Formula/towit.rb not found in ${tap_dir}"
+
+if [ -n "${tarball}" ] && [ ! -f "${tarball}" ]; then
+  die "tarball file not found: ${tarball}"
+fi
+
+tmp_dl=""
+tmp_out=""
+cleanup() {
+  [ -z "${tmp_dl}" ] || rm -f "${tmp_dl}"
+  [ -z "${tmp_out}" ] || rm -f "${tmp_out}"
+}
+trap cleanup EXIT
+
+url="https://github.com/chrisbloom7/to-wit/archive/refs/tags/v${version}.tar.gz"
+
+# Validate the formula before doing any download work.
+url_count="$(grep -c '^  url "' "${formula}" || true)"
+sha_count="$(grep -c '^  sha256 "' "${formula}" || true)"
+[ "${url_count}" -eq 1 ] || die "expected exactly one top-level 'url' line in ${formula}, found ${url_count}"
+[ "${sha_count}" -eq 1 ] || die "expected exactly one top-level 'sha256' line in ${formula}, found ${sha_count}"
+
+if [ -z "${tarball}" ]; then
+  tmp_dl="$(mktemp "${TMPDIR:-/tmp}/bump-tap-formula.XXXXXX")"
+  curl -fsSL -o "${tmp_dl}" "${url}" || die "download failed: ${url}"
+  tarball="${tmp_dl}"
+fi
+
+if command -v shasum >/dev/null 2>&1; then
+  sha="$(shasum -a 256 "${tarball}" | awk '{print $1}')"
+elif command -v sha256sum >/dev/null 2>&1; then
+  sha="$(sha256sum "${tarball}" | awk '{print $1}')"
+else
+  die "neither shasum nor sha256sum is available"
+fi
+sha="$(printf '%s' "${sha}" | tr 'A-F' 'a-f')"
+[[ "${sha}" =~ ^[0-9a-f]{64}$ ]] || die "could not compute a valid sha256 for ${tarball}"
+
+old_url="$(grep '^  url "' "${formula}")"
+old_sha="$(grep '^  sha256 "' "${formula}")"
+new_url="  url \"${url}\""
+new_sha="  sha256 \"${sha}\""
+
+if [ "${old_url}" = "${new_url}" ] && [ "${old_sha}" = "${new_sha}" ]; then
+  echo "Formula already up to date (version ${version}, sha256 ${sha}); nothing changed."
+  exit 0
+fi
+
+# Same-directory temp file so the final mv is an atomic rename.
+tmp_out="$(mktemp "${tap_dir}/Formula/.towit.rb.XXXXXX")"
+# Byte-preserving rewrite (keeps a missing trailing newline, if any).
+python3 -I - "${formula}" "${tmp_out}" "${new_url}" "${new_sha}" <<'PY'
+import os, re, sys
+src, dst, new_url, new_sha = sys.argv[1:5]
+with open(src, "rb") as f:
+    data = f.read()
+def sub(pattern, repl, data):
+    return re.sub(pattern, lambda m: repl.encode(), data, count=1, flags=re.M)
+data = sub(rb'^  url "[^\n]*', new_url, data)
+data = sub(rb'^  sha256 "[^\n]*', new_sha, data)
+with open(dst, "wb") as f:
+    f.write(data)
+os.chmod(dst, os.stat(src).st_mode & 0o7777)
+PY
+mv "${tmp_out}" "${formula}"
+tmp_out=""
+
+echo "Updated ${formula}"
+echo "  url:    ${old_url#  url }"
+echo "      ->  ${new_url#  url }"
+echo "  sha256: ${old_sha#  sha256 }"
+echo "      ->  \"${sha}\""
+echo "Version ${version}, sha256 ${sha}. Nothing was committed."
