@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-11
+
 ### Added
 
 - `TOWIT_PYTHON`: an optional absolute path to the Python interpreter that `towit` runs its helpers with and that `towit install-hook` writes into the hook command (default `python3`). It exists for package managers such as Homebrew, whose wrapper can pin its own Python. An unusable value is ignored with a warning, and `towit doctor` now warns when a hook's absolute interpreter path no longer exists.
