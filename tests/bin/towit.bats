@@ -17,6 +17,17 @@ teardown() {
   _teardown_common
 }
 
+@test "test helper: every test points TOWIT_SETTINGS_PATH at a temp file, never the real settings" {
+  # Commands such as implode, teardown and install-hook fall back to ~/.claude/settings.json
+  # when this is unset, and would edit the developer's real Claude Code hooks.
+  [ -n "${TOWIT_SETTINGS_PATH:-}" ] || {
+    echo "TOWIT_SETTINGS_PATH is not set by the test setup"; return 1
+  }
+  [[ "${TOWIT_SETTINGS_PATH}" == "${TEST_TMPDIR}"/* ]] || {
+    echo "TOWIT_SETTINGS_PATH is outside TEST_TMPDIR: ${TOWIT_SETTINGS_PATH}"; return 1
+  }
+}
+
 # ---------------------------------------------------------------------------
 # No args / usage
 # ---------------------------------------------------------------------------

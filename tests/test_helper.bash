@@ -25,6 +25,11 @@ EOF
   local db_path="${TEST_TMPDIR}/test.db"
   printf '[database]\npath = "%s"\n' "${db_path}" > "${TOWIT_CONFIG_PATH}"
 
+  # Never let a test reach the real ~/.claude/settings.json: implode, teardown and
+  # install-hook edit it when no override is given. Tests that need a settings file
+  # of their own still pass TOWIT_SETTINGS_PATH explicitly.
+  export TOWIT_SETTINGS_PATH="${TEST_TMPDIR}/settings.json"
+
   export TOWIT="${BIN_DIR}/towit"
 
   # Clear mode vars that shell scripts might reference
