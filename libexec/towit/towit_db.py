@@ -179,6 +179,8 @@ def _execute_script(conn, script: str) -> None:
 
 
 class Database:
+    cleanup_warning = None  # set by forget_conversations when physical cleanup was incomplete
+
     def __init__(self, db_path=None):
         self.db_path = db_path if db_path is not None else config.db_path
 
@@ -214,6 +216,8 @@ class Database:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        # Zero freed pages so deleted or overwritten text never lingers in the file.
+        conn.execute("PRAGMA secure_delete=ON")
         try:
             yield conn
             conn.commit()
@@ -758,6 +762,122 @@ class Database:
         self.validate()
         with self.connect() as conn:
             conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+
+    def _scope_clauses(self, repo: str = None, folder: str = None) -> tuple:
+        clauses, params = [], []
+        if repo is not None:
+            sql, repo_params = self._repo_filter(repo, 'repo_key')
+            clauses.append(sql)
+            params += repo_params
+        if folder is not None:
+            clauses.append("cwd = ?")
+            params.append(folder)
+        return clauses, params
+
+    def conversation_ids_for_scope(self, repo: str = None, folder: str = None) -> list:
+        """Return ids of conversations in a scope: `repo` matches repo_key exactly or by
+        final path component (as in search); `folder` matches cwd exactly (as in search
+        and list). With neither, returns [] — callers must pick a scope explicitly."""
+        self.validate()
+        clauses, params = self._scope_clauses(repo, folder)
+        if not clauses:
+            return []
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM conversations WHERE " + " AND ".join(clauses)
+                + " ORDER BY started_at DESC, id", params).fetchall()
+            return [r['id'] for r in rows]
+
+    def repo_count_for_scope(self, repo: str = None, folder: str = None) -> int:
+        """Number of distinct repo_keys among the conversations in a scope (see
+        conversation_ids_for_scope); lets a caller show how widely a basename matches."""
+        self.validate()
+        clauses, params = self._scope_clauses(repo, folder)
+        if not clauses:
+            return 0
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT COUNT(DISTINCT repo_key) FROM conversations WHERE " + " AND ".join(clauses),
+                params).fetchone()[0]
+
+    def _prune_orphan_labels(self, conn):
+        """Delete topics and keywords no conversation links to (their names derive from
+        content that may just have been forgotten)."""
+        conn.execute("DELETE FROM topics WHERE id NOT IN (SELECT topic_id FROM conversation_topics)")
+        conn.execute("DELETE FROM keywords WHERE id NOT IN (SELECT keyword_id FROM conversation_keywords)")
+
+    def _optimize_fts(self, conn):
+        """Merge all FTS5 segments. An external-content 'delete' only appends a delete
+        marker; the old segment keeps the (lowercased) terms until a merge rewrites it."""
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('optimize')")
+
+    def _purge_free_space(self, conn) -> bool:
+        """Rebuild the file (VACUUM drops pages freed earlier by any connection) and fold
+        then truncate the WAL. Must run outside a transaction. Returns False if the WAL
+        could not be fully truncated (e.g. another connection is reading)."""
+        conn.execute("PRAGMA busy_timeout=2000")
+        conn.execute("VACUUM")
+        busy, log, checkpointed = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        return busy == 0 and checkpointed >= log
+
+    def purge_free_space(self, example_id: str = '<session-id>') -> str | None:
+        """Physically remove text freed earlier by any writer (VACUUM, then truncate the
+        WAL). Idempotent, safe to run any time, and never raises: returns a warning
+        string naming the retry command (`towit forget <example_id>`) if cleanup was
+        incomplete, else None."""
+        self.validate()
+        retry = (f"Re-run `towit forget {example_id}` when no other towit process is "
+                 f"active to finish cleanup.")
+        try:
+            with self.connect() as conn:
+                if self._purge_free_space(conn):
+                    return None
+        except sqlite3.Error as exc:
+            return (f"the conversations were forgotten, but physical cleanup was incomplete "
+                    f"({exc}); deleted data may remain on disk. {retry}")
+        return f"some deleted data may remain in the write-ahead log. {retry}"
+
+    def forget_conversations(self, ids: list) -> int:
+        """Permanently delete conversations and tombstone their ids; return how many existed.
+
+        Forgets exactly the ids passed — a caller that resolved a scope and prompted the
+        user passes the set matched at prompt time, so conversations that appear later
+        are not swept up. One BEGIN IMMEDIATE transaction covers all ids, the orphan
+        topic/keyword cleanup and the FTS merge, so a failure leaves nothing half
+        forgotten. Deleting the conversation cascades to messages (whose delete trigger
+        clears the FTS index) and to topic/keyword links. The tombstone keeps only the id
+        and a timestamp. Ids that do not exist are ignored (no tombstone).
+
+        After the commit, purge_free_space() VACUUMs and truncates the WAL. That never
+        raises: on failure `self.cleanup_warning` holds a message and the forget itself
+        still stands (it is None after a clean run).
+        """
+        self.validate()
+        self.cleanup_warning = None
+        forgotten = 0
+        first_id = None
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                for conv_id in dict.fromkeys(ids):
+                    if conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,)).rowcount:
+                        conn.execute("INSERT OR IGNORE INTO forgotten (id) VALUES (?)", (conv_id,))
+                        forgotten += 1
+                        first_id = first_id or conv_id
+                if forgotten:
+                    self._prune_orphan_labels(conn)
+                    self._optimize_fts(conn)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        if forgotten:
+            self.cleanup_warning = self.purge_free_space(first_id)
+        return forgotten
+
+    def forget_conversation(self, conv_id: str) -> bool:
+        """Forget one conversation (see forget_conversations); False if the id was unknown."""
+        return self.forget_conversations([conv_id]) == 1
 
     def get_for_reindex(self, conv_id: str):
         """
