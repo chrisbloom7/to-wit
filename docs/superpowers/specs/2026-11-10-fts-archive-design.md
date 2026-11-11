@@ -303,23 +303,24 @@ Run 2026-11-10 against `../../Robinina-LLC` with an isolated database, scope `fo
 
 ### Known-answer queries
 
-The maintainer wrote 7 queries; for #12, #20 and #21 the maintainer supplied replacement queries after the first attempt. Results are for `include_subagents = false`, rank of the intended session:
+The maintainer picked 7 sessions and wrote a query for each; some queries were replaced after a first attempt (for example `warm tones`, a vocabulary miss for session c22b7b45, became `tangerine`). Results below use the final queries, `include_subagents = false`, and give the rank of the intended session:
 
-| Query | Rank | Notes |
-|---|---|---|
-| `robinina.art retail` | 2 | top 3 |
-| `pre-push hook` | 1 | top 3 |
-| `package.json sets overrides` | 1 | top 3 |
-| `tangerine` | 3 | top 3 (4 hits) |
-| `toggle` / `show password` | 8 (of 9 and 10 results) | miss: short-message bias |
-| `openssl` | none | miss: vocabulary |
-| `notification versus email` | none | miss: vocabulary; rescued by the OR fallback added in this release (`notification email` ranks 4) |
+| Session | Final query | Rank | Outcome |
+|---|---|---|---|
+| (retail) | `robinina.art retail` | 2 | found in top 3 |
+| (hooks) | `pre-push hook` | 1 | found in top 3 |
+| (overrides) | `package.json sets overrides` | 1 | found in top 3 |
+| c22b7b45 | `tangerine` | 3 (4 hits) | found in top 3 |
+| e7ded4ae | `show password` / `toggle` | 8 of 10 / 8 of 9 | miss: ranking bias |
+| 86db7390 | `openssl` | none | miss: vocabulary |
+| (24) | `notification versus email` | none | miss: vocabulary |
 
-- **Short-message bias.** `bm25` scores each message independently and rewards the shortest message containing the term, so short passing mentions in large sessions outrank the long, substantive message that the query was about.
-- **Vocabulary misses.** `openssl` is not in the stored text; it was most likely in tool output, which is stored only as stubs of at most 200 characters. `versus` is not in the stored text at all, so an all-terms search finds nothing; the any-term fallback now covers that case.
+- **Ranking bias (e7ded4ae).** `bm25` scores each message independently and rewards the shortest message containing the term, so short passing mentions in large sessions outrank the long, substantive message the query was about.
+- **Vocabulary (86db7390).** `openssl` is absent from the stored text; it is most likely in tool output, which is stored only as stubs of at most 200 characters. A first attempt, `railsway openssl`, also had a typo.
+- **Vocabulary (24).** `versus` is absent from the stored text, so the all-terms search finds nothing. `notification email` ranks 4; the any-term (OR) fallback added in this release rescues the original query only at rank 8 of 18.
 - With subagents on, ranks were the same or worse on every query, with more noise.
 
-**Acceptance bar not met.** The bar was the intended session in the top 3 for at least 8 of 10 queries. The result is 4 of 8 distinct queries. The shortfall is understood: vocabulary misses (`openssl`, `notification versus email`) and one ranking bias, the short-message bias (`toggle`, `show password`).
+**Acceptance bar not met.** The bar was the intended session in the top 3 for at least 8 of 10 queries; the result is 4 of 7 sessions. The shortfall is understood: 3 sessions missed, one from the ranking bias and two from vocabulary.
 
 **Decision:** ship with the limitation documented (the README says tool output is stored only as short stubs and that ranking favors short matching messages). `include_subagents` stays `false`: archiving subagents multiplies the conversation count about 25x for about 1.7x the disk, mostly transcripts that are not interactive conversations, and gave no ranking benefit. A ranking redesign is tracked for 0.9.x.
 
