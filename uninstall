@@ -4,11 +4,11 @@
 # Usage:
 #   ./uninstall [<install-dir>]
 #
-# Default install directory: /usr/local/bin
+# Default install directory: ~/.local/bin
 
 set -euo pipefail
 
-INSTALL_DIR="${1:-/usr/local/bin}"
+INSTALL_DIR="${1:-${HOME}/.local/bin}"
 
 if command -v towit &>/dev/null; then
   towit implode --install-dir "${INSTALL_DIR}"
