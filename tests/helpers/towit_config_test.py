@@ -17,31 +17,98 @@ import towit_config
 from towit_config import Config, _DEFAULT_DB_PATH, is_valid_session_id
 
 
+def _run_logger(home, code, config_path='default', umask=None):
+    """Run code in a subprocess with a temp HOME; config_path=None leaves TOWIT_CONFIG_PATH unset."""
+    import subprocess
+    env = {'HOME': home, 'PATH': os.environ.get('PATH', '')}
+    if config_path != 'default' and config_path is not None:
+        env['TOWIT_CONFIG_PATH'] = config_path
+    prefix = 'import os; os.umask(0o%o)\n' % umask if umask is not None else ''
+    return subprocess.run(
+        [sys.executable, '-c', prefix + 'import towit_config\n' + code],
+        cwd=HELPERS_DIR, capture_output=True, text=True, env=env)
+
+
+def _mode(path):
+    return os.stat(path).st_mode & 0o777
+
+
 class TestErrorLoggerDirectory(unittest.TestCase):
     def test_error_log_dir_created_owner_only(self):
-        import subprocess
         with tempfile.TemporaryDirectory() as home:
-            code = ("import towit_config; towit_config.get_error_logger()")
-            result = subprocess.run(
-                [sys.executable, '-c', code], cwd=HELPERS_DIR, capture_output=True, text=True,
-                env={'HOME': home, 'PATH': os.environ.get('PATH', ''),
-                     'TOWIT_CONFIG_PATH': os.path.join(home, 'none.toml')})
+            cfgdir = os.path.join(home, 'cfgdir')
+            result = _run_logger(home, "towit_config.get_error_logger()",
+                                 os.path.join(cfgdir, 'config.toml'))
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(os.stat(os.path.join(home, '.towit')).st_mode & 0o777, 0o700)
+            self.assertEqual(_mode(cfgdir), 0o700)
+
+    def test_log_follows_config_dir_and_creates_it(self):
+        with tempfile.TemporaryDirectory() as home:
+            cfgdir = os.path.join(home, 'cfgdir')
+            result = _run_logger(home, "towit_config.get_error_logger().error('boom')",
+                                 os.path.join(cfgdir, 'config.toml'), umask=0o022)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            log = os.path.join(cfgdir, 'errors.log')
+            self.assertTrue(os.path.exists(log), 'errors.log missing in config dir')
+            with open(log) as fh:
+                self.assertIn('boom', fh.read())
+            self.assertEqual(_mode(cfgdir), 0o700)
+            self.assertEqual(_mode(log), 0o600)
+            self.assertFalse(os.path.exists(os.path.join(home, '.towit')))
+
+    def test_existing_config_dir_left_as_is(self):
+        with tempfile.TemporaryDirectory() as home:
+            cfgdir = os.path.join(home, 'cfgdir')
+            os.makedirs(cfgdir)
+            os.chmod(cfgdir, 0o755)
+            result = _run_logger(home, "towit_config.get_error_logger().error('boom')",
+                                 os.path.join(cfgdir, 'config.toml'), umask=0o022)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            log = os.path.join(cfgdir, 'errors.log')
+            self.assertTrue(os.path.exists(log), 'errors.log missing in config dir')
+            self.assertEqual(_mode(cfgdir), 0o755)
+            self.assertEqual(_mode(log), 0o600)
+
+    def test_default_location_unchanged_without_config_env(self):
+        with tempfile.TemporaryDirectory() as home:
+            result = _run_logger(home, "towit_config.get_error_logger().error('boom')",
+                                 config_path=None, umask=0o022)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            towit_dir = os.path.join(home, '.towit')
+            log = os.path.join(towit_dir, 'errors.log')
+            with open(log) as fh:
+                self.assertIn('boom', fh.read())
+            self.assertEqual(_mode(towit_dir), 0o700)
+            self.assertEqual(_mode(log), 0o600)
+
+    def test_broken_config_does_not_stop_logging(self):
+        with tempfile.TemporaryDirectory() as home:
+            cfgdir = os.path.join(home, 'cfgdir')
+            os.makedirs(cfgdir, mode=0o700)
+            cfg = os.path.join(cfgdir, 'config.toml')
+            with open(cfg, 'w') as fh:
+                fh.write('[[[ not toml')
+            result = _run_logger(home, "towit_config.get_error_logger().error('boom')", cfg)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            log = os.path.join(cfgdir, 'errors.log')
+            self.assertTrue(os.path.exists(log), 'errors.log missing in config dir')
+            with open(log) as fh:
+                self.assertIn('boom', fh.read())
+            self.assertFalse(os.path.exists(os.path.join(home, '.towit')))
 
 
 class TestErrorLogPermissions(unittest.TestCase):
+    """Log files live in the config file's directory (<home>/cfgdir here)."""
+
+    def _cfgdir(self, home):
+        return os.path.join(home, 'cfgdir')
+
     def _run(self, home, code):
-        import subprocess
-        result = subprocess.run(
-            [sys.executable, '-c', 'import os; os.umask(0o022)\nimport towit_config\n' + code],
-            cwd=HELPERS_DIR, capture_output=True, text=True,
-            env={'HOME': home, 'PATH': os.environ.get('PATH', ''),
-                 'TOWIT_CONFIG_PATH': os.path.join(home, 'none.toml')})
+        result = _run_logger(home, code, os.path.join(self._cfgdir(home), 'config.toml'), umask=0o022)
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def _mode(self, home, name='errors.log'):
-        return os.stat(os.path.join(home, '.towit', name)).st_mode & 0o777
+        return _mode(os.path.join(self._cfgdir(home), name))
 
     def test_new_error_log_is_owner_only(self):
         with tempfile.TemporaryDirectory() as home:
@@ -50,9 +117,9 @@ class TestErrorLogPermissions(unittest.TestCase):
 
     def test_existing_loose_log_is_tightened(self):
         with tempfile.TemporaryDirectory() as home:
-            os.makedirs(os.path.join(home, '.towit'), mode=0o700)
+            os.makedirs(self._cfgdir(home), mode=0o700)
             for name in ('errors.log', 'errors.log.1'):
-                path = os.path.join(home, '.towit', name)
+                path = os.path.join(self._cfgdir(home), name)
                 with open(path, 'w') as fh:
                     fh.write('old\n')
                 os.chmod(path, 0o644)
@@ -64,7 +131,7 @@ class TestErrorLogPermissions(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             self._run(home, "lg = towit_config.get_error_logger()\n"
                             "for _ in range(5): lg.error('x' * 60000)")
-            self.assertTrue(os.path.exists(os.path.join(home, '.towit', 'errors.log.1')))
+            self.assertTrue(os.path.exists(os.path.join(self._cfgdir(home), 'errors.log.1')))
             for name in ('errors.log', 'errors.log.1'):
                 self.assertEqual(self._mode(home, name), 0o600, name)
 

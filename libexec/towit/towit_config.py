@@ -263,7 +263,11 @@ def remove_database_files(db_path: str) -> None:
 
 
 def get_error_logger():
-    """Return a rotating logger that writes to ~/.towit/errors.log (owner-only, 0600)."""
+    """Return a rotating logger that writes to errors.log next to the config file (owner-only, 0600).
+
+    The directory is dirname(CONFIG_PATH) (default ~/.towit/). It deliberately ignores parsed
+    config values and the database path so logging still works when either is broken.
+    """
     import glob
     import logging
     import logging.handlers
@@ -277,7 +281,7 @@ def get_error_logger():
             finally:
                 os.umask(old_umask)
 
-    log_dir = os.path.expanduser('~/.towit')
+    log_dir = os.path.abspath(os.path.dirname(os.path.expanduser(CONFIG_PATH)))
     os.makedirs(log_dir, mode=0o700, exist_ok=True)  # owner-only; an existing dir is left as is
     log_path = os.path.join(log_dir, 'errors.log')
     logger = logging.getLogger('towit.hook')
