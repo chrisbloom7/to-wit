@@ -59,7 +59,8 @@ case "${subcommand}" in
     _setup_args=()
     while [[ $# -gt 0 ]]; do
       case "$1" in
-        --full) _full=true; shift ;;
+        # --full is consumed here, so forward --config for towit_setup.py to generate the config
+        --full) _full=true; _setup_args+=(--config); shift ;;
         --hook) _hook=true; shift ;;
         *) _setup_args+=("$1"); shift ;;
       esac
