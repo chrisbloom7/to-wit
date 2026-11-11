@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A conversation's repo key is resolved once, at first archive, and kept on re-ingest (a NULL key is still filled in), so `towit backfill` after deleting a worktree no longer breaks `--repo` grouping.
 - `towit setup --full` now generates `~/.towit/config.toml` as documented.
 
 ### Security

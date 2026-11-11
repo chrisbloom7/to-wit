@@ -1032,7 +1032,7 @@ class Database:
                     ON CONFLICT(id) DO UPDATE SET
                         last_active            = excluded.last_active,
                         cwd                    = excluded.cwd,
-                        repo_key               = excluded.repo_key,
+                        repo_key               = COALESCE(conversations.repo_key, excluded.repo_key),
                         source_path            = excluded.source_path,
                         tail_hash              = excluded.tail_hash,
                         archived               = 1,
