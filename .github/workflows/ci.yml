@@ -7,15 +7,21 @@ on:
 
 jobs:
   test:
-    name: Tests (${{ matrix.os }})
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
+        # 3.11 is the documented minimum; 3.x tracks the newest stable release
+        python: ['3.11', '3.x']
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
 
       - name: Install bats-core (macOS)
         if: runner.os == 'macOS'
@@ -29,3 +35,36 @@ jobs:
 
       - name: Run tests
         run: ./run-tests
+
+  install-smoke:
+    name: Install smoke test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Install, set up, and run doctor in a clean HOME
+        run: |
+          set -euo pipefail
+          export HOME="$(mktemp -d)"
+          ./install
+          export PATH="${HOME}/.local/bin:${PATH}"
+          towit help >/dev/null
+          towit setup --hook
+          # No claude CLI on the runner, so doctor is expected to report exactly that one failure.
+          doctor_out="$(towit doctor || true)"
+          echo "${doctor_out}"
+          grep -F '[PASS] SQLite FTS5 is available' <<<"${doctor_out}"
+          grep -F '[PASS] Archive schema current' <<<"${doctor_out}"
+          grep -F '[PASS] To Wit hook registered for all events' <<<"${doctor_out}"
+          unexpected="$(grep '^\[FAIL\]' <<<"${doctor_out}" | grep -v 'claude CLI not found' || true)"
+          if [ -n "${unexpected}" ]; then
+            echo "Unexpected doctor failures:" >&2
+            echo "${unexpected}" >&2
+            exit 1
+          fi
+          towit stats >/dev/null
