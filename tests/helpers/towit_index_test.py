@@ -973,5 +973,33 @@ class TestIndexConversationArchiveInteraction(unittest.TestCase):
         conn.close()
 
 
+class TestIndexConversationResolvesDirectory(unittest.TestCase):
+    """index_conversation's stored folder must not depend on a symlinked directory."""
+
+    def setUp(self):
+        self.tmp = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.real_dir = os.path.join(self.tmp, 'real', 'projects', '-tmp-proj')
+        os.makedirs(self.real_dir)
+        self.real_path = os.path.join(self.real_dir, 'sess-idx-1.jsonl')
+        write_jsonl(self.real_path, MINIMAL_MESSAGES)
+        os.symlink(os.path.join(self.tmp, 'real', 'projects'), os.path.join(self.tmp, 'link'))
+        self.link_path = os.path.join(self.tmp, 'link', '-tmp-proj', 'sess-idx-1.jsonl')
+
+    def _index(self, path, name):
+        db = Database(os.path.join(self.tmp, name))
+        db.create_schema()
+        analysis = {'skip': False, 'title': 'T', 'summary': 'S', 'keywords': [], 'topics': []}
+        with patch.object(towit_index, 'analyze_with_claude', return_value=analysis):
+            self.assertEqual(index_conversation(path, db), 'indexed')
+        return db.get_conversation('sess-idx-1')['folder']
+
+    def test_real_path_stores_real_folder(self):
+        self.assertEqual(self._index(self.real_path, 'a.db'), self.real_dir)
+
+    def test_symlinked_directory_stores_resolved_folder(self):
+        self.assertEqual(self._index(self.link_path, 'b.db'), self.real_dir)
+
+
 if __name__ == '__main__':
     unittest.main()

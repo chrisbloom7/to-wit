@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `towit` no longer archives or sends to the LLM entries Claude Code marks as meta (such as the `<local-command-caveat>` text). Sessions archived earlier are cleaned the next time they are ingested (an archived session that ends with a meta entry is cleaned once it grows); `towit backfill` re-ingests every session.
 - `towit teardown` and `towit implode` now print `Leftover database files deleted` instead of `Database deleted: <path>` when only leftover `-wal`, `-shm` or `-journal` files existed and the database file itself did not.
+- A session's stored `folder` and `source_path` no longer depend on whether its transcript was reached through a symlinked directory: the hooks, the catch-up scan and backfill now record the same resolved location. Rows update the next time the session is ingested.
 
 ### Changed
 
