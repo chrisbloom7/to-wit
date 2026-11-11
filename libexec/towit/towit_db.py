@@ -534,11 +534,13 @@ class Database:
         return sql + ')', params
 
     def _text_match_query(self, folder, repo) -> tuple:
-        """SQL + params (after the MATCH expression) for message-text hits, best bm25 first."""
+        """SQL + params (after the MATCH expression) for message-text hits, best bm25 first.
+
+        Ranking only: snippet() is computed later, for the rows that are returned.
+        """
         sql = (
             "SELECT m.conversation_id AS id, m.seq AS seq,"
-            " snippet(messages_fts, 0, '[', ']', '…', 12) AS snippet,"
-            " bm25(messages_fts) AS score"
+            " messages_fts.rowid AS rowid, bm25(messages_fts) AS score"
             " FROM messages_fts"
             " JOIN messages m ON m.id = messages_fts.rowid"
             " JOIN conversations c ON c.id = m.conversation_id"
@@ -626,38 +628,70 @@ class Database:
                 # Cap text-only rows; every metadata-tier row is kept (tier 0 sorts first).
                 order = order[:len(meta_by_id) + limit]
 
+            snippets = self._hit_snippets(
+                conn, expr, [hits[i]['rowid'] for i in order if i in hits])
+            summary = self._get_summary_rows(
+                conn, [i for i in order if i not in meta_by_id])
+
             results = []
             for conv_id in order:
                 base = meta_by_id.get(conv_id)
                 if base is None:
-                    base = self._get_summary_row(conn, conv_id)
+                    base = summary[conv_id]
                 hit = hits.get(conv_id)
                 results.append(dict(
                     base,
                     seq=hit['seq'] if hit else None,
-                    snippet=hit['snippet'] if hit else '',
+                    snippet=snippets[hit['rowid']] if hit else '',
                     score=hit['score'] if hit else None,
                 ))
             self._fill_title_fallback(conn, results)
             return results
 
-    def _get_summary_row(self, conn, conv_id: str) -> dict:
-        row = conn.execute(
-            self._conversation_select() + " WHERE c.id = ? GROUP BY c.id", (conv_id,)
-        ).fetchone()
-        return self._row_to_dict(row)
+    def _hit_snippets(self, conn, expr: str, rowids: list) -> dict:
+        """snippet() for the given messages_fts rowids under the MATCH expression, as {rowid: text}."""
+        snippets = {}
+        for i in range(0, len(rowids), 500):
+            chunk = rowids[i:i + 500]
+            try:
+                for r in conn.execute(
+                        "SELECT rowid AS rowid, snippet(messages_fts, 0, '[', ']', '…', 12) AS snippet"
+                        " FROM messages_fts WHERE messages_fts MATCH ? AND rowid IN (%s)"
+                        % ','.join('?' for _ in chunk), [expr] + chunk):
+                    snippets[r['rowid']] = r['snippet']
+            except sqlite3.OperationalError as e:
+                if not is_fts_query_error(e):
+                    raise
+        return snippets
+
+    def _get_summary_rows(self, conn, conv_ids: list) -> dict:
+        """Summary rows for the given conversation ids, as {id: dict} (one query per 500 ids)."""
+        rows = {}
+        for i in range(0, len(conv_ids), 500):
+            chunk = conv_ids[i:i + 500]
+            for r in conn.execute(
+                    self._conversation_select()
+                    + " WHERE c.id IN (%s) GROUP BY c.id" % ','.join('?' for _ in chunk), chunk):
+                d = self._row_to_dict(r)
+                rows[d['id']] = d
+        return rows
 
     def _fill_title_fallback(self, conn, results: list) -> None:
         """Replace a null title with the first user message (80 chars), if one is archived."""
+        untitled = list({r['id'] for r in results if not r['title']})
+        first = {}
+        for i in range(0, len(untitled), 500):
+            chunk = untitled[i:i + 500]
+            for row in conn.execute(
+                    "SELECT m.conversation_id AS id, m.text AS text FROM messages m"
+                    " WHERE m.conversation_id IN (%s) AND m.role = 'user'"
+                    " AND m.seq = (SELECT MIN(m2.seq) FROM messages m2"
+                    " WHERE m2.conversation_id = m.conversation_id AND m2.role = 'user')"
+                    % ','.join('?' for _ in chunk), chunk):
+                first[row['id']] = row['text']
         for r in results:
-            if r['title']:
-                continue
-            row = conn.execute(
-                "SELECT text FROM messages WHERE conversation_id = ? AND role = 'user' "
-                "ORDER BY seq LIMIT 1", (r['id'],)
-            ).fetchone()
-            if row:
-                r['title'] = row['text'][:80]
+            if not r['title'] and r['id'] in first:
+                r['title'] = first[r['id']][:80]
 
     def list_conversations(self, folder: str = None, topic: str = None, keyword: str = None) -> list:
         """Return all conversations, optionally filtered by folder, topic, and/or keyword."""

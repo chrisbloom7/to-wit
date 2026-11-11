@@ -1142,6 +1142,318 @@ class TestSearchArchive(unittest.TestCase):
         self.assertNotRegex(plan, r'SCAN (TABLE )?m\b|SCAN TABLE messages\b')
 
 
+def build_snippet_fixture(db):
+    """Realistic archive for search_archive output pins: metadata and archive-only
+    conversations, several matching messages each, varied cwd/repo_key and started_at."""
+    def conv(cid, cwd, repo, started):
+        return {'id': cid, 'folder': '/f', 'cwd': cwd, 'started_at': started,
+                'last_active': started, 'repo_key': repo, 'source_path': None}
+
+    def m(role, text):
+        return {'role': role, 'ts': None, 'text': text}
+
+    def meta(cid, cwd, started, title, summary, topics, keywords):
+        db.upsert_conversation({
+            'id': cid, 'folder': '/f', 'cwd': cwd, 'started_at': started,
+            'last_active': started, 'title': title, 'summary': summary,
+            'topics': topics, 'keywords': keywords})
+
+    db.archive_session(conv('p1', '/w/alpha', '/src/alpha', '2026-03-01T00:00:00Z'), [
+        m('user', 'start with the zebra'), m('assistant', 'zebra zebra zebra zebra herds roam'),
+        m('user', 'more'), m('assistant', 'a lone zebra appears in a very long sentence about savanna '
+                                          'ecology and the migration of many other animals across plains'),
+        m('assistant', 'unrelated wrap up')])
+    meta('p1', '/w/alpha', '2026-03-01T00:00:00Z', 'Zebra migration', 'about herds',
+         ['animals', 'africa'], ['zebra', 'stripes'])
+    db.archive_session(conv('p2', '/w/alpha', '/src/alpha.wt1', '2026-03-02T00:00:00Z'), [
+        m('user', 'notes please'), m('assistant', 'zebra quagga hybrids are fictional'),
+        m('assistant', 'the zebra again')])
+    meta('p2', '/w/alpha', '2026-03-02T00:00:00Z', 'Plain notes', 'a zebra mention in summary',
+         ['notes'], ['notes'])
+    db.archive_session(conv('p3', '/w/beta', '/src/beta', '2026-03-03T00:00:00Z'), [
+        m('user', 'Tell me about zebra crossings and traffic law'),
+        m('assistant', 'zebra crossings give pedestrians priority'),
+        m('assistant', 'zebra'), m('assistant', 'crossings and zebra and more zebra')])
+    db.archive_session(conv('p4', '/w/beta', '/src/beta', '2026-03-03T00:00:00Z'), [
+        m('user', 'second tie question'), m('assistant', 'zebra zebra in a tied conversation'),
+        m('assistant', 'zebra quagga')])
+    db.archive_session(conv('p5', '/w/gamma', '/src/gamma', '2026-03-05T00:00:00Z'), [
+        m('user', 'x' * 120), m('assistant', 'one single zebra mention buried in a much longer '
+                                             'message that keeps going and going so the snippet truncates '
+                                             'around the match with an ellipsis at both ends')])
+    db.archive_session(conv('p6', '/w/gamma', '/src/gamma', '2026-03-06T00:00:00Z'), [
+        m('user', 'horse talk'), m('assistant', 'only horses here')])
+    meta('p6', '/w/gamma', '2026-03-06T00:00:00Z', 'Horse', 'horses', ['animals'], ['zebra'])
+    db.archive_session(conv('p7', '/w/gamma', '/src/gamma', '2026-03-07T00:00:00Z'), [
+        m('user', 'quagga facts'), m('assistant', 'the quagga is extinct'),
+        m('assistant', 'quagga quagga')])
+    # Filler with no matches so bm25 idf is meaningful and scores are distinguishable.
+    db.archive_session(conv('filler', '/w/filler', '/src/filler', '2026-02-01T00:00:00Z'),
+                       [m('user' if i % 2 == 0 else 'assistant', 'lorem ipsum filler %d' % i)
+                        for i in range(60)])
+
+
+PIN_CASES = [
+    ('all_and', ['zebra'], {}),
+    ('text', ['zebra'], {'scope': 'text'}),
+    ('metadata', ['zebra'], {'scope': 'metadata'}),
+    ('and_two_terms', ['zebra', 'quagga'], {'scope': 'text'}),
+    ('or_two_terms', ['zebra', 'quagga'], {'mode': 'or', 'scope': 'text'}),
+    ('all_or', ['zebra', 'quagga'], {'mode': 'or'}),
+    ('folder', ['zebra'], {'folder': '/w/beta'}),
+    ('repo', ['zebra'], {'repo': 'alpha'}),
+    ('repo_exact', ['zebra'], {'repo': '/src/gamma'}),
+    ('include_all_fields', ['animals'], {'include_title': True, 'include_summary': True, 'include_topics': True}),
+    ('include_summary', ['herds'], {'include_summary': True}),
+    ('include_title', ['plain'], {'include_title': True}),
+    ('limit_2', ['zebra'], {'limit': 2}),
+    ('limit_text_2', ['zebra'], {'scope': 'text', 'limit': 2}),
+    ('limit_none', ['zebra'], {'limit': None}),
+    ('no_hits', ['nonexistentterm'], {}),
+    ('unbalanced_quote', ['"zebra'], {}),
+]
+
+
+# Expected values below were captured by running the pre-optimisation search_archive once
+# over build_snippet_fixture and pasting the output. They pin byte-for-byte equality
+# (ids, order, seq, snippet, rounded score, title, summary, topics, keywords, cwd, started_at).
+SNIPPET_PIN_EXPECTED = {
+    'all_and': [
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+        ('p6', None, '', None, 'Horse', 'horses', 'animals', 'zebra', '/w/gamma', '2026-03-06T00:00:00Z'),
+        ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p4', 2, '[zebra] quagga', -2.222605, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p2', 2, 'the [zebra] again', -1.983775, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
+        ('p5', 1, 'one single [zebra] mention buried in a much longer message that keeps…', -0.538138, 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', None, '', '', '/w/gamma', '2026-03-05T00:00:00Z'),
+    ],
+    'text': [
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+        ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p4', 2, '[zebra] quagga', -2.222605, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p2', 2, 'the [zebra] again', -1.983775, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
+        ('p5', 1, 'one single [zebra] mention buried in a much longer message that keeps…', -0.538138, 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', None, '', '', '/w/gamma', '2026-03-05T00:00:00Z'),
+    ],
+    'metadata': [
+        ('p6', None, '', None, 'Horse', 'horses', 'animals', 'zebra', '/w/gamma', '2026-03-06T00:00:00Z'),
+        ('p1', None, '', None, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+    ],
+    'and_two_terms': [
+        ('p4', 2, '[zebra] [quagga]', -5.621657, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p2', 1, '[zebra] [quagga] hybrids are fictional', -4.130005, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
+    ],
+    'or_two_terms': [
+        ('p4', 2, '[zebra] [quagga]', -5.621657, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p7', 2, '[quagga] [quagga]', -4.291698, 'quagga facts', None, '', '', '/w/gamma', '2026-03-07T00:00:00Z'),
+        ('p2', 1, '[zebra] [quagga] hybrids are fictional', -4.130005, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+        ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p5', 1, 'one single [zebra] mention buried in a much longer message that keeps…', -0.538138, 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', None, '', '', '/w/gamma', '2026-03-05T00:00:00Z'),
+    ],
+    'all_or': [
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+        ('p6', None, '', None, 'Horse', 'horses', 'animals', 'zebra', '/w/gamma', '2026-03-06T00:00:00Z'),
+        ('p4', 2, '[zebra] [quagga]', -5.621657, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p7', 2, '[quagga] [quagga]', -4.291698, 'quagga facts', None, '', '', '/w/gamma', '2026-03-07T00:00:00Z'),
+        ('p2', 1, '[zebra] [quagga] hybrids are fictional', -4.130005, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
+        ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p5', 1, 'one single [zebra] mention buried in a much longer message that keeps…', -0.538138, 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', None, '', '', '/w/gamma', '2026-03-05T00:00:00Z'),
+    ],
+    'folder': [
+        ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p4', 2, '[zebra] quagga', -2.222605, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+    ],
+    'repo': [
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+        ('p2', 2, 'the [zebra] again', -1.983775, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
+    ],
+    'repo_exact': [
+        ('p6', None, '', None, 'Horse', 'horses', 'animals', 'zebra', '/w/gamma', '2026-03-06T00:00:00Z'),
+        ('p5', 1, 'one single [zebra] mention buried in a much longer message that keeps…', -0.538138, 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', None, '', '', '/w/gamma', '2026-03-05T00:00:00Z'),
+    ],
+    'include_all_fields': [
+        ('p1', 3, '…about savanna ecology and the migration of many other [animals] across plains', -1.561419, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+        ('p6', None, '', None, 'Horse', 'horses', 'animals', 'zebra', '/w/gamma', '2026-03-06T00:00:00Z'),
+    ],
+    'include_summary': [
+        ('p1', 1, 'zebra zebra zebra zebra [herds] roam', -3.464623, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+    ],
+    'include_title': [
+        ('p2', None, '', None, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
+    ],
+    'limit_2': [
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+        ('p6', None, '', None, 'Horse', 'horses', 'animals', 'zebra', '/w/gamma', '2026-03-06T00:00:00Z'),
+        ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p4', 2, '[zebra] quagga', -2.222605, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+    ],
+    'limit_text_2': [
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+        ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+    ],
+    'limit_none': [
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+        ('p6', None, '', None, 'Horse', 'horses', 'animals', 'zebra', '/w/gamma', '2026-03-06T00:00:00Z'),
+        ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p4', 2, '[zebra] quagga', -2.222605, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p2', 2, 'the [zebra] again', -1.983775, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
+        ('p5', 1, 'one single [zebra] mention buried in a much longer message that keeps…', -0.538138, 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', None, '', '', '/w/gamma', '2026-03-05T00:00:00Z'),
+    ],
+    'no_hits': [
+    ],
+    'unbalanced_quote': [
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+        ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p4', 2, '[zebra] quagga', -2.222605, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p2', 2, 'the [zebra] again', -1.983775, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
+        ('p5', 1, 'one single [zebra] mention buried in a much longer message that keeps…', -0.538138, 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', None, '', '', '/w/gamma', '2026-03-05T00:00:00Z'),
+    ],
+    'fts_rejected_all': [
+        ('p6', None, '', None, 'Horse', 'horses', 'animals', 'zebra', '/w/gamma', '2026-03-06T00:00:00Z'),
+        ('p1', None, '', None, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+    ],
+    'fts_rejected_text': [
+    ],
+}
+
+
+
+def _snap(results):
+    return [(r['id'], r['seq'], r['snippet'], None if r['score'] is None else round(r['score'], 6),
+             r['title'], r['summary'], r['topics'], r['keywords'], r['cwd'], r['started_at'])
+            for r in results]
+
+
+class TestSearchArchiveOutputPins(unittest.TestCase):
+    """Output-equality pins that guard the search_archive performance refactor."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db = Database(os.path.join(self.tmpdir, 't.db'))
+        self.db.create_schema()
+        build_snippet_fixture(self.db)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_pinned_outputs(self):
+        for name, terms, kwargs in PIN_CASES:
+            with self.subTest(case=name):
+                got = _snap(self.db.search_archive(terms, **kwargs))
+                self.assertEqual(len(got), len(SNIPPET_PIN_EXPECTED[name]))
+                for g, e in zip(got, SNIPPET_PIN_EXPECTED[name]):
+                    self.assertEqual(g[:3], e[:3])
+                    self.assertAlmostEqual(g[3] or 0.0, e[3] or 0.0, places=5)
+                    self.assertEqual(g[4:], e[4:])
+
+    def test_limit_caps_text_only_but_never_metadata(self):
+        res = self.db.search_archive(['zebra'], limit=2)
+        self.assertEqual([r['id'] for r in res], ['p1', 'p6', 'p3', 'p4'])
+
+    def test_no_hits_and_quoted_unbalanced_term(self):
+        self.assertEqual(self.db.search_archive(['nonexistentterm']), [])
+        self.assertEqual(len(self.db.search_archive(['"zebra'], scope='text')), 5)
+
+    def test_fts_rejected_query_leaves_metadata_hits_only(self):
+        real_connect = Database.connect
+
+        @contextlib.contextmanager
+        def connect(db):
+            with real_connect(db) as conn:
+                yield _FailingMatchConn(conn, 'fts5: syntax error near "x"')
+        with unittest.mock.patch.object(Database, 'connect', connect):
+            for name, kwargs in (('fts_rejected_all', {}), ('fts_rejected_text', {'scope': 'text'})):
+                with self.subTest(case=name):
+                    self.assertEqual(_snap(self.db.search_archive(['zebra'], **kwargs)),
+                                     SNIPPET_PIN_EXPECTED[name])
+
+
+class TestSearchArchiveWorkCount(unittest.TestCase):
+    """SQL statement counts for search_archive (sqlite trace), to catch N+1 and per-row snippet work."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db = Database(os.path.join(self.tmpdir, 't.db'))
+        self.db.create_schema()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _build(self, n, titled, matches_per=1):
+        """n text-only hit conversations (no keyword match). titled=True gives each a
+        metadata title/summary (so only the summary-row lookup applies); titled=False
+        leaves title NULL (so the first-user-message fallback applies too)."""
+        for i in range(n):
+            cid = 'w%03d' % i
+            started = '2026-06-%02dT00:00:00Z' % (i % 28 + 1)
+            self.db.archive_session(
+                {'id': cid, 'folder': '/f', 'cwd': '/w/perf', 'started_at': started,
+                 'last_active': started, 'repo_key': '/src/perf', 'source_path': None},
+                [{'role': 'user', 'ts': None, 'text': 'first question %d' % i}]
+                + [{'role': 'assistant', 'ts': None, 'text': 'needle reply %d number %d' % (i, j)}
+                   for j in range(matches_per)])
+            if titled:
+                self.db.upsert_conversation({
+                    'id': cid, 'folder': '/f', 'cwd': '/w/perf', 'started_at': started,
+                    'last_active': started, 'title': 'Title %d' % i, 'summary': 'Summary %d' % i,
+                    'topics': ['t'], 'keywords': ['unrelated']})
+
+    def _statements(self, **kwargs):
+        """Run one search_archive and return the SQL statements executed on its connections."""
+        self.db.validate()  # warm the cached schema check so it is not counted
+        seen = []
+        real_connect = Database.connect
+
+        @contextlib.contextmanager
+        def connect(db):
+            with real_connect(db) as conn:
+                conn.set_trace_callback(seen.append)
+                yield conn
+        with unittest.mock.patch.object(Database, 'connect', connect):
+            results = self.db.search_archive(['needle'], **kwargs)
+        return results, [q for q in seen if q.lstrip().upper().startswith(('SELECT', 'WITH'))]
+
+    def _assert_constant_statements(self, titled):
+        small, small_sql = self._run_counted(5, titled)
+        large, large_sql = self._run_counted(30, titled)
+        self.assertEqual((len(small), len(large)), (5, 30))
+        self.assertLessEqual(len(large_sql) - len(small_sql), 2,
+                             'statement count grows with conversations: %d -> %d'
+                             % (len(small_sql), len(large_sql)))
+        self.assertLessEqual(len(large_sql), 12, 'too many statements: %d' % len(large_sql))
+
+    def _run_counted(self, n, titled):
+        self.tearDown()
+        self.setUp()
+        self._build(n, titled)
+        return self._statements(limit=None)
+
+    def test_summary_rows_are_batched_not_n_plus_one(self):
+        self._assert_constant_statements(titled=True)
+
+    def test_title_fallback_is_batched_not_n_plus_one(self):
+        self._assert_constant_statements(titled=False)
+
+    def test_snippets_computed_only_for_returned_rows(self):
+        # 30 conversations x 40 matching messages, limit=5. Trace shows SQL text, not rows
+        # evaluated, so assert the *shape*: (a) the ranking query (the one calling bm25)
+        # never calls snippet() -- the full-scan form that evaluates snippet for every
+        # matching message is not executed; (b) snippet() runs only in rowid-restricted
+        # statements, at most once per returned result (and at least once, since the
+        # results carry snippets).
+        self._build(30, titled=False, matches_per=40)
+        results, sql = self._statements(limit=5)
+        self.assertEqual(len(results), 5)
+        self.assertTrue(all('[needle]' in r['snippet'] for r in results))
+        full_scan = [q for q in sql if 'snippet(' in q and 'bm25(' in q]
+        self.assertEqual(full_scan, [], 'snippet() evaluated in the ranking query for every matching row')
+        snippet_sql = [q for q in sql if 'snippet(' in q]
+        self.assertGreaterEqual(len(snippet_sql), 1)
+        self.assertLessEqual(len(snippet_sql), len(results))
+        for q in snippet_sql:
+            self.assertRegex(q, r'rowid\s+IN\b|rowid\s*=\s*\d', 'snippet query is not rowid-restricted')
+
+
+
 # The catalog DDL as it existed before the archive work: no archive columns, no
 # messages/messages_fts/forgotten/meta, user_version 0.
 OLD_SCHEMA = """
