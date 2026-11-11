@@ -332,6 +332,34 @@ class TestIngestTranscript(unittest.TestCase):
         self.assertNotIn(secret, text)
         self.assertIn('[REDACTED:', text)
 
+    def _stored_after_ingest(self, entries):
+        _write_jsonl(self.path, entries + [_entry('assistant', 'ok'), _entry('user', 'again')])
+        ingest_transcript(self.path, self.db)
+        return self._rows()[0]['text']
+
+    def test_secret_straddling_the_message_cap_is_redacted_before_truncation(self):
+        secret = 'AKIA' + 'A' * 16
+        text = self._stored_after_ingest(
+            [_entry('user', 'y' * (MAX_MESSAGE_CHARS - 10) + ' ' + secret)])
+        self.assertNotIn('AKIA', text)
+        self.assertIn('chars truncated', text)
+
+    def test_secret_straddling_the_tool_stub_cap_is_redacted_before_truncation(self):
+        secret = 'AKIA' + 'A' * 16
+        value = 'x' * (towit_ingest.STUB_VALUE_CHARS - 10) + ' ' + secret
+        text = self._stored_after_ingest([_entry('user', [
+            {'type': 'tool_use', 'name': 'Bash', 'input': {'description': value}}])])
+        self.assertNotIn('AKIA', text)
+        self.assertTrue(text.startswith('[Bash] xxx'))
+
+    def test_secret_straddling_the_error_cap_is_redacted_before_truncation(self):
+        secret = 'AKIA' + 'A' * 16
+        content = 'z' * (towit_ingest.ERROR_RESULT_CHARS - 10) + ' ' + secret
+        text = self._stored_after_ingest([_entry('user', [
+            {'type': 'tool_result', 'is_error': True, 'content': content}])])
+        self.assertNotIn('AKIA', text)
+        self.assertTrue(text.startswith('[error] zzz'))
+
     def test_secret_stored_raw_when_redact_disabled(self):
         secret = 'AKIA' + 'A' * 16
         self.ingest_redact.return_value = False

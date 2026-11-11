@@ -46,7 +46,7 @@ class ParsedTranscript:
     messages: list[ArchiveMessage] = field(default_factory=list)
 
 
-def _tool_stub(item: dict) -> str:
+def _tool_stub(item: dict, redactor=None) -> str:
     """Build '[<ToolName>] <value>' from a tool_use item."""
     name = item.get('name') or 'tool'
     tool_input = item.get('input')
@@ -57,10 +57,12 @@ def _tool_stub(item: dict) -> str:
             if isinstance(candidate, str) and candidate.strip():
                 value = candidate
                 break
+    if redactor:
+        value = redactor(value)  # before the cap, so a cut never leaves part of a secret
     return f'[{name}] {value[:STUB_VALUE_CHARS]}'.rstrip()
 
 
-def _error_text(item: dict) -> str:
+def _error_text(item: dict, redactor=None) -> str:
     """Return '[error] <first 300 chars>' for a failed tool_result."""
     content = item.get('content', '')
     if isinstance(content, list):
@@ -71,6 +73,8 @@ def _error_text(item: dict) -> str:
         )
     elif not isinstance(content, str):
         content = ''
+    if redactor:
+        content = redactor(content)  # before the cap, as for tool stubs
     return '[error] ' + content[:ERROR_RESULT_CHARS]
 
 
@@ -81,7 +85,7 @@ def _truncate(text: str) -> str:
     return f'{text[:MAX_MESSAGE_CHARS]}\n[... {dropped} chars truncated ...]'
 
 
-def _entry_text(content) -> str:
+def _entry_text(content, redactor=None) -> str:
     if isinstance(content, str):
         return content.strip()
     if not isinstance(content, list):
@@ -96,14 +100,19 @@ def _entry_text(content) -> str:
             if isinstance(text, str) and text.strip():
                 parts.append(text.strip())
         elif item_type == 'tool_use':
-            parts.append(_tool_stub(item))
+            parts.append(_tool_stub(item, redactor))
         elif item_type == 'tool_result' and item.get('is_error'):
-            parts.append(_error_text(item))
+            parts.append(_error_text(item, redactor))
     return '\n'.join(parts)
 
 
-def parse_transcript(path: str) -> ParsedTranscript:
-    """Parse a JSONL transcript into ArchiveMessages (no redaction applied)."""
+def parse_transcript(path: str, redactor=None) -> ParsedTranscript:
+    """Parse a JSONL transcript into ArchiveMessages.
+
+    `redactor`, if given, maps text to redacted text. It runs on the full tool value,
+    error text and message before the stub, error and message caps are applied (a secret
+    cut at a cap boundary would otherwise survive in part); no redaction by default.
+    """
     session_id = os.path.basename(path)
     if session_id.endswith('.jsonl'):
         session_id = session_id[:-len('.jsonl')]
@@ -136,7 +145,9 @@ def parse_transcript(path: str) -> ParsedTranscript:
                 if role not in ('user', 'assistant'):
                     continue
 
-                text = _entry_text(msg.get('content', ''))
+                text = _entry_text(msg.get('content', ''), redactor)
+                if redactor and text:
+                    text = redactor(text)
                 if not text:
                     continue
                 ts = entry.get('timestamp') or None
@@ -215,16 +226,13 @@ def ingest_transcript(jsonl_path: str, db: Database | None = None) -> str:
     if db.is_forgotten(session_id):
         return 'forgotten'
 
-    parsed = parse_transcript(path)
+    extra = config.ingest_extra_patterns
+    redactor = (lambda text: redact(text, extra)) if config.ingest_redact else None
+    parsed = parse_transcript(path, redactor)
     if sum(1 for m in parsed.messages if m.role == 'user') < 2:
         return 'skipped'
 
-    extra = config.ingest_extra_patterns
-    do_redact = config.ingest_redact
-    messages = []
-    for m in parsed.messages:
-        text = redact(m.text, extra) if do_redact else m.text
-        messages.append({'role': m.role, 'ts': m.ts, 'text': _sanitize(text)})
+    messages = [{'role': m.role, 'ts': m.ts, 'text': _sanitize(m.text)} for m in parsed.messages]
 
     conv = {
         'id': session_id,
