@@ -450,3 +450,28 @@ EOF
   run "${TOWIT}" doctor --json
   [ "${status}" -ne 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# backfill subcommand (archive ingestion)
+# ---------------------------------------------------------------------------
+
+@test "towit: backfill with indexing disabled archives sessions without calling Claude" {
+  # Pin the real python3 first: a shimmed python3 (mise/asdf) breaks under a fake HOME
+  ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
+  export HOME="${TEST_TMPDIR}/home"
+  mkdir -p "${HOME}"
+  printf '[indexing]\nenabled = false\n' >> "${TOWIT_CONFIG_PATH}"
+  "${TOWIT}" setup
+  local sessions="${TEST_TMPDIR}/sessions"
+  write_fixture_session "${sessions}" "session-aaa-0001"
+  write_fixture_session "${sessions}" "session-bbb-0002"
+
+  run "${TOWIT}" backfill --folder "${sessions}"
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"-> ingested"* ]] || { echo "Expected ingest status, got: ${output}"; return 1; }
+  [[ "${output}" == *"Archived: 2"* ]] || { echo "Expected 'Archived: 2', got: ${output}"; return 1; }
+
+  run "${TOWIT}" stats
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"2"* ]] || { echo "Expected 2 conversations in stats, got: ${output}"; return 1; }
+}

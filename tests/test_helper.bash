@@ -36,3 +36,16 @@ EOF
 _teardown_common() {
   rm -rf "${TEST_TMPDIR}"
 }
+
+# write_fixture_session <dir> <session-id>
+# Write a synthetic two-exchange Claude Code transcript to <dir>/<session-id>.jsonl.
+write_fixture_session() {
+  local dir="$1" session_id="$2"
+  mkdir -p "${dir}"
+  cat > "${dir}/${session_id}.jsonl" <<EOF
+{"type":"user","timestamp":"2026-01-15T10:00:00Z","cwd":"/work/proj","sessionId":"${session_id}","message":{"role":"user","content":"How does SQLite WAL mode work?"}}
+{"type":"assistant","timestamp":"2026-01-15T10:00:05Z","cwd":"/work/proj","sessionId":"${session_id}","message":{"role":"assistant","content":[{"type":"text","text":"WAL appends changes to a log."}]}}
+{"type":"user","timestamp":"2026-01-15T10:01:00Z","cwd":"/work/proj","sessionId":"${session_id}","message":{"role":"user","content":"And how does it help concurrency?"}}
+{"type":"assistant","timestamp":"2026-01-15T10:01:05Z","cwd":"/work/proj","sessionId":"${session_id}","message":{"role":"assistant","content":[{"type":"text","text":"Readers do not block the writer."}]}}
+EOF
+}

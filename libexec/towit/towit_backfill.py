@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-towit_backfill — Backfill the catalog from existing JSONL transcripts.
+towit_backfill — Archive and index existing existing JSONL transcripts.
 
 Usage:
     python3 towit_backfill.py [--dry-run] [--force] [--folder <path>]
@@ -12,7 +12,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from towit_config import config
 from towit_index import index_conversation, parse_jsonl, should_index
+from towit_ingest import ingest_transcript, should_skip_path
 from towit_db import Database
 
 
@@ -38,15 +40,11 @@ def main():
         print(f"Error: directory not found: {search_root}", file=sys.stderr)
         sys.exit(1)
 
-    # Find all JSONL files, sorted by mtime (oldest first).
-    # Exclude subagent sessions — they live under a subagents/ directory and
-    # are not interactive user conversations.
+    # Find all JSONL files, sorted by mtime (oldest first). Symlinks and
+    # subagent sessions are excluded later by ingest_transcript's own rules.
     pattern = os.path.join(search_root, '**', '*.jsonl')
-    jsonl_files = [
-        p for p in glob.glob(pattern, recursive=True)
-        if '/subagents/' not in p and not os.path.islink(p)
-    ]
-    jsonl_files.sort(key=lambda p: os.path.getmtime(p))
+    jsonl_files = glob.glob(pattern, recursive=True)
+    jsonl_files.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0)
 
     total = len(jsonl_files)
     print(f"[0/{total}] Starting backfill...")
@@ -64,13 +62,18 @@ def main():
         except SystemExit:
             db = None  # DB not yet set up; everything would be indexed
 
-    counts = {'indexed': 0, 'skipped': 0, 'already_indexed': 0, 'error': 0}
+    counts = {'indexed': 0, 'skipped': 0, 'already_indexed': 0, 'error': 0, 'archived': 0}
+    archived_statuses = ('ingested', 'appended', 'rewritten', 'unchanged')
 
     for i, path in enumerate(jsonl_files, start=1):
         session_id = os.path.splitext(os.path.basename(path))[0]
         print(f"[{i}/{total}] Processing {session_id}...")
 
         if args.dry_run:
+            if should_skip_path(path):
+                print(f"  -> would skip (excluded: symlink, subagent, or folder filter)")
+                counts['skipped'] += 1
+                continue
             if db is not None and db.is_indexed(session_id) and not args.force:
                 print(f"  -> would skip (already indexed)")
                 counts['already_indexed'] += 1
@@ -85,30 +88,47 @@ def main():
             continue
 
         try:
-            result = index_conversation(path, force=args.force)
+            status = ingest_transcript(path)
         except Exception as exc:
             print(f"  -> error: {exc}", file=sys.stderr)
             counts['error'] += 1
             continue
 
-        if result is None:
-            print(f"  -> error (None returned)")
+        if status not in archived_statuses:
+            print(f"  -> {status}")
+            counts['skipped'] += 1  # 'skipped' or 'forgotten': nothing archived
+            continue
+        counts['archived'] += 1
+
+        if not config.indexing_enabled:
+            print(f"  -> {status} (indexing disabled)")
+            continue
+
+        try:
+            result = index_conversation(path, force=args.force)
+        except Exception as exc:
+            print(f"  -> {status}; index error: {exc}", file=sys.stderr)
             counts['error'] += 1
+            continue
+
+        if result == 'indexed':
+            print(f"  -> {status}; indexed")
+            counts['indexed'] += 1
         elif result == 'already_indexed':
-            print(f"  -> already indexed")
+            print(f"  -> {status}; already indexed")
             counts['already_indexed'] += 1
         elif result == 'skipped':
-            print(f"  -> skipped")
-            counts['skipped'] += 1
-        elif result == 'indexed':
-            print(f"  -> indexed")
-            counts['indexed'] += 1
+            print(f"  -> {status}; index skipped")
         else:
-            print(f"  -> unknown status: {result}")
+            print(f"  -> {status}; index error (status: {result})")
+            counts['error'] += 1
 
+    summary = "\nBackfill complete. "
+    if not args.dry_run:
+        summary += f"Archived: {counts['archived']}, "
     print(
-        f"\nBackfill complete. "
-        f"Indexed: {counts['indexed']}, "
+        summary
+        + f"Indexed: {counts['indexed']}, "
         f"Skipped: {counts['skipped']}, "
         f"Already indexed: {counts['already_indexed']}"
         + (f", Errors: {counts['error']}" if counts['error'] else "")

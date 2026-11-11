@@ -362,5 +362,85 @@ class TestIngestTranscript(unittest.TestCase):
         self.assertEqual(len(self._rows()), len(parse_transcript(self.path).messages))
 
 
+class TestIngestMain(unittest.TestCase):
+    """towit_ingest.main(): the detached process spawned by the stop hook."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.projects = os.path.join(self.tmpdir, '.claude', 'projects', '-work-proj')
+        os.makedirs(self.projects)
+        self.path = os.path.join(self.projects, 'session-abc-123.jsonl')
+        with open(self.path, 'w') as fh:
+            fh.write('{}\n')
+        self.env = unittest.mock.patch.dict(os.environ, {'HOME': self.tmpdir})
+        self.env.start()
+        os.environ.pop('TOWIT_INDEXING', None)
+
+    def tearDown(self):
+        self.env.stop()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _main(self, argv=None, ingest='ingested', enabled=True):
+        argv = [self.path] if argv is None else argv
+        ingest_mock = unittest.mock.MagicMock(side_effect=ingest) \
+            if isinstance(ingest, BaseException) else unittest.mock.MagicMock(return_value=ingest)
+        with unittest.mock.patch.object(towit_ingest, 'ingest_transcript', ingest_mock), \
+             unittest.mock.patch.object(towit_ingest, 'index_conversation') as index, \
+             unittest.mock.patch.object(towit_ingest.config.__class__, 'indexing_enabled',
+                                        new_callable=unittest.mock.PropertyMock,
+                                        return_value=enabled), \
+             unittest.mock.patch('sys.argv', ['towit_ingest.py'] + argv):
+            towit_ingest.main()
+        return ingest_mock, index
+
+    def test_indexes_after_ingest(self):
+        ingest, index = self._main()
+        ingest.assert_called_once()
+        index.assert_called_once_with(os.path.realpath(self.path))
+
+    def test_indexing_disabled_never_indexes(self):
+        ingest, index = self._main(enabled=False)
+        ingest.assert_called_once()
+        index.assert_not_called()
+
+    def test_forgotten_and_skipped_never_index(self):
+        for status in ('forgotten', 'skipped'):
+            _, index = self._main(ingest=status)
+            index.assert_not_called()
+
+    def test_ingest_systemexit_is_swallowed_and_not_indexed(self):
+        _, index = self._main(ingest=SystemExit(1))
+        index.assert_not_called()
+
+    def test_ingest_db_error_is_swallowed_and_not_indexed(self):
+        import sqlite3
+        _, index = self._main(ingest=sqlite3.OperationalError('database is locked'))
+        index.assert_not_called()
+
+    def test_index_error_is_swallowed(self):
+        with unittest.mock.patch.object(towit_ingest, 'index_conversation',
+                                        side_effect=RuntimeError('boom')):
+            with unittest.mock.patch.object(towit_ingest, 'ingest_transcript',
+                                            return_value='ingested'), \
+                 unittest.mock.patch('sys.argv', ['towit_ingest.py', self.path]):
+                towit_ingest.main()  # must not raise
+
+    def test_path_outside_projects_root_is_ignored(self):
+        outside = os.path.join(self.tmpdir, 'x.jsonl')
+        ingest, index = self._main(argv=[outside])
+        ingest.assert_not_called()
+        index.assert_not_called()
+
+    def test_recursion_guard(self):
+        with unittest.mock.patch.dict(os.environ, {'TOWIT_INDEXING': '1'}):
+            ingest, index = self._main()
+        ingest.assert_not_called()
+        index.assert_not_called()
+
+    def test_missing_argument_is_ignored(self):
+        ingest, index = self._main(argv=[])
+        ingest.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()

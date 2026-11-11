@@ -2,8 +2,8 @@
 """
 towit_hook — Claude Code stop hook.
 
-Reads stdin JSON from Claude Code's hook mechanism and indexes the
-completed conversation into the To Wit catalog.
+Reads stdin JSON from Claude Code's hook mechanism and spawns towit_ingest.py
+to archive and index the completed conversation into the To Wit catalog.
 
 Always exits 0 to avoid interrupting Claude Code.
 """
@@ -13,40 +13,12 @@ import os
 import json
 import subprocess
 
-from towit_config import is_valid_session_id
-
-# Guard against recursive calls triggered by towit's own Claude invocations
+# Guard against recursive calls triggered by towit's own Claude invocations.
+# Must run before towit_config is imported (which reads the config file).
 if os.environ.get('TOWIT_INDEXING'):
     sys.exit(0)
 
-_EXPECTED_ROOT = os.path.realpath(os.path.expanduser('~/.claude/projects'))
-
-
-def _validate_jsonl_path(path):
-    """Return realpath if it's under ~/.claude/projects/, else None."""
-    resolved = os.path.realpath(path)
-    if resolved.startswith(_EXPECTED_ROOT + os.sep):
-        return resolved
-    return None
-
-
-def _get_error_logger():
-    """Return a rotating logger that writes to ~/.towit/errors.log."""
-    import logging
-    import logging.handlers
-    log_dir = os.path.expanduser('~/.towit')
-    os.makedirs(log_dir, exist_ok=True)
-    logger = logging.getLogger('towit.hook')
-    if not logger.handlers:
-        handler = logging.handlers.RotatingFileHandler(
-            os.path.join(log_dir, 'errors.log'),
-            maxBytes=100_000,
-            backupCount=2,
-        )
-        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
-        logger.addHandler(handler)
-        logger.setLevel(logging.ERROR)
-    return logger
+from towit_config import get_error_logger, is_valid_session_id, validate_jsonl_path
 
 
 def main():
@@ -61,7 +33,7 @@ def main():
         cwd = data.get('cwd', '')
 
         if transcript_path and os.path.exists(transcript_path):
-            jsonl_path = _validate_jsonl_path(transcript_path)
+            jsonl_path = validate_jsonl_path(transcript_path)
             if jsonl_path is None:
                 sys.exit(0)
         elif session_id and cwd:
@@ -71,7 +43,7 @@ def main():
             # Derive path from cwd encoding
             encoded = cwd.replace('/', '-').lstrip('-')
             folder = os.path.expanduser(f'~/.claude/projects/-{encoded}')
-            jsonl_path = _validate_jsonl_path(os.path.join(folder, f'{session_id}.jsonl'))
+            jsonl_path = validate_jsonl_path(os.path.join(folder, f'{session_id}.jsonl'))
             if jsonl_path is None:
                 sys.exit(0)
         else:
@@ -84,18 +56,18 @@ def main():
         if '/subagents/' in jsonl_path:
             sys.exit(0)
 
-        # Spawn indexing as a detached background process so the stop hook
-        # exits immediately rather than blocking on the Claude API call.
+        # Spawn archiving + indexing as a detached background process so the
+        # stop hook exits immediately rather than blocking on the Claude API call.
         helpers_dir = os.path.dirname(os.path.abspath(__file__))
         subprocess.Popen(
-            [sys.executable, os.path.join(helpers_dir, 'towit_index.py'), jsonl_path],
+            [sys.executable, os.path.join(helpers_dir, 'towit_ingest.py'), jsonl_path],
             start_new_session=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
     except Exception:
         try:
-            _get_error_logger().exception("towit hook error")
+            get_error_logger().exception("towit hook error")
         except Exception:
             pass  # Never interrupt Claude Code
 
