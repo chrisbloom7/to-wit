@@ -198,22 +198,35 @@ class TestBackfillIngest(unittest.TestCase):
         self.index.assert_not_called()
         self.assertIn('Skipped: 1', output)
 
-    def test_subagent_sessions_are_skipped(self):
+    def test_subagent_sessions_are_not_counted_or_printed(self):
         self._write_session('sub-session-001', subdir='subagents')
         output = self._run()
         self.index.assert_not_called()
         self.assertEqual(self._count(), 0)
-        self.assertIn('Skipped: 1', output)
+        self.assertNotIn('sub-session-001', output)
+        self.assertIn('No JSONL files found', output)
+
+    def test_included_subagent_is_archived_but_not_indexed(self):
+        from towit_config import Config
+        self._write_session('sub-session-001', subdir='subagents')
+        with patch.object(Config, 'ingest_include_subagents', new_callable=PropertyMock,
+                          return_value=True):
+            output = self._run()
+        self.assertEqual(self._count(), 1)
+        self.index.assert_not_called()
+        self.assertIn('-> ingested', output)
 
     def test_symlinked_sessions_are_skipped(self):
         real = os.path.join(self.tmpdir, 'outside', 'link-session-001.jsonl')
         os.makedirs(os.path.dirname(real))
         write_jsonl(real, SUBSTANTIAL_MESSAGES, session_id='link-session-001')
         os.symlink(real, os.path.join(self.projects_dir, 'link-session-001.jsonl'))
+        self._write_session('good-session-001')
         output = self._run()
-        self.index.assert_not_called()
-        self.assertEqual(self._count(), 0)
-        self.assertIn('Skipped: 1', output)
+        self.assertEqual(self.index.call_count, 1)
+        self.assertEqual(self._count(), 1)
+        self.assertNotIn('link-session-001', output)
+        self.assertIn('[0/1]', output)
 
     def test_per_file_line_shows_ingest_status(self):
         self._write_session('good-session-001')

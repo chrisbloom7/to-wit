@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-towit_backfill — Archive and index existing existing JSONL transcripts.
+towit_backfill — Archive and index existing JSONL transcripts.
 
 Usage:
     python3 towit_backfill.py [--dry-run] [--force] [--folder <path>]
@@ -40,10 +40,10 @@ def main():
         print(f"Error: directory not found: {search_root}", file=sys.stderr)
         sys.exit(1)
 
-    # Find all JSONL files, sorted by mtime (oldest first). Symlinks and
-    # subagent sessions are excluded later by ingest_transcript's own rules.
+    # Find all JSONL files, sorted by mtime (oldest first). Symlinks, subagent
+    # sessions and folder-filtered files are dropped via ingest's own rules.
     pattern = os.path.join(search_root, '**', '*.jsonl')
-    jsonl_files = glob.glob(pattern, recursive=True)
+    jsonl_files = [p for p in glob.glob(pattern, recursive=True) if not should_skip_path(p)]
     jsonl_files.sort(key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0)
 
     total = len(jsonl_files)
@@ -70,10 +70,6 @@ def main():
         print(f"[{i}/{total}] Processing {session_id}...")
 
         if args.dry_run:
-            if should_skip_path(path):
-                print(f"  -> would skip (excluded: symlink, subagent, or folder filter)")
-                counts['skipped'] += 1
-                continue
             if db is not None and db.is_indexed(session_id) and not args.force:
                 print(f"  -> would skip (already indexed)")
                 counts['already_indexed'] += 1
@@ -102,6 +98,9 @@ def main():
 
         if not config.indexing_enabled:
             print(f"  -> {status} (indexing disabled)")
+            continue
+        if '/subagents/' in os.path.abspath(path):
+            print(f"  -> {status} (subagent: not indexed)")
             continue
 
         try:

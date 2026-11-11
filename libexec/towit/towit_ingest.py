@@ -253,6 +253,8 @@ def main():
         status = ingest_transcript(jsonl_path)
         if status in ('forgotten', 'skipped') or not config.indexing_enabled:
             return
+        if '/subagents/' in jsonl_path:
+            return  # archived only: subagent sessions stay out of the LLM-indexed catalog
         index_conversation(jsonl_path)
     except (Exception, SystemExit):
         # SystemExit: Database.validate() exits when the DB is missing.

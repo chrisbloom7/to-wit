@@ -65,14 +65,21 @@ class TestHook(unittest.TestCase):
         popen.assert_not_called()
 
     def test_recursion_guard_exits_before_reading_config(self):
-        sys.modules.pop('towit_hook', None)
-        with patch.dict(os.environ, {'HOME': self.tmpdir, 'TOWIT_INDEXING': '1'}), \
-             patch('subprocess.Popen') as popen:
-            with self.assertRaises(SystemExit) as cm:
-                import towit_hook  # noqa: F401
-        self.assertEqual(cm.exception.code, 0)
-        popen.assert_not_called()
-        self.assertNotIn('towit_hook', sys.modules)
+        saved = {k: sys.modules.pop(k, None) for k in ('towit_hook', 'towit_config')}
+        try:
+            with patch.dict(os.environ, {'HOME': self.tmpdir, 'TOWIT_INDEXING': '1'}), \
+                 patch('subprocess.Popen') as popen:
+                with self.assertRaises(SystemExit) as cm:
+                    import towit_hook  # noqa: F401
+            self.assertEqual(cm.exception.code, 0)
+            popen.assert_not_called()
+            self.assertNotIn('towit_hook', sys.modules)
+            self.assertNotIn('towit_config', sys.modules)
+        finally:
+            for k, v in saved.items():
+                sys.modules.pop(k, None)
+                if v is not None:
+                    sys.modules[k] = v
 
 
 if __name__ == '__main__':

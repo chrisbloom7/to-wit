@@ -418,12 +418,29 @@ class TestIngestMain(unittest.TestCase):
         index.assert_not_called()
 
     def test_index_error_is_swallowed(self):
-        with unittest.mock.patch.object(towit_ingest, 'index_conversation',
-                                        side_effect=RuntimeError('boom')):
-            with unittest.mock.patch.object(towit_ingest, 'ingest_transcript',
-                                            return_value='ingested'), \
-                 unittest.mock.patch('sys.argv', ['towit_ingest.py', self.path]):
-                towit_ingest.main()  # must not raise
+        with unittest.mock.patch.object(towit_ingest.config.__class__, 'indexing_enabled',
+                                        new_callable=unittest.mock.PropertyMock,
+                                        return_value=True), \
+             unittest.mock.patch.object(towit_ingest, 'index_conversation',
+                                        side_effect=RuntimeError('boom')) as index, \
+             unittest.mock.patch.object(towit_ingest, 'ingest_transcript',
+                                        return_value='ingested'), \
+             unittest.mock.patch('sys.argv', ['towit_ingest.py', self.path]):
+            towit_ingest.main()  # must not raise
+        index.assert_called_once()
+
+    def test_subagent_transcript_is_archived_but_not_indexed(self):
+        sub = os.path.join(self.projects, 'subagents')
+        os.makedirs(sub)
+        path = os.path.join(sub, 'agent-abc-123.jsonl')
+        with open(path, 'w') as fh:
+            fh.write('{}\n')
+        with unittest.mock.patch.object(towit_ingest.config.__class__, 'ingest_include_subagents',
+                                        new_callable=unittest.mock.PropertyMock,
+                                        return_value=True):
+            ingest, index = self._main(argv=[path])
+        ingest.assert_called_once()
+        index.assert_not_called()
 
     def test_path_outside_projects_root_is_ignored(self):
         outside = os.path.join(self.tmpdir, 'x.jsonl')
@@ -438,8 +455,9 @@ class TestIngestMain(unittest.TestCase):
         index.assert_not_called()
 
     def test_missing_argument_is_ignored(self):
-        ingest, index = self._main(argv=[])
+        ingest, index = self._main(argv=[], enabled=True)
         ingest.assert_not_called()
+        index.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -473,5 +473,5 @@ EOF
 
   run "${TOWIT}" stats
   [ "${status}" -eq 0 ]
-  [[ "${output}" == *"2"* ]] || { echo "Expected 2 conversations in stats, got: ${output}"; return 1; }
+  [[ "${output}" == *"Conversations indexed : 2"* ]] || { echo "Expected 2 conversations in stats, got: ${output}"; return 1; }
 }
