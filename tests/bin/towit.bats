@@ -153,7 +153,7 @@ _setup_isolated_home() {
   [ "${mode}" = "600" ] || { echo "Expected mode 600, got ${mode}"; return 1; }
   [[ "${output}" == *"Config file created at"* ]] || { echo "${output}"; return 1; }
   [[ "${output}" == *"Database initialized"* ]] || { echo "${output}"; return 1; }
-  [[ "${output}" == *"stop hook installed"* ]] || { echo "${output}"; return 1; }
+  [[ "${output}" == *"hooks installed"* ]] || { echo "${output}"; return 1; }
   [[ "${output}" == *"No JSONL files found"* || "${output}" == *"Backfill"* ]] || {
     echo "${output}"; return 1
   }

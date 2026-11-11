@@ -568,6 +568,23 @@ class Database:
             ).fetchone()
             return row is not None
 
+    def get_meta(self, key: str) -> str | None:
+        """Return the value stored under `key` in the meta table, or None."""
+        self.validate()
+        with self.connect() as conn:
+            row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+            return row['value'] if row else None
+
+    def set_meta(self, key: str, value: str) -> None:
+        """Upsert a meta key/value pair."""
+        self.validate()
+        with self.connect() as conn:
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+
     def archive_session(self, conv: dict, messages: list) -> str:
         """
         Atomically sync a session's messages into the archive.

@@ -123,29 +123,28 @@ class TestTowitImplode(unittest.TestCase):
 
 
     def test_removes_hook_if_present(self):
+        other = {"type": "command", "command": "echo other-tool"}
+        seeded = {"hooks": {ev: [{"matcher": m, "hooks": [other]}]
+                            for ev, m in (("Stop", ""), ("SessionEnd", ""),
+                                          ("SessionStart", "startup"))}}
+        os.makedirs(os.path.dirname(self.settings_path), exist_ok=True)
+        with open(self.settings_path, 'w') as f:
+            json.dump(seeded, f)
         run_install_hook(self.tmpdir, settings_path=self.settings_path)
-        self.assertTrue(os.path.exists(self.settings_path))
+        with open(self.settings_path) as f:
+            installed = json.dumps(json.load(f))
+        self.assertEqual(installed.count('towit_hook.py'), 3)
 
         run_implode(self.db_path, self.config_path, self.tmpdir,
                     settings_path=self.settings_path,
                     args=['--yes', '--install-dir', self.install_dir])
 
-        if os.path.exists(self.settings_path):
-            with open(self.settings_path) as f:
-                data = json.load(f)
-            stop_hooks = data.get('hooks', {}).get('Stop', [])
-            all_commands = []
-            for entry in stop_hooks:
-                if isinstance(entry, dict):
-                    if 'command' in entry:
-                        all_commands.append(entry['command'])
-                    for nested in entry.get('hooks', []):
-                        if isinstance(nested, dict) and 'command' in nested:
-                            all_commands.append(nested['command'])
-            self.assertFalse(
-                any('towit_hook.py' in cmd for cmd in all_commands),
-                f"Expected To Wit hook removed, but found: {all_commands}"
-            )
+        with open(self.settings_path) as f:
+            data = json.load(f)
+        self.assertNotIn('towit_hook.py', json.dumps(data))
+        for event in ('Stop', 'SessionEnd', 'SessionStart'):
+            cmds = [h['command'] for e in data['hooks'][event] for h in e['hooks']]
+            self.assertEqual(cmds, ['echo other-tool'], event)
 
     def test_deletes_db_file_if_present(self):
         run_setup(self.db_path, self.config_path, self.tmpdir)

@@ -429,6 +429,26 @@ class TestDatabaseValidate(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
 
 
+class TestMeta(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db = Database(os.path.join(self.tmpdir, 'catalog.db'))
+        self.db.create_schema()
+
+    def test_get_missing_is_none(self):
+        self.assertIsNone(self.db.get_meta('x'))
+
+    def test_set_then_get(self):
+        self.db.set_meta('x', '1')
+        self.assertEqual(self.db.get_meta('x'), '1')
+
+    def test_set_overwrites(self):
+        self.db.set_meta('x', '1')
+        self.db.set_meta('x', '2')
+        self.assertEqual(self.db.get_meta('x'), '2')
+
+
 class TestArchiveSchema(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
