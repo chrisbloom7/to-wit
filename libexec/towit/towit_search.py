@@ -196,7 +196,8 @@ def main():
                              'plus keywords, titles and summaries. Text-only results are '
                              'capped at 50; metadata results are never capped')
     parser.add_argument('--repo', metavar='PATH|NAME',
-                        help='Restrict search to a repo (its key, or its directory name)')
+                        help='Restrict search to a repo: its key, its directory name, or a worktree of it '
+                             '(a directory named NAME.<branch>)')
     args = parser.parse_args()
 
     db = Database()

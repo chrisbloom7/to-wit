@@ -502,12 +502,14 @@ class Database:
             return [self._row_to_dict(r) for r in rows]
 
     def _repo_filter(self, repo: str, col: str = 'c.repo_key') -> tuple:
-        """Return (sql, params) matching rows whose `col` equals repo exactly or whose
-        final path component equals repo.
+        """Return (sql, params) matching rows whose `col` equals repo exactly, whose final
+        path component equals repo, or whose final path component starts with `repo + '.'`
+        (so `studio-app` matches the worktree key `/src/studio-app.phase-2a-payments`).
 
         `col` is a hardcoded column reference supplied by the caller (never user input).
-        The basename test compares a suffix with substr(), not LIKE, so '%', '_' and
-        '\\' in repo are literal. A trailing slash on repo is ignored.
+        The component tests compare with substr(), not LIKE, so '%', '_' and '\\' in repo
+        are literal. A trailing slash on repo is ignored; a repo containing '/' is only
+        matched as a whole key.
         """
         stripped = repo.rstrip('/')
         if not stripped:
@@ -517,6 +519,11 @@ class Database:
         if '/' not in stripped:
             sql += f" OR substr({col}, -length(?)) = ?"
             params += ['/' + stripped, '/' + stripped]
+            # Final path component: everything after the last '/' (rtrim of the
+            # non-slash characters leaves the key up to and including that slash).
+            base = f"substr({col}, length(rtrim({col}, replace({col}, '/', ''))) + 1)"
+            sql += f" OR substr({base}, 1, length(?)) = ?"
+            params += [stripped + '.', stripped + '.']
         return sql + ')', params
 
     def _text_match_query(self, folder, repo) -> tuple:
@@ -794,7 +801,7 @@ class Database:
 
     def conversation_ids_for_scope(self, repo: str = None, folder: str = None) -> list:
         """Return ids of conversations in a scope: `repo` matches repo_key exactly or by
-        final path component (as in search); `folder` matches cwd exactly (as in search
+        final path component or its `name.` prefix (as in search); `folder` matches cwd exactly (as in search
         and list). With neither, returns [] — callers must pick a scope explicitly."""
         self.validate()
         clauses, params = self._scope_clauses(repo, folder)
@@ -819,7 +826,7 @@ class Database:
 
     def repo_count_for_scope(self, repo: str = None, folder: str = None) -> int:
         """Number of distinct repo_keys among the conversations in a scope (see
-        conversation_ids_for_scope); lets a caller show how widely a basename matches."""
+        conversation_ids_for_scope); lets a caller show how widely a name matches."""
         self.validate()
         clauses, params = self._scope_clauses(repo, folder)
         if not clauses:
@@ -828,6 +835,19 @@ class Database:
             return conn.execute(
                 "SELECT COUNT(DISTINCT repo_key) FROM conversations WHERE " + " AND ".join(clauses),
                 params).fetchone()[0]
+
+    def repo_keys_for_scope(self, repo: str = None, folder: str = None) -> list:
+        """Sorted distinct non-null repo_keys among the conversations in a scope (see
+        conversation_ids_for_scope); lets a caller show what a name matched."""
+        self.validate()
+        clauses, params = self._scope_clauses(repo, folder)
+        if not clauses:
+            return []
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT repo_key FROM conversations WHERE repo_key IS NOT NULL AND "
+                + " AND ".join(clauses) + " ORDER BY repo_key", params).fetchall()
+            return [r[0] for r in rows]
 
     def _prune_orphan_labels(self, conn):
         """Delete topics and keywords no conversation links to (their names derive from

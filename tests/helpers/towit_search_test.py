@@ -432,6 +432,19 @@ class TestTowitSearchArchive(unittest.TestCase):
             r = run_search(self.config_path, ['guard', '--repo', repo, '--format', 'json'])
             self.assertEqual([d['id'] for d in json.loads(r.stdout)], ['arc-2'], repo)
 
+    def test_repo_name_matches_worktree_key_by_prefix(self):
+        import json
+        db = Database(self.db_path)
+        for sid, key in (('wt-1', '/src/app.phase-2a'), ('wt-2', '/src/app2'),
+                         ('wt-3', '/src/otherapp.x')):
+            db.archive_session(
+                {'id': sid, 'folder': '/f', 'cwd': '/w/wt', 'started_at': '2026-02-03T00:00:00Z',
+                 'last_active': None, 'repo_key': key, 'source_path': None},
+                [{'role': 'user', 'ts': None, 'text': 'prefixprobe here'},
+                 {'role': 'assistant', 'ts': None, 'text': 'ok'}])
+        r = run_search(self.config_path, ['prefixprobe', '--repo', 'app', '--format', 'json'])
+        self.assertEqual([d['id'] for d in json.loads(r.stdout)], ['wt-1'])
+
     def test_hostile_term_does_not_crash(self):
         r = run_search(self.config_path, ['"', '--format', 'json'])
         self.assertEqual(r.returncode, 0, r.stderr)

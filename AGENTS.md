@@ -40,7 +40,7 @@ No build step required — it's a bash/Python CLI tool.
 Subcommand modules map 1:1 to `bin/towit` cases (`towit_search.py`, `towit_show.py`, `towit_forget.py`, `towit_prune.py`, `towit_stats.py`, `towit_doctor.py`, ...). The modules below are not subcommands:
 
 - `towit_config.py` — Loads `~/.towit/config.toml` (typed accessors, warnings for unknown keys), `safe_subprocess_env()`, session-id and transcript-path validation, the rotating error logger
-- `towit_db.py` — Database abstraction layer; all SQL lives here (schema, migrations, search, forget, archive writes)
+- `towit_db.py` — Database abstraction layer; all SQL lives here (schema, migrations, search, forget, archive writes). `_repo_filter` implements `--repo NAME` for search and forget: exact key, final path component equal to `NAME`, or final component starting with `NAME.` (worktree dirs); it uses `substr()`, never `LIKE`, so wildcards stay literal. `towit_forget` prints `repo_keys_for_scope` in its prompt
 - `towit_ingest.py` — Archive ingest: parses JSONL into messages plus tool stubs, redacts, stores append-only, resolves `repo_key` (git common dir, else the cwd) once at first ingest (the stored key is kept afterwards unless it is NULL), runs the `SessionStart` catch-up scan. Its `main()` is the detached process the hook spawns (archive, then LLM indexing)
 - `towit_sanitize.py` — Strips terminal control sequences from archived text before it is printed (`show` text output, and the table output of `search` and `list`, which also collapse newlines)
 - `towit_redact.py` — Best-effort, pattern-based secret redaction (`[REDACTED:<kind>]`)

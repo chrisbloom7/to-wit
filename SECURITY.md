@@ -39,7 +39,7 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 
 ### Deleting Data (`towit forget`)
 
-- `towit forget <session-id>`, `--repo <path|name>`, and `--folder <path>` permanently delete conversations with their messages, search-index entries, topics, and keywords, after a confirmation prompt (or `--yes`)
+- `towit forget <session-id>`, `--repo <path|name>`, and `--folder <path>` permanently delete conversations with their messages, search-index entries, topics, and keywords, after a confirmation prompt (or `--yes`). `--repo NAME` matches a repo key exactly, by its final path component, or by a final component starting with `NAME.` (worktree directories), so it can match more than one repo; the prompt lists the matched repo keys (up to 10) before you confirm
 - A tombstone (the session id and a timestamp only) is kept so that `backfill`, the hooks, and the catch-up scan cannot re-ingest a conversation from a transcript that is still on disk
 - Deletion is physical, not just logical: `PRAGMA secure_delete=ON` zeroes freed pages, the FTS5 index is merged (`optimize`), and a `VACUUM` plus write-ahead-log truncate follow (`towit prune --archive` deletes the same way, without a tombstone). If that cleanup cannot finish, `forget` warns on stderr and `towit forget <session-id>` can be re-run to retry
 - The original transcripts under `~/.claude/projects/` are not touched

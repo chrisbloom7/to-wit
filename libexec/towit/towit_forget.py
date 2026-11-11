@@ -21,6 +21,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_config import is_valid_session_id
 from towit_db import Database
+from towit_sanitize import sanitize_cell
+
+
+MAX_LISTED_KEYS = 10
 
 
 def main():
@@ -28,7 +32,8 @@ def main():
         description='Permanently delete conversations from the To Wit catalog and archive.'
     )
     parser.add_argument('session_id', nargs='?', help='Session ID to forget')
-    parser.add_argument('--repo', help='Forget every conversation in this repo (path or name)')
+    parser.add_argument('--repo', help='Forget every conversation in this repo (its key, its directory name, '
+                        'or a worktree directory named NAME.<branch>); lists the matched keys at the prompt')
     parser.add_argument('--folder', help='Forget every conversation whose working directory is exactly this path')
     parser.add_argument('--yes', '-y', action='store_true', help='Skip confirmation prompt')
     args = parser.parse_args()
@@ -69,11 +74,19 @@ def main():
     if args.repo is not None:
         repos = db.repo_count_for_scope(repo=args.repo)
         prompt = (f"Delete {len(ids)} conversation(s) across {repos} repo(s) "
-                  f"matching '{args.repo}'? [y/N] ")
+                  f"matching '{sanitize_cell(args.repo)}'? [y/N] ")
     else:
         prompt = f"Delete {len(ids)} conversation(s)? [y/N] "
 
     if not args.yes:
+        if args.repo is not None:
+            # A name also matches worktree keys such as <name>.<branch>; show what matched.
+            keys = db.repo_keys_for_scope(repo=args.repo)
+            print("Matched repo keys:")
+            for key in keys[:MAX_LISTED_KEYS]:
+                print(f"  {sanitize_cell(key)}")
+            if len(keys) > MAX_LISTED_KEYS:
+                print(f"  +{len(keys) - MAX_LISTED_KEYS} more")
         try:
             answer = input(prompt).strip().lower()
         except (EOFError, KeyboardInterrupt):
