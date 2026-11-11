@@ -32,7 +32,9 @@ _KNOWN_KEYS = {
         'min_keywords', 'max_keywords',
         'min_summary_sentences', 'max_summary_sentences',
         'transcript_max_chars',
+        'enabled',
     },
+    'ingest': {'redact', 'extra_patterns', 'include_subagents', 'folders'},
 }
 
 
@@ -80,10 +82,25 @@ class Config:
         if key not in section_data:
             return default
         value = section_data[key]
-        if not isinstance(value, expected_type) or isinstance(value, bool):
+        # bool is a subclass of int, so reject it unless a bool was asked for.
+        if not isinstance(value, expected_type) or (
+            isinstance(value, bool) and expected_type is not bool
+        ):
             print(
                 f"Warning: config [{section}] {key!r} must be a "
                 f"{expected_type.__name__}; using default ({default!r}).",
+                file=sys.stderr,
+            )
+            return default
+        return value
+
+    def _get_str_list(self, section, key, default):
+        """Return a list of str, or default (with a warning) if not a list of str."""
+        value = self._get(section, key, default, list)
+        if value is not default and not all(isinstance(v, str) for v in value):
+            print(
+                f"Warning: config [{section}] {key!r} must be a list of "
+                f"strings; using default ({default!r}).",
                 file=sys.stderr,
             )
             return default
@@ -145,6 +162,31 @@ class Config:
     def indexing_transcript_max_chars(self) -> int:
         """Character cap applied to the transcript before sending to Claude."""
         return self._get('indexing', 'transcript_max_chars', 8000, int)
+
+    @property
+    def indexing_enabled(self) -> bool:
+        """Whether the stop hook runs LLM indexing. False leaves only archiving."""
+        return self._get('indexing', 'enabled', True, bool)
+
+    @property
+    def ingest_redact(self) -> bool:
+        """Redact secrets from message text before archiving."""
+        return self._get('ingest', 'redact', True, bool)
+
+    @property
+    def ingest_extra_patterns(self) -> list:
+        """Extra regex patterns to redact, in addition to the built-in set."""
+        return self._get_str_list('ingest', 'extra_patterns', [])
+
+    @property
+    def ingest_include_subagents(self) -> bool:
+        """Also archive sessions found under subagents/ directories."""
+        return self._get('ingest', 'include_subagents', False, bool)
+
+    @property
+    def ingest_folders(self) -> list:
+        """Restrict archiving to these folders. Empty means all folders."""
+        return self._get_str_list('ingest', 'folders', [])
 
     @property
     def db_path(self) -> str:

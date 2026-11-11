@@ -355,5 +355,91 @@ class TestIndexingConfig(unittest.TestCase):
             self.assertIn('Warning', mock_err.getvalue())
 
 
+class TestConfigIngest(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _warnings(self, cfg, attr):
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            result = getattr(cfg, attr)
+        return result, mock_err.getvalue()
+
+    def test_defaults(self):
+        cfg = Config(path='/nonexistent/config.toml')
+        self.assertIs(cfg.ingest_redact, True)
+        self.assertEqual(cfg.ingest_extra_patterns, [])
+        self.assertIs(cfg.ingest_include_subagents, False)
+        self.assertEqual(cfg.ingest_folders, [])
+        self.assertIs(cfg.indexing_enabled, True)
+
+    def test_values_read_from_config(self):
+        path = write_config(self.tmpdir, (
+            '[ingest]\n'
+            'redact = false\n'
+            'extra_patterns = ["foo[0-9]+", "bar"]\n'
+            'include_subagents = true\n'
+            'folders = ["/a", "/b"]\n'
+            '[indexing]\nenabled = false\n'
+        ))
+        cfg = Config(path=path)
+        self.assertIs(cfg.ingest_redact, False)
+        self.assertEqual(cfg.ingest_extra_patterns, ['foo[0-9]+', 'bar'])
+        self.assertIs(cfg.ingest_include_subagents, True)
+        self.assertEqual(cfg.ingest_folders, ['/a', '/b'])
+        self.assertIs(cfg.indexing_enabled, False)
+
+    def test_redact_wrong_type_warns_and_uses_default(self):
+        path = write_config(self.tmpdir, '[ingest]\nredact = "yes"\n')
+        result, err = self._warnings(Config(path=path), 'ingest_redact')
+        self.assertIs(result, True)
+        self.assertIn('Warning', err)
+
+    def test_indexing_enabled_wrong_type_warns_and_uses_default(self):
+        path = write_config(self.tmpdir, '[indexing]\nenabled = 1\n')
+        result, err = self._warnings(Config(path=path), 'indexing_enabled')
+        self.assertIs(result, True)
+        self.assertIn('Warning', err)
+
+    def test_bool_still_rejected_where_int_expected(self):
+        path = write_config(self.tmpdir, '[indexing]\nreindex_delta = true\n')
+        result, err = self._warnings(Config(path=path), 'indexing_reindex_delta')
+        self.assertEqual(result, 2)
+        self.assertIn('Warning', err)
+
+    def test_bool_still_rejected_where_str_expected(self):
+        path = write_config(self.tmpdir, '[indexing]\nmodel = true\n')
+        result, err = self._warnings(Config(path=path), 'indexing_model')
+        self.assertEqual(result, 'haiku')
+        self.assertIn('Warning', err)
+
+    def test_unknown_ingest_key_warns(self):
+        path = write_config(self.tmpdir, '[ingest]\nbogus = 1\n')
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            Config(path=path)
+        self.assertIn('bogus', mock_err.getvalue())
+
+    def test_known_ingest_keys_do_not_warn(self):
+        path = write_config(self.tmpdir, '[ingest]\nredact = true\n[indexing]\nenabled = true\n')
+        with unittest.mock.patch('sys.stderr', new_callable=io.StringIO) as mock_err:
+            Config(path=path)
+        self.assertEqual(mock_err.getvalue(), '')
+
+    def test_folders_not_a_list_warns_and_returns_empty(self):
+        path = write_config(self.tmpdir, '[ingest]\nfolders = "x"\n')
+        result, err = self._warnings(Config(path=path), 'ingest_folders')
+        self.assertEqual(result, [])
+        self.assertIn('Warning', err)
+
+    def test_extra_patterns_with_non_str_element_warns_and_returns_empty(self):
+        path = write_config(self.tmpdir, '[ingest]\nextra_patterns = ["ok", 3]\n')
+        result, err = self._warnings(Config(path=path), 'ingest_extra_patterns')
+        self.assertEqual(result, [])
+        self.assertIn('Warning', err)
+
+
 if __name__ == '__main__':
     unittest.main()

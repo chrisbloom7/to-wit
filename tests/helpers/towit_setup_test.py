@@ -42,6 +42,16 @@ class TestTowitSetup(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
+    def test_config_template_documents_ingest_and_enabled(self):
+        fresh = os.path.join(self.tmpdir, 'fresh', 'config.toml')
+        result = run_setup(self.db_path, fresh, ['--config'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(fresh) as f:
+            content = f.read()
+        self.assertIn('[ingest]', content)
+        self.assertIn('include_subagents', content)
+        self.assertIn('enabled', content)
+
     def test_creates_db_file_at_towit_db_path(self):
         self.assertFalse(os.path.exists(self.db_path))
         result = run_setup(self.db_path, self.config_path)
