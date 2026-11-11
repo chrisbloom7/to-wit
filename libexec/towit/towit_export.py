@@ -29,7 +29,7 @@ def _call_claude(prompt: str) -> str:
     if config.ingest_redact:
         prompt = redact(prompt, config.ingest_extra_patterns)
     result = subprocess.run(
-        ['claude', '-p', prompt, '--output-format', 'text'],
+        ['claude', '-p', prompt, '--output-format', 'text', '--no-session-persistence'],
         capture_output=True, text=True, timeout=120,
         env=safe_subprocess_env({'TOWIT_INDEXING': '1'})
     )
