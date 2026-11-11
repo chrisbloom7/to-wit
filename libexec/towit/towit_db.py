@@ -820,6 +820,23 @@ class Database:
         busy, log, checkpointed = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
         return busy == 0 and checkpointed >= log
 
+    def purge_free_space(self, example_id: str = '<session-id>') -> str | None:
+        """Physically remove text freed earlier by any writer (VACUUM, then truncate the
+        WAL). Idempotent, safe to run any time, and never raises: returns a warning
+        string naming the retry command (`towit forget <example_id>`) if cleanup was
+        incomplete, else None."""
+        self.validate()
+        retry = (f"Re-run `towit forget {example_id}` when no other towit process is "
+                 f"active to finish cleanup.")
+        try:
+            with self.connect() as conn:
+                if self._purge_free_space(conn):
+                    return None
+        except sqlite3.Error as exc:
+            return (f"the conversations were forgotten, but physical cleanup was incomplete "
+                    f"({exc}); deleted data may remain on disk. {retry}")
+        return f"some deleted data may remain in the write-ahead log. {retry}"
+
     def forget_conversations(self, ids: list) -> int:
         """Permanently delete conversations and tombstone their ids; return how many existed.
 
@@ -831,13 +848,14 @@ class Database:
         clears the FTS index) and to topic/keyword links. The tombstone keeps only the id
         and a timestamp. Ids that do not exist are ignored (no tombstone).
 
-        After the commit, VACUUM and a WAL truncate remove text freed earlier by any
-        writer. Those steps never raise: on failure `self.cleanup_warning` holds a
-        message and the forget itself still stands (it is None after a clean run).
+        After the commit, purge_free_space() VACUUMs and truncates the WAL. That never
+        raises: on failure `self.cleanup_warning` holds a message and the forget itself
+        still stands (it is None after a clean run).
         """
         self.validate()
         self.cleanup_warning = None
         forgotten = 0
+        first_id = None
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
@@ -845,6 +863,7 @@ class Database:
                     if conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,)).rowcount:
                         conn.execute("INSERT OR IGNORE INTO forgotten (id) VALUES (?)", (conv_id,))
                         forgotten += 1
+                        first_id = first_id or conv_id
                 if forgotten:
                     self._prune_orphan_labels(conn)
                     self._optimize_fts(conn)
@@ -852,18 +871,8 @@ class Database:
             except Exception:
                 conn.rollback()
                 raise
-            if forgotten:
-                try:
-                    if not self._purge_free_space(conn):
-                        self.cleanup_warning = (
-                            "some deleted data may remain in the write-ahead log; re-run "
-                            "`towit forget` cleanup (or any towit write) when no other "
-                            "towit process is active.")
-                except sqlite3.Error as exc:
-                    self.cleanup_warning = (
-                        f"the conversations were forgotten, but physical cleanup was incomplete "
-                        f"({exc}); deleted data may remain on disk. Retry when no other towit "
-                        f"process is active.")
+        if forgotten:
+            self.cleanup_warning = self.purge_free_space(first_id)
         return forgotten
 
     def forget_conversation(self, conv_id: str) -> bool:

@@ -256,6 +256,33 @@ class TestRawBytesPurged(ForgetBase):
             self.assertEqual(conn.execute('PRAGMA secure_delete').fetchone()[0], 1)
 
 
+class TestForgetKeepsPermissions(unittest.TestCase):
+    def test_files_stay_private_after_vacuuming_forget(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        d = os.path.join(tmp, 'towit')
+        old = os.umask(0o077)
+        try:
+            os.mkdir(d)
+            os.umask(0o177)
+            db = Database(os.path.join(d, 'catalog.db'))
+            db.create_schema()
+        finally:
+            os.umask(old)
+        os.umask(0o022)
+        self.addCleanup(os.umask, old)
+        db.archive_session({'id': 'sess-0001', 'folder': 'f', 'cwd': '/w', 'repo_key': None,
+                            'started_at': None, 'last_active': None, 'source_path': None},
+                           [{'role': 'user', 'ts': None, 'text': 'hello ' * 500}])
+        keeper = sqlite3.connect(db.db_path)
+        self.addCleanup(keeper.close)
+        keeper.execute('PRAGMA journal_mode=WAL')
+        self.assertTrue(db.forget_conversation('sess-0001'))
+        self.assertEqual(os.stat(d).st_mode & 0o777, 0o700)
+        for path in glob.glob(db.db_path + '*'):
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600, path)
+
+
 class TestForgetCleanupWarnings(ForgetBase):
     def setUp(self):
         super().setUp()
@@ -269,7 +296,10 @@ class TestForgetCleanupWarnings(ForgetBase):
         with unittest.mock.patch.object(towit_forget, 'Database', return_value=self.db), \
                 unittest.mock.patch.object(sys, 'argv', ['towit_forget.py'] + args), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            towit_forget.main()
+            try:
+                towit_forget.main()
+            finally:
+                self.last_err = err.getvalue()
         return out.getvalue(), err.getvalue()
 
     def test_clean_run_has_no_warning(self):
@@ -284,6 +314,7 @@ class TestForgetCleanupWarnings(ForgetBase):
         self.assertTrue(self.db.forget_conversation('sess-0001'))
         self.assertEqual(self.remaining(), 0)
         self.assertIn('write-ahead log', self.db.cleanup_warning)
+        self.assertIn('`towit forget sess-0001`', self.db.cleanup_warning)
 
     def test_post_commit_failure_warns_and_exits_cleanly(self):
         with unittest.mock.patch.object(Database, '_purge_free_space',
@@ -292,6 +323,7 @@ class TestForgetCleanupWarnings(ForgetBase):
         self.assertIn('Forgot 1 conversation(s).', out)
         self.assertIn('Warning:', err)
         self.assertIn('physical cleanup', err)
+        self.assertIn('`towit forget sess-0001`', err)
         self.assertEqual(self.remaining(), 0)
         self.assertTrue(self.db.is_forgotten('sess-0001'))
 
@@ -303,6 +335,58 @@ class TestForgetCleanupWarnings(ForgetBase):
         out, err = self.run_cli(['sess-0001', '--yes'])
         self.assertIn('Forgot 1 conversation(s).', out)
         self.assertIn('Warning: some deleted data may remain in the write-ahead log', err)
+        self.assertIn('Re-run `towit forget sess-0001`', err)
+
+    def test_bulk_warning_names_first_forgotten_id(self):
+        self.ingest('sess-0002', ['two', 'answer', 'more'])
+        with unittest.mock.patch.object(Database, '_purge_free_space',
+                                        side_effect=sqlite3.OperationalError('x')):
+            self.db.forget_conversations(['sess-0002', 'sess-0001'])
+        self.assertIn('`towit forget sess-0002`', self.db.cleanup_warning)
+
+    def test_purge_free_space_is_idempotent_and_returns_none_when_clean(self):
+        self.db.forget_conversation('sess-0001')
+        self.assertIsNone(self.db.purge_free_space('sess-0001'))
+        self.assertIsNone(self.db.purge_free_space('sess-0001'))
+
+    def test_already_forgotten_id_reruns_cleanup_and_exits_zero(self):
+        self.db.forget_conversation('sess-0001')
+        with unittest.mock.patch.object(Database, 'purge_free_space', return_value=None) as purge:
+            out, err = self.run_cli(['sess-0001'])
+        purge.assert_called_once()
+        self.assertIn('Already forgotten; re-ran physical cleanup.', out)
+        self.assertEqual(err, '')
+
+    def test_already_forgotten_rerun_prints_cleanup_warning(self):
+        self.db.forget_conversation('sess-0001')
+        with unittest.mock.patch.object(Database, 'purge_free_space', return_value='Re-run it'):
+            out, err = self.run_cli(['sess-0001'])
+        self.assertIn('Warning: Re-run it', err)
+
+    def test_unknown_untombstoned_id_exits_1_without_cleanup(self):
+        with unittest.mock.patch.object(Database, 'purge_free_space') as purge:
+            with self.assertRaises(SystemExit) as cm:
+                self.run_cli(['nope-0000'])
+        self.assertEqual(cm.exception.code, 1)
+        purge.assert_not_called()
+        self.assertFalse(self.db.is_forgotten('nope-0000'))
+
+    def test_bulk_selector_matching_nothing_does_not_run_cleanup(self):
+        with unittest.mock.patch.object(Database, 'purge_free_space') as purge:
+            with self.assertRaises(SystemExit) as cm:
+                self.run_cli(['--folder', '/nowhere', '--yes'])
+        self.assertEqual(cm.exception.code, 1)
+        purge.assert_not_called()
+
+    def test_in_transaction_failure_is_a_clean_error(self):
+        with unittest.mock.patch.object(Database, '_optimize_fts',
+                                        side_effect=sqlite3.OperationalError('boom')):
+            with self.assertRaises(SystemExit) as cm:
+                self.run_cli(['sess-0001', '--yes'])
+        self.assertEqual(cm.exception.code, 1)
+        self.assertEqual(self.remaining(), 1)
+        self.assertIn('Error: could not forget (boom); nothing was deleted.', self.last_err)
+        self.assertNotIn('Traceback', self.last_err)
 
     def test_optimize_failure_rolls_back_the_whole_forget(self):
         with unittest.mock.patch.object(Database, '_optimize_fts',
