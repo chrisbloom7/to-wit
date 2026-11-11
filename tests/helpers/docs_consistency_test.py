@@ -139,5 +139,19 @@ class TestAgentsMd(DocTestCase):
         self.assertMatches(_read('CLAUDE.md'), r'(?m)^@AGENTS\.md\s*$', "CLAUDE.md must import @AGENTS.md")
 
 
+class TestSecurityMd(DocTestCase):
+    def test_security_allowlist_matches_source(self):
+        sentence = next((line for line in _read('SECURITY.md').splitlines()
+                         if 'prefix allowlist' in line), None)
+        self.assertIsNotNone(sentence, "SECURITY.md has no subprocess-allowlist sentence")
+        documented = {token.rstrip('*') for token in re.findall(r'`([A-Za-z_*]+)`', sentence)}
+        self.assertEqual(documented, set(towit_config._PASS_THROUGH_PREFIXES))
+
+    def test_security_documents_archive_controls(self):
+        security = _read('SECURITY.md')
+        for term in ('redact', 'forget', 'FTS5', 'claude purge', 'SessionEnd'):
+            self.assertContains(security, term, f"SECURITY.md does not mention {term!r}")
+
+
 if __name__ == '__main__':
     unittest.main()
