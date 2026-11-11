@@ -335,7 +335,7 @@ def index_conversation(jsonl_path: str, db_path: str = None, force: bool = False
     timestamps = [m['timestamp'] for m in messages if m.get('timestamp')]
     started_at = timestamps[0] if timestamps else None
     last_active = timestamps[-1] if timestamps else None
-    folder = str(os.path.dirname(os.path.abspath(jsonl_path)))
+    folder = os.path.realpath(os.path.dirname(os.path.abspath(jsonl_path)))
 
     data = {
         'id':            session_id,

@@ -237,7 +237,7 @@ class TestIngestOnOldDatabase(unittest.TestCase):
 
 class TestIngestTranscript(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp()
+        self.tmp = os.path.realpath(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.folder = os.path.join(self.tmp, 'projects', '-work-Robinina')
         os.makedirs(self.folder)
@@ -819,6 +819,69 @@ class TestIngestMain(unittest.TestCase):
         ingest, index = self._main(argv=[], enabled=True)
         ingest.assert_not_called()
         index.assert_not_called()
+
+
+class TestIngestResolvesDirectory(unittest.TestCase):
+    """folder/source_path must not depend on a symlinked directory in the transcript path."""
+
+    def setUp(self):
+        self.tmp = os.path.realpath(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.real_dir = os.path.join(self.tmp, 'real', 'projects', '-tmp-proj')
+        os.makedirs(self.real_dir)
+        self.real_path = os.path.join(self.real_dir, 'sess-0001.jsonl')
+        _write_jsonl(self.real_path, [_entry('user', 'first question'),
+                                      _entry('assistant', 'an answer'),
+                                      _entry('user', 'second question')])
+        os.symlink(os.path.join(self.tmp, 'real', 'projects'), os.path.join(self.tmp, 'link'))
+        self.link_path = os.path.join(self.tmp, 'link', '-tmp-proj', 'sess-0001.jsonl')
+        for name, value in (('ingest_redact', True), ('ingest_extra_patterns', []),
+                            ('ingest_include_subagents', False), ('ingest_folders', [])):
+            patcher = unittest.mock.patch.object(
+                type(towit_ingest.config), name, new_callable=unittest.mock.PropertyMock,
+                return_value=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _db(self, name):
+        db = Database(os.path.join(self.tmp, name))
+        db.create_schema()
+        return db
+
+    def _stored(self, db):
+        with db.connect() as conn:
+            rows = conn.execute('SELECT id, folder, source_path FROM conversations').fetchall()
+        return [(r['id'], r['folder'], r['source_path']) for r in rows]
+
+    def test_symlinked_directory_stores_same_folder_and_source_path_as_real(self):
+        db_real, db_link = self._db('real.db'), self._db('link.db')
+        self.assertEqual(ingest_transcript(self.real_path, db_real), 'ingested')
+        self.assertEqual(ingest_transcript(self.link_path, db_link), 'ingested')
+        expected = [('sess-0001', self.real_dir, self.real_path)]
+        self.assertEqual(self._stored(db_real), expected)
+        self.assertEqual(self._stored(db_link), expected)
+
+    def test_real_then_symlinked_does_not_flip_flop(self):
+        db = self._db('one.db')
+        ingest_transcript(self.real_path, db)
+        ingest_transcript(self.link_path, db)
+        self.assertEqual(self._stored(db), [('sess-0001', self.real_dir, self.real_path)])
+        db2 = self._db('two.db')
+        ingest_transcript(self.link_path, db2)
+        ingest_transcript(self.real_path, db2)
+        self.assertEqual(self._stored(db2), [('sess-0001', self.real_dir, self.real_path)])
+
+    def test_symlinked_file_in_real_directory_still_skipped(self):
+        db = self._db('file.db')
+        link = os.path.join(self.real_dir, 'linked-session.jsonl')
+        os.symlink(self.real_path, link)
+        self.assertEqual(ingest_transcript(link, db), 'skipped')
+        self.assertEqual(self._stored(db), [])
+
+    def test_plain_path_stores_its_own_folder_and_path(self):
+        db = self._db('plain.db')
+        self.assertEqual(ingest_transcript(self.real_path, db), 'ingested')
+        self.assertEqual(self._stored(db), [('sess-0001', self.real_dir, self.real_path)])
 
 
 if __name__ == '__main__':

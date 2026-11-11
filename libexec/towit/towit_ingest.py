@@ -219,7 +219,10 @@ def ingest_transcript(jsonl_path: str, db: Database | None = None) -> str:
     if should_skip_path(jsonl_path):
         return 'skipped'
     path = os.path.abspath(jsonl_path)
-    folder = os.path.dirname(path)
+    # Resolve only the directory (never the file: should_skip_path rejects symlinked files),
+    # so folder/source_path do not depend on a symlinked directory being the way in.
+    folder = os.path.realpath(os.path.dirname(path))
+    path = os.path.join(folder, os.path.basename(path))
 
     session_id = os.path.splitext(os.path.basename(path))[0]
     if not is_valid_session_id(session_id):
