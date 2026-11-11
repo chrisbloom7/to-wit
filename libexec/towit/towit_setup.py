@@ -66,8 +66,9 @@ _CONFIG_TEMPLATE = """\
 [ingest]
 # Redact secrets (API keys, tokens, private keys) from message text before it
 # is archived and before it is sent to Claude. Best effort, not a guarantee.
-# Redaction happens at ingest time only: changing this later does not rewrite
-# messages that are already archived. Default: true
+# Stored messages are redacted once, at ingest, and never rewritten: changing this
+# later does not touch messages that are already archived. Export prompts are
+# redacted at send time. Default: true
 # redact = true
 
 # Extra regex patterns to redact, in addition to the built-in set.

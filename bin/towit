@@ -15,6 +15,8 @@
 #                                 --repo NAME also matches worktree directories named NAME.<branch>
 #                                 Default: message text plus keywords, titles, summaries;
 #                                   --only metadata restores the keywords-only scope
+#                                 If all terms find nothing, retries matching any term
+#                                   (not with --or or --only metadata); notice on stderr
 #   list [--format json|csv] [--folder <path>] [--topic <name>] [--keyword <name>]
 #   resume <session-id> [--force] Resume a session in its original working directory
 #   show <session-id> [--around <seq>] [--context <n>] [--format text|json]

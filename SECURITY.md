@@ -34,7 +34,7 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 ### Secret Redaction
 
 - Message text is scanned for secret-shaped strings (AWS key ids, GitHub, Anthropic, OpenAI, Stripe, and Slack tokens, JWTs, private-key blocks, `Bearer` tokens, credentials embedded in URLs, and long `*_KEY` / `*_SECRET` / `*_TOKEN` / `*_PASSWORD` assignment values) and matches are replaced with `[REDACTED:<kind>]` **before** they are written to the database. The same redaction is applied to the transcript text sent to the `claude` CLI for metadata generation and for `export --summarize`. Add patterns with `[ingest] extra_patterns`; disable with `[ingest] redact = false`
-- Redaction is pattern-based and best effort. It will miss secrets in unfamiliar formats, and it runs at ingest time only: archived rows are not rewritten if you change the setting later. Use `towit forget` to remove a conversation that contains a secret
+- Redaction is pattern-based and best effort. It will miss secrets in unfamiliar formats, and stored rows are redacted once, at ingest, and never rewritten if you change the setting later (export prompts are redacted at send time). Use `towit forget` to remove a conversation that contains a secret
 - Only tool-call stubs (at most 200 characters of a description, command, or path) and truncated error results (at most 300 characters) are stored; tool results and file contents are not archived. A single message is capped at 50,000 characters
 
 ### Deleting Data (`towit forget`)
