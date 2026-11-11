@@ -5,7 +5,21 @@ description: Use when releasing a new version of to-wit — when the user asks t
 
 # Release to-wit
 
-Release a new version of the to-wit CLI: determine version, audit README, update CHANGELOG, commit, tag, and push.
+Release a new version of the to-wit CLI: check preconditions, determine version, audit docs, update CHANGELOG, commit on a release branch, open a PR, and (after the user merges it) tag and push the tag.
+
+Never run `wt merge` and never push `main`. All merges into `main` come from remote branches via PR, merged by the user.
+
+## Step 0 — Preconditions
+
+Verify all of the following before doing anything else. If any fails, **stop and report it**.
+
+```bash
+git branch --show-current                  # must be main
+git status --porcelain                     # must be empty
+git fetch origin && git status -sb         # main must not be behind (or ahead of) origin/main
+./run-tests                                # full suite green
+TOWIT_RELEASE_CHECK=1 ./run-tests tests/helpers/docs_consistency_test.py   # docs consistency green
+```
 
 ## Step 1 — Determine the Version
 
@@ -17,7 +31,21 @@ If the user provided an explicit version (e.g. `0.7.0`), use it. Otherwise:
 
 Tags use a `v` prefix: `v0.7.0`.
 
-## Step 2 — Audit Help Text and README
+Validate the version before continuing (stop if any check fails):
+
+1. It matches the SemVer 2.0.0 pattern `^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$` (no leading `v`, no leading zeros, no pre-release or build suffix)
+2. It is strictly greater than the latest tag (compare numerically per component, e.g. `sort -V`)
+3. The tag is unused: `git tag -l vX.Y.Z` prints nothing and `git ls-remote --tags origin vX.Y.Z` is empty
+
+Then create the release branch with `wt` (not `git worktree`) and do all remaining edits (Steps 2–4, including any `bin/towit` fixes) from the new worktree, never on `main`:
+
+```bash
+wt switch --create chore/release-vX.Y.Z --yes
+```
+
+Verify the `wt` hooks succeeded; if any failed, stop and report.
+
+## Step 2 — Audit Help Text and Docs
 
 ### 2a — Validate `towit --help`
 
@@ -43,6 +71,16 @@ Check for:
 
 Present a brief audit summary. If nothing is out of date, say so explicitly. If issues are found, propose edits and wait for approval before editing `README.md`.
 
+### 2c — Audit SECURITY.md and AGENTS.md
+
+Read `SECURITY.md` and `AGENTS.md` and compare them against the `## [Unreleased]` section of `CHANGELOG.md` and the implementation.
+
+Check for:
+- `SECURITY.md`: trust boundaries, stored data, redaction, or permission/hardening controls that changed but aren't reflected
+- `AGENTS.md`: modules in `libexec/towit/`, database schema, environment variables, test layout, or security constraints that changed but aren't reflected
+
+Present a brief audit summary. If issues are found, propose edits and wait for approval before editing either file.
+
 ## Step 3 — Update CHANGELOG.md
 
 1. Read `CHANGELOG.md`.
@@ -55,24 +93,43 @@ Present a brief audit summary. If nothing is out of date, say so explicitly. If 
 ## [X.Y.Z] - YYYY-MM-DD
 ```
 
-Use today's date. Move all existing Unreleased content under the new version heading. Do not alter the content itself.
+Use today's date from `gdate +%F` (GNU date on macOS). Move all existing Unreleased content under the new version heading. Do not alter the content itself.
 
-## Step 4 — Commit
+## Step 4 — Commit on the Release Branch
 
-Stage only the files that were changed (README.md if edited, CHANGELOG.md always):
+Never commit the release to `main`. From the release worktree, stage only the files that were changed (CHANGELOG.md always; README.md, SECURITY.md, AGENTS.md if edited):
 
 ```bash
-git add CHANGELOG.md README.md   # or just CHANGELOG.md if README was unchanged
+git add CHANGELOG.md README.md   # plus SECURITY.md / AGENTS.md if edited; just CHANGELOG.md if nothing else changed
 git commit -m "chore: release vX.Y.Z"
 ```
 
 Show the diff before committing and wait for approval.
 
-## Step 5 — Tag and Push
+## Step 5 — Open the PR
+
+Push the release branch (never `main`) and open a PR with `gh`:
+
+```bash
+git push -u origin chore/release-vX.Y.Z
+gh pr create --base main --title "chore: release vX.Y.Z" --body "<CHANGELOG entry for vX.Y.Z>"
+```
+
+**Stop here.** The user reviews and merges the PR. Do not merge it yourself and do not use `wt merge`.
+
+## Step 6 — Tag and Push the Tag
+
+Only after the user confirms the PR is merged, go to the main worktree (`main` is checked out there, so `git switch main` fails in the release worktree):
+
+```bash
+git switch main && git pull --ff-only
+git log -1 --oneline                      # confirm this is the merged release commit
+```
+
+Ask the user to confirm before pushing the tag. Then tag the merged commit and push **only the tag**:
 
 ```bash
 git tag vX.Y.Z
-git push origin main
 git push origin vX.Y.Z
 ```
 
@@ -80,4 +137,4 @@ Confirm each command succeeded. Report the tag name and the commit SHA it points
 
 ## Done
 
-Summarize: version released, tag pushed, any README changes made.
+Summarize: version released, release PR, tag pushed, any README, SECURITY.md, or AGENTS.md changes made.

@@ -63,7 +63,7 @@ Write tests before implementation. Follow the ZOMBIES order for each new unit of
 ## Step 3 — Implementation Guidelines
 
 - **Dispatcher:** `bin/towit` routes to `libexec/towit/towit_<subcommand>.py`; new subcommands need an entry there
-- **DB access:** all SQL lives in `towit_db.py` — no raw queries elsewhere
+- **DB access:** all SQL lives in `towit_db.py` — no raw queries elsewhere. The one exception is `towit_doctor.py`, which deliberately keeps direct `sqlite3` diagnostics because it must work on a broken DB (its FTS integrity check uses a separate rw handle inside an always-rolled-back transaction)
 - **Config:** read via `towit_config.py`; never read env vars directly in subcommand modules
 - **Helper text:** if a CLI flag or subcommand is added, changed, or removed, update the `help` output in `bin/towit` immediately — it is the canonical usage reference
 - **Security:** parameterized queries only, no f-strings in SQL, path-validate any user-supplied file paths
@@ -74,7 +74,7 @@ Slice work into logical feature units and commit each as a complete slice: **tes
 
 Target **≤ 300 lines changed** per commit. If a slice cannot fit within that limit, ask for permission before proceeding with the larger commit.
 
-A separate final commit covers documentation: README, CHANGELOG, and helper text updates. If the helper text is tightly coupled to a code change (e.g. a new flag), it may go in the same slice commit instead.
+A separate final commit covers documentation: README, CHANGELOG, SECURITY.md/AGENTS.md (when affected), and helper text updates. If the helper text is tightly coupled to a code change (e.g. a new flag), it may go in the same slice commit instead.
 
 **Commit message format:** `<type>: <short description>` where type is `feat`, `fix`, `refactor`, `test`, `docs`, or `chore`.
 
@@ -84,6 +84,12 @@ A separate final commit covers documentation: README, CHANGELOG, and helper text
 - New or changed subcommand → update the Usage table
 - New or changed flag → update the flag list under the subcommand
 - Behavioral change → update "How it works" if relevant
+
+**SECURITY.md** — update when trust boundaries or controls change (what is stored, redaction, permissions, subprocess/env scoping, path validation).
+
+**AGENTS.md** — update when modules, database schema, environment variables, test layout, or security constraints change.
+
+**Docs-consistency check** — run `TOWIT_RELEASE_CHECK=1 ./run-tests tests/helpers/docs_consistency_test.py` and fix any drift between code and README, SECURITY.md, and AGENTS.md.
 
 **CHANGELOG.md** — add a bullet under `## [Unreleased]` using the draft from the plan. Use Keep a Changelog headings: `Added`, `Changed`, `Fixed`, `Removed`, `Security`.
 
@@ -95,9 +101,10 @@ Proactively raise these during planning or implementation:
 
 - Can a new flag reuse existing DB queries, or does it need a new one?
 - Does new output format logic belong in `towit_db.py` (query) or the subcommand module (formatting)?
-- Will the change impede or cause significant delay to the indexing hook (`towit_hook.py` → `towit_index.py`)?
+- Will the change impede or cause significant delay to the indexing hook (`towit_hook.py` → `towit_ingest.py` → `towit_index.py`)?
 - Will the change result in a significant increase in spend per indexing call (extra Claude API calls, larger prompts, more tokens)?
 - Does anything in the change negatively affect performance or cross-platform deployability (macOS/Linux shell compatibility, Python stdlib vs. third-party dependencies, path assumptions)?
+- Does this store new user content? If so, consider redaction, `forget`, and SECURITY.md
 - Are there existing tests in adjacent test files that could share fixtures?
 
 ## Quick Reference
