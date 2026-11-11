@@ -3,6 +3,7 @@
 #
 # Run with: python3 tests/helpers/towit_prune_test.py
 
+import glob
 import unittest
 import tempfile
 import shutil
@@ -268,6 +269,29 @@ class TestTowitPruneArchive(unittest.TestCase):
         result = run_prune(self.config_path, ['--archive'])
         self.assertNotIn('[y/N]', result.stdout)
         self.assertFalse(self._exists('meta-only'))
+
+    def test_archive_prune_physically_removes_text_and_leaves_no_tombstone(self):
+        marker = 'QZXPRUNE' + 'marker8h3k'
+        self._archive('arch-marker', self.projects_dir, 'hello ' + marker + ' world')
+        self.db.upsert_conversation({'id': 'arch-marker', 'folder': self.projects_dir,
+                                     'cwd': self.tmpdir, 'title': 'T ' + marker,
+                                     'summary': '', 'topics': ['tp' + marker],
+                                     'keywords': ['kw' + marker]})
+
+        def total():
+            n = 0
+            for path in glob.glob(self.db_path + '*'):
+                with open(path, 'rb') as fh:
+                    n += fh.read().lower().count(marker.lower().encode())
+            return n
+
+        self.assertGreater(total(), 0)
+        result = run_prune(self.config_path, ['--archive', '--yes'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self._exists('arch-marker'))
+        self.assertEqual(total(), 0)
+        with self.db.connect() as conn:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM forgotten").fetchone()[0], 0)
 
 
 if __name__ == '__main__':

@@ -836,25 +836,29 @@ class Database:
         busy, log, checkpointed = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
         return busy == 0 and checkpointed >= log
 
-    def purge_free_space(self, example_id: str = '<session-id>') -> str | None:
+    def purge_free_space(self, example_id: str = '<session-id>', retry: str = None) -> str | None:
         """Physically remove text freed earlier by any writer (VACUUM, then truncate the
         WAL). Idempotent, safe to run any time, and never raises: returns a warning
-        string naming the retry command (`towit forget <example_id>`) if cleanup was
-        incomplete, else None."""
+        string naming the retry command (`towit forget <example_id>`, or `retry` when
+        given) if cleanup was incomplete, else None."""
         self.validate()
-        retry = (f"Re-run `towit forget {example_id}` when no other towit process is "
-                 f"active to finish cleanup.")
+        removed = 'removed' if retry else 'forgotten'
+        retry = retry or (f"Re-run `towit forget {example_id}` when no other towit process is "
+                          f"active to finish cleanup.")
         try:
             with self.connect() as conn:
                 if self._purge_free_space(conn):
                     return None
         except sqlite3.Error as exc:
-            return (f"the conversations were forgotten, but physical cleanup was incomplete "
+            return (f"the conversations were {removed}, but physical cleanup was incomplete "
                     f"({exc}); deleted data may remain on disk. {retry}")
         return f"some deleted data may remain in the write-ahead log. {retry}"
 
-    def forget_conversations(self, ids: list) -> int:
+    def forget_conversations(self, ids: list, tombstone: bool = True) -> int:
         """Permanently delete conversations and tombstone their ids; return how many existed.
+
+        With tombstone=False (used by `prune`) the ids are not tombstoned, so a session
+        whose transcript reappears can be archived again; everything else is identical.
 
         Forgets exactly the ids passed — a caller that resolved a scope and prompted the
         user passes the set matched at prompt time, so conversations that appear later
@@ -877,7 +881,8 @@ class Database:
             try:
                 for conv_id in dict.fromkeys(ids):
                     if conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,)).rowcount:
-                        conn.execute("INSERT OR IGNORE INTO forgotten (id) VALUES (?)", (conv_id,))
+                        if tombstone:
+                            conn.execute("INSERT OR IGNORE INTO forgotten (id) VALUES (?)", (conv_id,))
                         forgotten += 1
                         first_id = first_id or conv_id
                 if forgotten:
@@ -888,7 +893,9 @@ class Database:
                 conn.rollback()
                 raise
         if forgotten:
-            self.cleanup_warning = self.purge_free_space(first_id)
+            self.cleanup_warning = self.purge_free_space(
+                first_id, None if tombstone else
+                "Any later `towit forget` finishes the cleanup once no other towit process is active.")
         return forgotten
 
     def forget_conversation(self, conv_id: str) -> bool:
