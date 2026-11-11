@@ -73,7 +73,7 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 ### Error Handling
 
 - The hooks (`Stop`, `SessionEnd`, `SessionStart`) catch all exceptions and never exit non-zero (to avoid interrupting Claude Code). Work runs in a detached background process, so a slow or failing ingest can never block a session or exceed `SessionEnd`'s time budget; a `TOWIT_INDEXING` guard stops towit's own `claude` calls from triggering the hooks recursively
-- Errors are logged to `~/.towit/errors.log` (rotating, 100 KB max, 2 backups, owner-only `0600`) for post-hoc debugging
+- Errors are logged to `errors.log` next to the config file (default `~/.towit/errors.log`; follows `TOWIT_CONFIG_PATH`) (rotating, 100 KB max, 2 backups, owner-only `0600`) for post-hoc debugging
 
 ## Reporting a Vulnerability
 

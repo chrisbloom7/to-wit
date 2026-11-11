@@ -297,7 +297,8 @@ def catch_up(root: str | None = None, db: Database | None = None) -> dict[str, i
 def main():
     """Detached entry point spawned by the hook: archive, then index (or `--catch-up`).
 
-    Never raises or exits non-zero; failures are logged to ~/.towit/errors.log.
+    Never raises or exits non-zero; failures are logged to errors.log next to the config file
+    (default ~/.towit/).
     """
     if os.environ.get('TOWIT_INDEXING'):
         return  # recursive call from towit's own Claude invocation
