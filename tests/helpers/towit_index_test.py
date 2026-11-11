@@ -8,6 +8,7 @@ import tempfile
 import shutil
 import json
 import os
+import sqlite3
 import sys
 from unittest.mock import patch, MagicMock
 
@@ -686,6 +687,105 @@ class TestIndexConversationTranscriptCap(unittest.TestCase):
         # build_transcript is called as build_transcript(messages, max_chars=N)
         actual_max_chars = call_kwargs[1].get('max_chars') if call_kwargs[1] else call_kwargs[0][1]
         self.assertEqual(actual_max_chars, 1234)
+
+
+class TestIndexConversationArchiveInteraction(unittest.TestCase):
+    ANALYSIS = {'skip': False, 'title': 'T', 'summary': 'S', 'topics': ['x'], 'keywords': ['k']}
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.db = Database(self.db_path)
+        self.db.create_schema()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write(self, session_id, messages):
+        path = os.path.join(self.tmpdir, f'{session_id}.jsonl')
+        write_jsonl(path, messages)
+        return path
+
+    def _fake_secret(self):
+        return 'AKIA' + 'A' * 16
+
+    def test_transcript_sent_to_claude_is_redacted(self):
+        secret = self._fake_secret()
+        msgs = [dict(m) for m in MINIMAL_MESSAGES]
+        msgs[0]['content'] = f'My key is {secret} please help with SQLite WAL mode'
+        path = self._write('red-1', msgs)
+        with patch('towit_index.analyze_with_claude', return_value=self.ANALYSIS) as mock_an:
+            self.assertEqual(index_conversation(path, self.db), 'indexed')
+        sent = mock_an.call_args[0][0]
+        self.assertNotIn(secret, sent)
+        self.assertIn('[REDACTED:', sent)
+
+    def test_transcript_not_redacted_when_ingest_redact_false(self):
+        secret = self._fake_secret()
+        msgs = [dict(m) for m in MINIMAL_MESSAGES]
+        msgs[0]['content'] = f'My key is {secret} please help with SQLite WAL mode'
+        path = self._write('red-2', msgs)
+        with patch.object(towit_index._config, '_get', side_effect=lambda s, k, d, t=None: False if (s, k) == ('ingest', 'redact') else d), \
+             patch('towit_index.analyze_with_claude', return_value=self.ANALYSIS) as mock_an:
+            index_conversation(path, self.db)
+        self.assertIn(secret, mock_an.call_args[0][0])
+
+    def test_extra_patterns_are_applied(self):
+        msgs = [dict(m) for m in MINIMAL_MESSAGES]
+        msgs[0]['content'] = 'internal host corp-secret-42 and SQLite WAL mode question'
+        path = self._write('red-3', msgs)
+        with patch.object(type(towit_index._config), 'ingest_extra_patterns',
+                          new_callable=lambda: property(lambda self: [r'corp-secret-\d+'])), \
+             patch('towit_index.analyze_with_claude', return_value=self.ANALYSIS) as mock_an:
+            index_conversation(path, self.db)
+        self.assertNotIn('corp-secret-42', mock_an.call_args[0][0])
+
+    def test_forgotten_id_is_skipped_without_calling_claude(self):
+        path = self._write('gone-1', MINIMAL_MESSAGES)
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("INSERT INTO forgotten (id) VALUES ('gone-1')")
+        conn.commit()
+        conn.close()
+        with patch('towit_index.analyze_with_claude') as mock_an:
+            self.assertEqual(index_conversation(path, self.db), 'skipped')
+        mock_an.assert_not_called()
+        conn = sqlite3.connect(self.db_path)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM conversations WHERE id='gone-1'").fetchone()[0], 0)
+        conn.close()
+
+    def test_archive_only_row_is_analyzed_and_archive_columns_survive(self):
+        path = self._write('arc-1', MINIMAL_MESSAGES)
+        arch_msgs = [{'role': 'user', 'ts': 't0', 'text': 'one'},
+                     {'role': 'assistant', 'ts': 't1', 'text': 'two'}]
+        self.db.archive_session({'id': 'arc-1', 'folder': '/f', 'cwd': '/w', 'started_at': None,
+                                 'last_active': None, 'repo_key': 'repo-k', 'source_path': '/p/arc-1.jsonl'},
+                                arch_msgs)
+        def snap():
+            conn = sqlite3.connect(self.db_path)
+            row = conn.execute("SELECT archived, archived_message_count, tail_hash, source_path, repo_key "
+                               "FROM conversations WHERE id='arc-1'").fetchone()
+            n = conn.execute("SELECT COUNT(*) FROM messages WHERE conversation_id='arc-1'").fetchone()[0]
+            conn.close()
+            return row, n
+        before, n_before = snap()
+        self.assertEqual(n_before, 2)
+        with patch('towit_index.analyze_with_claude', return_value=self.ANALYSIS) as mock_an:
+            self.assertEqual(index_conversation(path, self.db), 'indexed')
+        mock_an.assert_called_once()
+        after, n_after = snap()
+        self.assertEqual(after, before)
+        self.assertEqual(n_after, 2)
+        self.assertEqual(before[0], 1)
+        self.assertTrue(self.db.is_indexed('arc-1'))
+
+    def test_index_conversation_writes_no_messages_or_forgotten_rows(self):
+        path = self._write('plain-1', MINIMAL_MESSAGES)
+        with patch('towit_index.analyze_with_claude', return_value=self.ANALYSIS):
+            index_conversation(path, self.db)
+        conn = sqlite3.connect(self.db_path)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0], 0)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM forgotten").fetchone()[0], 0)
+        conn.close()
 
 
 if __name__ == '__main__':

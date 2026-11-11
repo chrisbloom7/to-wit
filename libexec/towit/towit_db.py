@@ -527,11 +527,11 @@ class Database:
             )
 
     def is_indexed(self, conv_id: str) -> bool:
-        """Return True if the session ID already exists in the DB."""
+        """Return True if the session has LLM metadata (a title); archive-only rows do not count."""
         self.validate()
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT 1 FROM conversations WHERE id = ?", (conv_id,)
+                "SELECT 1 FROM conversations WHERE id = ? AND title IS NOT NULL", (conv_id,)
             ).fetchone()
             return row is not None
 

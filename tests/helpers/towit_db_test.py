@@ -205,6 +205,14 @@ class TestDatabaseIsIndexed(unittest.TestCase):
     def test_is_indexed_returns_false_for_missing(self):
         self.assertFalse(self.db.is_indexed('nonexistent-id'))
 
+    def test_is_indexed_false_for_archive_only_row_true_for_titled(self):
+        conv = {'id': 'arc-only', 'folder': '/f', 'cwd': '/w', 'started_at': None,
+                'last_active': None, 'repo_key': 'r', 'source_path': '/p'}
+        self.db.archive_session(conv, [{'role': 'user', 'ts': None, 'text': 'hi'}])
+        self.assertFalse(self.db.is_indexed('arc-only'))
+        self.db.upsert_conversation(dict(SAMPLE_CONV, id='arc-only'))
+        self.assertTrue(self.db.is_indexed('arc-only'))
+
 
 class TestDatabaseSearch(unittest.TestCase):
     def setUp(self):
