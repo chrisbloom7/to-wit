@@ -1132,13 +1132,79 @@ class TestAutoMigration(unittest.TestCase):
         self.db.run_migrations()
         self.assertEqual(self.db.schema_version(), SCHEMA_VERSION + 5)
 
-    def test_failed_migration_propagates_and_leaves_version_unchanged(self):
-        with unittest.mock.patch.object(towit_db, 'ARCHIVE_DDL', 'CREATE TABLE messages (;'):
-            with self.assertRaises(sqlite3.Error):
-                self.db.validate()
+    def _assert_not_migrated(self):
         self.assertEqual(self.db.schema_version(), 0)
         cols = {r[1] for r in self._q("PRAGMA table_info(conversations)")}
-        self.assertNotIn('tail_hash', cols)  # rolled back as a unit
+        self.assertNotIn('tail_hash', cols)  # earlier ALTERs rolled back too
+        self.assertNotIn('zz', self._names())
+
+    def test_failed_migration_propagates_and_leaves_version_unchanged(self):
+        ddl = '\nCREATE TABLE zz(a);\nCREATE TABLE messages (;'
+        with unittest.mock.patch.object(towit_db, 'ARCHIVE_DDL', ddl):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.db.validate()
+        self._assert_not_migrated()
+
+    @contextlib.contextmanager
+    def _proxied_connect(self, execute=None, after_migration=None):
+        """Patch Database.connect to hand out a wrapper around the real connection."""
+        real_connect = Database.connect
+
+        class Proxy:
+            def __init__(self, conn):
+                self._c = conn
+
+            def __getattr__(self, name):
+                return getattr(self._c, name)
+
+            def execute(self, sql, *a):
+                if execute:
+                    execute(sql)
+                return self._c.execute(sql, *a)
+
+        @contextlib.contextmanager
+        def fake(db):
+            with real_connect(db) as conn:
+                yield Proxy(conn)
+
+        with unittest.mock.patch.object(Database, 'connect', fake):
+            yield
+
+    def test_non_duplicate_alter_error_propagates_and_is_not_stamped(self):
+        def boom(sql):
+            if 'ADD COLUMN source_path' in sql:
+                raise sqlite3.OperationalError('disk I/O error')
+
+        with self._proxied_connect(execute=boom):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.db.validate()
+        self._assert_not_migrated()
+
+    def test_transaction_lost_before_stamp_is_not_stamped(self):
+        real = towit_db._execute_script
+
+        def script_then_autorollback(conn, script):
+            real(conn, script)
+            if 'messages_fts' in script:  # the final step
+                conn._c.rollback()  # what SQLite does itself on SQLITE_FULL / IOERR
+
+        with unittest.mock.patch.object(towit_db, '_execute_script', script_then_autorollback):
+            with self._proxied_connect():
+                with self.assertRaises(RuntimeError):
+                    self.db.validate()
+        self._assert_not_migrated()
+
+    def test_stale_recheck_under_lock_runs_no_ddl_on_stamped_db(self):
+        self.db.validate()
+        before = self._q("SELECT type, name, sql FROM sqlite_master ORDER BY name")
+        with unittest.mock.patch.object(towit_db, '_execute_script') as script:
+            def no_alter(sql):
+                self.assertNotIn('ALTER', sql)
+            with self._proxied_connect(execute=no_alter):
+                self.db.run_migrations(only_if_stale=True)
+        script.assert_not_called()
+        self.assertEqual(self._q("SELECT type, name, sql FROM sqlite_master ORDER BY name"), before)
+        self.assertEqual(self.db.schema_version(), SCHEMA_VERSION)
 
     def test_concurrent_validate_calls_both_succeed(self):
         errors = []

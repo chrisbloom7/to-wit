@@ -15,7 +15,7 @@ from unittest.mock import patch, MagicMock
 HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
 sys.path.insert(0, HELPERS_DIR)
 
-from towit_db import Database
+from towit_db import SCHEMA_VERSION, Database
 from towit_db_test import build_old_schema_db
 from towit_index import parse_jsonl, should_index, build_transcript, analyze_with_claude, index_conversation
 import towit_index
@@ -311,7 +311,7 @@ class TestIndexConversation(unittest.TestCase):
         with patch('subprocess.run', return_value=mock_result):
             self.assertEqual(index_conversation(path, old_db), 'indexed')
         self.assertTrue(old_db.is_indexed('fresh-on-old-001'))
-        self.assertEqual(old_db.schema_version(), 1)
+        self.assertEqual(old_db.schema_version(), SCHEMA_VERSION)
 
     def test_index_conversation_touches_last_active_when_count_unchanged(self):
         old_last_active = '2026-01-15T10:00:00Z'

@@ -149,12 +149,24 @@ def build_match_expression(terms: list, mode: str = 'and') -> str | None:
     return (' OR ' if mode == 'or' else ' AND ').join(phrases)
 
 
+def _add_column(conn, column_def: str) -> None:
+    """ALTER TABLE conversations ADD COLUMN, tolerating only an already-present column."""
+    try:
+        conn.execute(f"ALTER TABLE conversations ADD COLUMN {column_def}")
+    except sqlite3.OperationalError as exc:
+        if 'duplicate column name' not in str(exc):
+            raise
+
+
 def _execute_script(conn, script: str) -> None:
     """
     Run a multi-statement script inside the caller's open transaction.
 
     sqlite3's executescript() COMMITs first, which would drop the migration lock,
     so split on complete statements (trigger bodies contain semicolons) instead.
+    Statements are detected line by line with sqlite3.complete_statement, so each
+    one must start on its own line; two statements on one line raise
+    ProgrammingError (and the migration rolls back).
     """
     statement = ''
     for line in script.splitlines(keepends=True):
@@ -230,10 +242,7 @@ class Database:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             if only_if_stale and version >= SCHEMA_VERSION:
                 return
-            try:
-                conn.execute("ALTER TABLE conversations ADD COLUMN message_count INTEGER")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+            _add_column(conn, "message_count INTEGER")
             _execute_script(conn, """
                 CREATE TABLE IF NOT EXISTS keywords (
                   id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -254,15 +263,15 @@ class Database:
                 "archived_message_count INTEGER NOT NULL DEFAULT 0",
                 "repo_key TEXT",
             ):
-                try:
-                    conn.execute(f"ALTER TABLE conversations ADD COLUMN {column}")
-                except sqlite3.OperationalError:
-                    pass  # Column already exists
+                _add_column(conn, column)
             _execute_script(
                 conn,
                 "CREATE INDEX IF NOT EXISTS idx_conversations_repo_key ON conversations(repo_key);"
                 + ARCHIVE_DDL
             )
+            if not conn.in_transaction:
+                # SQLite can roll back by itself on SQLITE_FULL/IOERR; never stamp that.
+                raise RuntimeError("schema migration transaction was lost; not stamping version")
             if version < SCHEMA_VERSION:  # never downgrade a newer towit's stamp
                 conn.execute(f"PRAGMA user_version = {int(SCHEMA_VERSION)}")
 

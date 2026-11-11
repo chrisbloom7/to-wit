@@ -16,7 +16,7 @@ HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'
 SEARCH_SCRIPT = os.path.join(HELPERS_DIR, 'towit_search.py')
 
 sys.path.insert(0, HELPERS_DIR)
-from towit_db import Database
+from towit_db import SCHEMA_VERSION, Database
 from towit_db_test import build_old_schema_db
 
 
@@ -352,7 +352,7 @@ class TestTowitSearchOnOldDatabase(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('old-1', result.stdout)
         self.assertEqual(result.stderr, '')
-        self.assertEqual(Database(db_path).schema_version(), 1)
+        self.assertEqual(Database(db_path).schema_version(), SCHEMA_VERSION)
 
 
 class TestTowitSearchArchive(unittest.TestCase):
