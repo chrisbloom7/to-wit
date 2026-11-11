@@ -14,7 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_db import Database
-from towit_config import config as _config
+from towit_config import config as _config, safe_subprocess_env
 
 
 # ---------------------------------------------------------------------------
@@ -201,15 +201,7 @@ def analyze_with_claude(transcript: str, existing_topics: list = None,
         max_topics=_config.indexing_max_topics,
     )
 
-    _PASS_THROUGH_PREFIXES = (
-        'HOME', 'PATH', 'USER', 'TMPDIR', 'TERM', 'LANG', 'LC_',
-        'CLAUDE_', 'ANTHROPIC_',
-    )
-    safe_env = {
-        k: v for k, v in os.environ.items()
-        if any(k.startswith(p) for p in _PASS_THROUGH_PREFIXES)
-    }
-    safe_env['TOWIT_INDEXING'] = '1'
+    safe_env = safe_subprocess_env({'TOWIT_INDEXING': '1'})
 
     cmd = ['claude', '-p', prompt, '--output-format', 'text', '--no-session-persistence']
     model = _config.indexing_model

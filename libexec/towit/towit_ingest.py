@@ -9,7 +9,10 @@ searchable by what was run, not just what was said.
 
 import json
 import os
+import subprocess
 from dataclasses import dataclass, field
+
+from towit_config import safe_subprocess_env
 
 MAX_MESSAGE_CHARS = 50_000
 STUB_VALUE_CHARS = 200
@@ -142,3 +145,27 @@ def parse_transcript(path: str) -> ParsedTranscript:
         last_active=stamps[-1] if stamps else None,
         messages=messages,
     )
+
+
+def resolve_repo_key(cwd: str) -> str:
+    """Return the repo root that groups all worktrees of a repo, else `cwd`.
+
+    Uses the git common dir, so linked worktrees map to the main repo. Never raises.
+    """
+    if not cwd or not os.path.isdir(cwd):
+        return cwd
+    try:
+        result = subprocess.run(
+            ['git', '-C', cwd, 'rev-parse', '--git-common-dir'],
+            capture_output=True, text=True, timeout=5,
+            env=safe_subprocess_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return cwd
+    common = result.stdout.strip() if result.returncode == 0 else ''
+    if not common:
+        return cwd
+    common = os.path.realpath(os.path.join(cwd, common))  # join keeps absolute paths as-is
+    if os.path.basename(common) == '.git':
+        return os.path.dirname(common)
+    return common

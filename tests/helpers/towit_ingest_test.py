@@ -7,14 +7,16 @@ import json
 import os
 import shutil
 import sys
+import subprocess
 import tempfile
 import unittest
+import unittest.mock
 
 HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
 sys.path.insert(0, HELPERS_DIR)
 
 import towit_ingest
-from towit_ingest import MAX_MESSAGE_CHARS, parse_transcript
+from towit_ingest import MAX_MESSAGE_CHARS, parse_transcript, resolve_repo_key
 
 
 def _write_jsonl(path, entries):
@@ -136,6 +138,50 @@ class TestParseTranscript(unittest.TestCase):
             os.chmod(self.path, 0o600)
         self.assertEqual(parsed.session_id, 'abc-123')
         self.assertEqual(parsed.messages, [])
+
+
+class TestResolveRepoKey(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def test_real_git_repo_returns_its_root(self):
+        subprocess.run(['git', 'init', '-q', self.tmp], check=True)
+        self.assertEqual(resolve_repo_key(self.tmp), os.path.realpath(self.tmp))
+
+    def test_linked_worktree_maps_to_main_repo(self):
+        fake = unittest.mock.MagicMock(returncode=0, stdout='/repo/.git\n')
+        with unittest.mock.patch('subprocess.run', return_value=fake):
+            self.assertEqual(resolve_repo_key(self.tmp), '/repo')
+
+    def test_relative_result_resolved_against_cwd(self):
+        fake = unittest.mock.MagicMock(returncode=0, stdout='.git\n')
+        with unittest.mock.patch('subprocess.run', return_value=fake):
+            self.assertEqual(resolve_repo_key(self.tmp), os.path.realpath(self.tmp))
+
+    def test_bare_repo_returns_common_dir(self):
+        fake = unittest.mock.MagicMock(returncode=0, stdout='/srv/repo.git\n')
+        with unittest.mock.patch('subprocess.run', return_value=fake):
+            self.assertEqual(resolve_repo_key(self.tmp), '/srv/repo.git')
+
+    def test_non_git_dir_returns_cwd(self):
+        self.assertEqual(resolve_repo_key(self.tmp), self.tmp)
+
+    def test_nonexistent_path_returns_path(self):
+        missing = os.path.join(self.tmp, 'nope')
+        self.assertEqual(resolve_repo_key(missing), missing)
+
+    def test_git_missing_returns_cwd(self):
+        with unittest.mock.patch('subprocess.run', side_effect=FileNotFoundError):
+            self.assertEqual(resolve_repo_key(self.tmp), self.tmp)
+
+    def test_timeout_returns_cwd(self):
+        with unittest.mock.patch('subprocess.run',
+                                 side_effect=subprocess.TimeoutExpired('git', 5)):
+            self.assertEqual(resolve_repo_key(self.tmp), self.tmp)
+
+    def test_empty_cwd_returns_empty(self):
+        self.assertEqual(resolve_repo_key(''), '')
 
 
 if __name__ == '__main__':

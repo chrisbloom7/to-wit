@@ -441,5 +441,22 @@ class TestConfigIngest(unittest.TestCase):
         self.assertIn('Warning', err)
 
 
+class TestSafeSubprocessEnv(unittest.TestCase):
+    def test_drops_secrets_and_keeps_allowlisted(self):
+        fake = {'AWS_SECRET_ACCESS_KEY': 'x', 'PATH': '/bin', 'CLAUDE_X': '1', 'LC_ALL': 'C'}
+        with unittest.mock.patch.dict(os.environ, fake, clear=True):
+            env = towit_config.safe_subprocess_env()
+        self.assertNotIn('AWS_SECRET_ACCESS_KEY', env)
+        self.assertEqual(env['PATH'], '/bin')
+        self.assertEqual(env['CLAUDE_X'], '1')
+        self.assertEqual(env['LC_ALL'], 'C')
+
+    def test_extra_is_merged(self):
+        with unittest.mock.patch.dict(os.environ, {'PATH': '/bin'}, clear=True):
+            env = towit_config.safe_subprocess_env({'TOWIT_INDEXING': '1'})
+        self.assertEqual(env['TOWIT_INDEXING'], '1')
+        self.assertEqual(env['PATH'], '/bin')
+
+
 if __name__ == '__main__':
     unittest.main()
