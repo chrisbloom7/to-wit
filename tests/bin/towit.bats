@@ -574,3 +574,124 @@ EOF
   [ "${status}" -eq 1 ]
   [[ "${output}" == *"not found"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# end-to-end archive flow
+# ---------------------------------------------------------------------------
+
+@test "towit: end-to-end archive flow (backfill, search, show, redaction, forget)" {
+  # Never call the real claude: indexing is disabled and claude is absent from PATH
+  ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
+  export HOME="${TEST_TMPDIR}/home"
+  mkdir -p "${HOME}"
+  printf '[indexing]\nenabled = false\n' >> "${TOWIT_CONFIG_PATH}"
+  "${TOWIT}" setup
+
+  # Synthetic fixture session with a fake secret assembled from pieces
+  local fake_secret="AKIA""ABCDEFGHIJKLMNOP"
+  local sessions="${TEST_TMPDIR}/sessions"
+  mkdir -p "${sessions}"
+  cat > "${sessions}/session-e2e-0001.jsonl" <<JSONL
+{"type":"user","timestamp":"2026-01-15T10:00:00Z","cwd":"/work/proj","sessionId":"session-e2e-0001","message":{"role":"user","content":"Remember the zephyr marker for later. My key is ${fake_secret} ok?"}}
+{"type":"assistant","timestamp":"2026-01-15T10:00:05Z","cwd":"/work/proj","sessionId":"session-e2e-0001","message":{"role":"assistant","content":[{"type":"text","text":"Noted, the zephyr marker is saved."}]}}
+{"type":"user","timestamp":"2026-01-15T10:01:00Z","cwd":"/work/proj","sessionId":"session-e2e-0001","message":{"role":"user","content":"Thanks, that is all."}}
+{"type":"assistant","timestamp":"2026-01-15T10:01:05Z","cwd":"/work/proj","sessionId":"session-e2e-0001","message":{"role":"assistant","content":[{"type":"text","text":"You are welcome."}]}}
+JSONL
+
+  run "${TOWIT}" backfill --folder "${sessions}"
+  [ "${status}" -eq 0 ]
+
+  run "${TOWIT}" search "zephyr marker"
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"session-e2e-0001"* ]] || { echo "Expected a hit, got: ${output}"; return 1; }
+  [[ "${output}" == *"zephyr"* ]] || { echo "Expected a snippet, got: ${output}"; return 1; }
+
+  run "${TOWIT}" show session-e2e-0001
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"zephyr marker"* ]] || { echo "Expected message text, got: ${output}"; return 1; }
+  [[ "${output}" != *"${fake_secret}"* ]] || { echo "Secret leaked via show"; return 1; }
+
+  # Stored text is redacted: marker present, secret absent
+  run python3 -c '
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+print("\n".join(r[0] for r in con.execute("SELECT text FROM messages")))
+' "${TOWIT_DB_PATH}"
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"[REDACTED:"* ]] || { echo "Expected redaction marker, got: ${output}"; return 1; }
+  [[ "${output}" != *"${fake_secret}"* ]] || { echo "Secret stored in DB"; return 1; }
+
+  run "${TOWIT}" forget session-e2e-0001 --yes
+  [ "${status}" -eq 0 ]
+
+  run "${TOWIT}" search "zephyr marker"
+  [[ "${output}" != *"session-e2e-0001"* ]] || { echo "Forgotten session still found: ${output}"; return 1; }
+
+  run "${TOWIT}" backfill --folder "${sessions}"
+  [ "${status}" -eq 0 ]
+  run "${TOWIT}" search "zephyr marker"
+  [[ "${output}" != *"session-e2e-0001"* ]] || { echo "Backfill restored forgotten session: ${output}"; return 1; }
+}
+
+@test "towit: setup migrates a v0.8.2 database and keeps rows searchable by metadata" {
+  ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
+  export HOME="${TEST_TMPDIR}/home"
+  mkdir -p "${HOME}"
+
+  # Hand-written v0.8.2 schema (no archive tables) with one existing row
+  python3 - "${TOWIT_DB_PATH}" <<'PYEOF'
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.executescript("""
+PRAGMA journal_mode=WAL;
+CREATE TABLE conversations (
+  id TEXT PRIMARY KEY, folder TEXT NOT NULL, cwd TEXT, started_at TEXT,
+  last_active TEXT, title TEXT, summary TEXT, message_count INTEGER,
+  indexed_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE topics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL COLLATE NOCASE
+);
+CREATE TABLE conversation_topics (
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  topic_id INTEGER NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+  PRIMARY KEY (conversation_id, topic_id)
+);
+CREATE TABLE keywords (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL COLLATE NOCASE
+);
+CREATE TABLE conversation_keywords (
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  keyword_id INTEGER NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+  PRIMARY KEY (conversation_id, keyword_id)
+);
+INSERT INTO conversations (id, folder, cwd, started_at, last_active, title, summary, message_count)
+VALUES ("legacy-session-0001", "-work-legacy", "/work/legacy", "2025-12-01T10:00:00Z",
+        "2025-12-01T11:00:00Z", "Quokka migration notes", "Discussed marsupial schemas.", 4);
+INSERT INTO topics (name) VALUES ("legacy-topic");
+INSERT INTO conversation_topics VALUES ("legacy-session-0001", 1);
+INSERT INTO keywords (name) VALUES ("marsupial");
+INSERT INTO conversation_keywords VALUES ("legacy-session-0001", 1);
+""")
+con.commit()
+PYEOF
+
+  run "${TOWIT}" setup
+  [ "${status}" -eq 0 ]
+
+  # --only metadata searches keywords; --title/--summary add those fields
+  run "${TOWIT}" search marsupial --only metadata
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"legacy-session-0001"* ]] || { echo "Expected keyword hit, got: ${output}"; return 1; }
+
+  run "${TOWIT}" search quokka --only metadata --title
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"legacy-session-0001"* ]] || { echo "Expected title hit, got: ${output}"; return 1; }
+
+  run "${TOWIT}" search quokka
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"legacy-session-0001"* ]] || { echo "Expected default-scope hit, got: ${output}"; return 1; }
+
+  run "${TOWIT}" stats
+  [ "${status}" -eq 0 ]
+}
