@@ -686,7 +686,9 @@ class Database:
 
         with self.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
-            return [self._row_to_dict(r) for r in rows]
+            results = [self._row_to_dict(r) for r in rows]
+            self._fill_title_fallback(conn, results)
+            return results
 
     def get_conversation(self, conv_id: str):
         """Return a single conversation dict, or None if not found."""

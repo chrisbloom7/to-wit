@@ -282,5 +282,31 @@ class TestTowitListSanitizesTable(unittest.TestCase):
         self.assertNotIn('\x07', r.stdout)
 
 
+class TestTowitListArchiveOnlyTitle(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        db = Database(self.db_path)
+        db.create_schema()
+        db.archive_session(
+            {'id': 'arc-only', 'folder': '/f', 'cwd': '/w/app', 'started_at': '2026-02-01T00:00:00Z',
+             'last_active': '2026-02-01T00:00:00Z', 'repo_key': None, 'source_path': None},
+            [{'role': 'user', 'ts': None, 'text': 'How do I tune the flux capacitor?'},
+             {'role': 'assistant', 'ts': None, 'text': 'carefully'}])
+
+    def test_table_shows_first_user_message_as_title(self):
+        r = run_list(self.config_path)
+        self.assertIn('How do I tune the flux capacitor?', r.stdout)
+
+    def test_json_and_csv_use_the_same_fallback_title(self):
+        import json
+        data = json.loads(run_list(self.config_path, ['--format', 'json']).stdout)
+        self.assertEqual(data[0]['title'], 'How do I tune the flux capacitor?')
+        rows = list(csv.reader(io.StringIO(run_list(self.config_path, ['--format', 'csv']).stdout)))
+        self.assertEqual(rows[1][1], 'How do I tune the flux capacitor?')
+
+
 if __name__ == '__main__':
     unittest.main()
