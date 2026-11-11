@@ -985,6 +985,23 @@ class Database:
                 (last_active, conv_id)
             )
 
+    def record_index_attempt(self, conv_id: str, message_count: int):
+        """Record the prose message count of an index attempt that produced no metadata.
+
+        Touches only message_count and indexed_at, and only on an existing, non-forgotten
+        row; a missing row is left missing.
+        """
+        self.validate()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE conversations
+                SET message_count = ?, indexed_at = datetime('now')
+                WHERE id = ? AND id NOT IN (SELECT id FROM forgotten)
+                """,
+                (message_count, conv_id)
+            )
+
     def is_indexed(self, conv_id: str) -> bool:
         """Return True if the session has LLM metadata (a title); archive-only rows do not count."""
         self.validate()
