@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secret redaction before archiving and before text is sent to Claude (best effort; see SECURITY.md).
 - `towit forget` provides permanent, physical deletion of archived conversations, with a tombstone so they are not re-ingested.
 - `towit show` strips terminal control sequences from archived text before printing it.
+- `towit export --summarize` now runs `claude` with the scoped environment allowlist (as indexing already did) instead of the full environment.
 - FTS5 search input is escaped into quoted phrases and bound as a parameter; the `git rev-parse` subprocess used for repo grouping uses a list command, the scoped environment, and a 5-second timeout.
 
 ## [0.8.2] - 2026-04-17

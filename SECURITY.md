@@ -61,6 +61,7 @@ To Wit (`towit`) is a single-user CLI tool. It runs entirely on your local machi
 
 - The `claude` subprocess is invoked with a list (never `shell=True`)
 - The subprocess environment is scoped to an explicit prefix allowlist (`HOME`, `PATH`, `USER`, `TMPDIR`, `TERM`, `LANG`, `LC_*`, `CLAUDE_*`, `ANTHROPIC_*`) to avoid leaking unrelated credentials
+- `towit export --summarize` sends the original transcript (not the redacted archive) to the `claude` CLI at your request, with the same scoped environment as indexing
 - Ingest runs `git -C <cwd> rev-parse --git-common-dir` to group worktrees of one repo. It is invoked with a list (never `shell=True`), with the same scoped environment, a 5-second timeout, and any failure falls back to the working directory
 
 ### Settings File Writes
