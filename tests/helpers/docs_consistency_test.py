@@ -98,5 +98,46 @@ class TestReadmeAndHelp(DocTestCase):
                 self.assertContains(_read(doc), event, f"{event} missing from {doc}")
 
 
+def _libexec_modules() -> list:
+    libexec = os.path.join(ROOT, 'libexec', 'towit')
+    return sorted(f[:-3] for f in os.listdir(libexec) if f.startswith('towit_') and f.endswith('.py'))
+
+
+def _env_vars_read_by_code() -> set:
+    """TOWIT_* names read from os.environ anywhere under libexec/towit/."""
+    reads = re.compile(r"""os\.(?:environ(?:\.get\(|\[)|getenv\()\s*['"](TOWIT_[A-Z_]+)['"]""")
+    found = set()
+    for module in _libexec_modules():
+        found |= set(reads.findall(_read(f'libexec/towit/{module}.py')))
+    return found
+
+
+class TestAgentsMd(DocTestCase):
+    def test_every_env_var_documented_in_agents_md(self):
+        found = _env_vars_read_by_code()
+        self.assertIn('TOWIT_INDEXING', found)  # the scan really finds reads
+        agents = _read('AGENTS.md')
+        for var in sorted(found):
+            self.assertMatches(agents, rf'`{var}[`=]', f"{var} missing from the AGENTS.md environment table")
+
+    def test_every_schema_table_in_agents_md(self):
+        tables = set(re.findall(r'CREATE (?:VIRTUAL )?TABLE (?:IF NOT EXISTS )?(\w+)', _read('libexec/towit/towit_db.py')))
+        self.assertGreaterEqual(len(tables), 9)
+        agents = _read('AGENTS.md')
+        for table in sorted(tables):
+            self.assertContains(agents, f'`{table}`', f"table {table} missing from AGENTS.md")
+
+    def test_every_non_subcommand_module_in_agents_md(self):
+        dispatcher = _read('bin/towit')
+        helpers = [m for m in _libexec_modules() if f'{m}.py"' not in dispatcher]
+        self.assertIn('towit_ingest', helpers)
+        agents = _read('AGENTS.md')
+        for module in helpers:
+            self.assertContains(agents, f'`{module}.py`', f"{module}.py missing from AGENTS.md")
+
+    def test_claude_md_imports_agents_md(self):
+        self.assertMatches(_read('CLAUDE.md'), r'(?m)^@AGENTS\.md\s*$', "CLAUDE.md must import @AGENTS.md")
+
+
 if __name__ == '__main__':
     unittest.main()
