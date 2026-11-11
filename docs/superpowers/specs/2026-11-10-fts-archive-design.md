@@ -235,7 +235,7 @@ The trial is done when the acceptance bar is met or the shortfall is understood.
 
 Resolved on 2026-11-10:
 
-1. **Subagent transcripts: excluded by default.** `include_subagents = false` stays the default, matching current backfill. The Robinina trial ran both modes and the numbers support keeping it off (see Live Trial Results); the decision is confirmed pending the known-answer step.
+1. **Subagent transcripts: excluded by default.** `include_subagents = false` stays the default, matching current backfill. The Robinina trial ran both modes and the numbers support keeping it off (see Live Trial Results); the decision is confirmed by the known-answer queries (subagents on gave the same or worse ranks; see Live Trial Results).
 2. **Worktree grouping: by git common dir.** At ingest, resolve `git rev-parse --git-common-dir` from the session `cwd` and store the result in a new nullable `conversations.repo_key` column (index it; `--repo <path|name>` filters on it). If `cwd` no longer exists or is not a git checkout, fall back to `cwd`. Resolution happens once at first ingest and is never recomputed, so deleted worktrees keep their key. `--folder` keeps its current meaning.
 3. **Stub depth: `description`, falling back to `command`.** For `Bash` stubs. Other tools use the first available of the existing key list.
 4. **Removed worktrees keep their transcripts.** Project folders for worktrees that no longer exist (e.g. `docs-beta-testing`, `studio-app-neato-logo-placements` under `~/.claude/projects`) are still present, so removal does not delete transcripts, only the 30-day purge does. The archive therefore matters for retention, not recovery from worktree removal. `prune` still must not treat a missing `cwd` as a reason to delete archived rows.
@@ -256,7 +256,7 @@ The first attempt used a string the model failed to produce (it mis-reversed the
 
 ## Open Questions
 
-None blocking, except the pending known-answer step in Live Trial Results. Items 1–3 under "Not covered by the prototype" in Evidence (compaction/rewind, ranking at scale, backfill at scale) remain to be measured during the live trial.
+None blocking. Items 1–3 under "Not covered by the prototype" in Evidence (compaction/rewind, ranking at scale, backfill at scale) remain to be measured during the live trial.
 
 ## Follow-Up Specs
 
@@ -270,7 +270,7 @@ What shipped differs from the text above in these ways. The first five were plan
 | Spec says | Shipped | Why |
 |---|---|---|
 | Reuse `conversations.message_count` | New column `archived_message_count` | `message_count` is the prose-only count that drives `reindex_delta`; archive counts include stubs and would corrupt LLM re-index timing |
-| Search ranked together with metadata weighting | Tiered: conversations with a metadata match first, then by best `bm25` | `bm25` scores and `LIKE` matches are not comparable. Revisit with real queries (see the pending known-answer step) |
+| Search ranked together with metadata weighting | Tiered: conversations with a metadata match first, then by best `bm25` | `bm25` scores and `LIKE` matches are not comparable. Revisit with real queries (the known-answer step found a short-message bias; see Live Trial Results) |
 | (silent) | Per-message cap of 50,000 characters | A pasted log must not bloat the archive |
 | JSON output includes `conversation_id` | JSON keeps the existing `id` key and adds `seq`, `snippet`, `score` (`show --format json` is an array of `seq`, `role`, `ts`, `text`) | Avoids breaking existing consumers |
 | (silent) | `Database.is_indexed` means "has a non-null title" | Ingest creates rows with no title; backfill's dry run must not call them indexed |
@@ -283,11 +283,11 @@ What shipped differs from the text above in these ways. The first five were plan
 | `prune` reports "Likely removed by `claude purge`" | Subagent conversations have folder `<project>/<session>/subagents`, so a purged subagent session directory also appears in that report | Follows from how folders are stored |
 | One LLM call per hook | `Stop` and `SessionEnd` are separate processes; if both run before the first finishes, both may call the LLM for the same session | Cost only; not worth a lock |
 
-**Note on `repo_key` (not a deviation):** the first implementation overwrote the key on every ingest; that was fixed before release. The shipped behavior matches Decision 2: the key is resolved once and kept (git is skipped when a non-empty key is stored; a NULL or empty key is filled on the next ingest). A session first archived after its worktree was deleted falls back to `cwd` and does not group under the main repo; the README documents this.
+**Note on `repo_key` (not a deviation):** the first implementation overwrote the key on every ingest; that was fixed before release. The shipped behavior matches Decision 2: the key is resolved once and kept (git is skipped when a non-empty key is stored; a NULL or empty key is filled on the next ingest). A session first archived after its worktree was deleted falls back to `cwd` as its own key. Before release, `--repo NAME` was widened to also match keys whose final component starts with `NAME.`, so `--repo studio-app` finds `studio-app.phase-2a-payments`; only the match widens, the stored key does not change.
 
 ## Live Trial Results
 
-Run 2026-11-10 against `../../Robinina-LLC` with an isolated database, `folders = ["*Robinina-LLC*"]`, and `[indexing] enabled = false` (no LLM calls):
+Run 2026-11-10 against `../../Robinina-LLC` with an isolated database, scope `folders = ["*Robinina-LLC*"]`, and `[indexing] enabled = false` (no LLM calls):
 
 | | `include_subagents = false` | `include_subagents = true` |
 |---|---|---|
@@ -297,9 +297,40 @@ Run 2026-11-10 against `../../Robinina-LLC` with an isolated database, `folders 
 | Backfill time | 2.8 s (2 skipped) | 8.3 s (3 skipped) |
 
 - **Disk:** about 0.68 MB per top-level session without subagents (16.4 MB / 24); the 568 subagent transcripts add about 11 MB (about 20 KB each). The README states this, not the prototype's 0.5 MB.
-- **Query latency:** 60-100 ms per search on the 597-conversation database.
+- **Query latency:** 50-100 ms per search.
 - **Hygiene scan:** 0 unredacted secret-pattern hits in either database (counts only; no values printed).
-- **Worktree grouping:** sessions whose worktree had already been deleted when first archived keep their `cwd` as `repo_key` and do not group under the main repo (for example `studio-app.phase-2a-payments` is its own key). See Deviations and Notes.
-- **Known-answer queries (~10 queries, intended session in the top 3 for at least 8):** pending; to be recorded by the maintainer. No result is claimed here.
+- **Worktree grouping:** sessions whose worktree had already been deleted when first archived keep their `cwd` as `repo_key` (for example `studio-app.phase-2a-payments` is its own key). `--repo studio-app` now matches them by the `studio-app.` prefix. See Deviations and Notes.
 
-**Decision:** `include_subagents` stays `false`. Archiving subagents multiplies the conversation count about 25x for about 1.7x the disk, mostly transcripts that are not interactive conversations. This is confirmed pending the known-answer step.
+### Known-answer queries
+
+The maintainer wrote 7 queries; for #12, #20 and #21 the maintainer supplied replacement queries after the first attempt. Results are for `include_subagents = false`, rank of the intended session:
+
+| Query | Rank | Notes |
+|---|---|---|
+| `robinina.art retail` | 2 | top 3 |
+| `pre-push hook` | 1 | top 3 |
+| `package.json sets overrides` | 1 | top 3 |
+| `tangerine` | 3 | top 3 (4 hits) |
+| `toggle` / `show password` | 8 (of 9 and 10 results) | miss: short-message bias |
+| `openssl` | none | miss: vocabulary |
+| `notification versus email` | none | miss: vocabulary; rescued by the OR fallback added in this release (`notification email` ranks 4) |
+
+- **Short-message bias.** `bm25` scores each message independently and rewards the shortest message containing the term, so short passing mentions in large sessions outrank the long, substantive message that the query was about.
+- **Vocabulary misses.** `openssl` is not in the stored text; it was most likely in tool output, which is stored only as stubs of at most 200 characters. `versus` is not in the stored text at all, so an all-terms search finds nothing; the any-term fallback now covers that case.
+- With subagents on, ranks were the same or worse on every query, with more noise.
+
+**Acceptance bar not met.** The bar was the intended session in the top 3 for at least 8 of 10 queries. The result is 4 of 8 distinct queries. The shortfall is understood: vocabulary misses (`openssl`, `notification versus email`) and one ranking bias, the short-message bias (`toggle`, `show password`).
+
+**Decision:** ship with the limitation documented (the README says tool output is stored only as short stubs and that ranking favors short matching messages). `include_subagents` stays `false`: archiving subagents multiplies the conversation count about 25x for about 1.7x the disk, mostly transcripts that are not interactive conversations, and gave no ranking benefit. A ranking redesign is tracked for 0.9.x.
+
+### Follow-ups for 0.9.x
+
+- Per-conversation ranking (match count plus best score) instead of the best single message.
+- Tool-output searchability (stubs are capped at 200 characters today).
+- `export --summarize` should pass `--no-session-persistence` to `claude -p` as indexing does (the flag exists; indexing already uses it).
+- Sidechain and meta messages are archived: `isSidechain`, `isMeta` and `isCompactSummary` are ignored.
+- `abspath` versus `realpath` for the stored `folder` and `source_path`.
+- The `'/subagents/'` substring test is repeated in four places.
+- `Stop` and `SessionEnd` can both call the LLM for the same session.
+- Search computes snippets without a bound and issues N+1 queries.
+- Orphaned `-wal` and `-shm` files without a database are not removed by `teardown` or `implode`.
