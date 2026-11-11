@@ -759,6 +759,74 @@ class Database:
         with self.connect() as conn:
             conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
 
+    def conversation_ids_for_scope(self, repo: str = None, folder: str = None) -> list:
+        """Return ids of conversations in a scope: `repo` matches repo_key exactly or by
+        final path component (as in search); `folder` matches cwd exactly (as in search
+        and list). With neither, returns [] — callers must pick a scope explicitly."""
+        self.validate()
+        clauses, params = [], []
+        if repo is not None:
+            sql, repo_params = self._repo_filter(repo, 'repo_key')
+            clauses.append(sql)
+            params += repo_params
+        if folder is not None:
+            clauses.append("cwd = ?")
+            params.append(folder)
+        if not clauses:
+            return []
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT id FROM conversations WHERE " + " AND ".join(clauses)
+                + " ORDER BY started_at DESC, id", params).fetchall()
+            return [r['id'] for r in rows]
+
+    def _prune_orphan_labels(self, conn):
+        """Delete topics and keywords no conversation links to (their names derive from
+        content that may just have been forgotten)."""
+        conn.execute("DELETE FROM topics WHERE id NOT IN (SELECT topic_id FROM conversation_topics)")
+        conn.execute("DELETE FROM keywords WHERE id NOT IN (SELECT keyword_id FROM conversation_keywords)")
+
+    def forget_conversations(self, ids: list) -> int:
+        """Permanently delete conversations and tombstone their ids; return how many existed.
+
+        One BEGIN IMMEDIATE transaction for all ids, so a failure leaves nothing half
+        forgotten. Deleting the conversation cascades to messages (whose delete trigger
+        clears the FTS index) and to topic/keyword links; topics and keywords left
+        unlinked are removed too. The tombstone keeps only the id and a timestamp.
+        Ids that do not exist are ignored (no tombstone).
+
+        Deleted content would otherwise linger in free pages, the WAL and FTS5
+        segments, so the connection runs with secure_delete=ON and, after the commit,
+        merges the FTS index and truncates the WAL.
+        """
+        self.validate()
+        forgotten = 0
+        with self.connect() as conn:
+            conn.execute("PRAGMA secure_delete=ON")
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                for conv_id in dict.fromkeys(ids):
+                    if conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,)).rowcount:
+                        conn.execute("INSERT OR IGNORE INTO forgotten (id) VALUES (?)", (conv_id,))
+                        forgotten += 1
+                if forgotten:
+                    self._prune_orphan_labels(conn)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            if forgotten:
+                # Rewrite FTS segments (drops the delete markers), then fold the WAL
+                # into the main file and truncate it. Both are best effort beyond this.
+                conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('optimize')")
+                conn.commit()
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        return forgotten
+
+    def forget_conversation(self, conv_id: str) -> bool:
+        """Forget one conversation (see forget_conversations); False if the id was unknown."""
+        return self.forget_conversations([conv_id]) == 1
+
     def get_for_reindex(self, conv_id: str):
         """
         Return indexing metadata for an existing conversation, or None if not found.

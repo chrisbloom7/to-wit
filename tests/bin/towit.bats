@@ -477,6 +477,47 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# forget subcommand
+# ---------------------------------------------------------------------------
+
+@test "towit: forget is not undone by backfill or the SessionStart catch-up" {
+  ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
+  export HOME="${TEST_TMPDIR}/home"
+  mkdir -p "${HOME}"
+  printf '[indexing]\nenabled = false\n' >> "${TOWIT_CONFIG_PATH}"
+  "${TOWIT}" setup
+  local sessions="${HOME}/.claude/projects/-work-proj"
+  write_fixture_session "${sessions}" "session-aaa-0001"
+  run "${TOWIT}" backfill --folder "${sessions}"
+  [ "${status}" -eq 0 ]
+  run "${TOWIT}" search concurrency
+  [[ "${output}" == *"session-aaa-0001"* ]] || { echo "Expected a hit before forget, got: ${output}"; return 1; }
+
+  run "${TOWIT}" forget session-aaa-0001 --yes
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"Forgot 1 conversation(s)."* ]]
+  [ -f "${sessions}/session-aaa-0001.jsonl" ]
+
+  run "${TOWIT}" backfill --folder "${sessions}"
+  [ "${status}" -eq 0 ]
+  run python3 "${HELPERS_DIR}/towit_ingest.py" --catch-up
+  [ "${status}" -eq 0 ]
+
+  run "${TOWIT}" search concurrency
+  [[ "${output}" != *"session-aaa-0001"* ]] || { echo "Forgotten session resurfaced: ${output}"; return 1; }
+  run "${TOWIT}" show session-aaa-0001
+  [ "${status}" -eq 1 ]
+  run "${TOWIT}" list
+  [[ "${output}" != *"session-aaa-0001"* ]] || { echo "Forgotten session listed: ${output}"; return 1; }
+}
+
+@test "towit: forget with no selector exits 2 and shows usage" {
+  run "${TOWIT}" forget --yes
+  [ "${status}" -eq 2 ]
+  [[ "${output}" == *"usage"* ]]
+}
+
+# ---------------------------------------------------------------------------
 # show subcommand
 # ---------------------------------------------------------------------------
 

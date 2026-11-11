@@ -20,6 +20,11 @@
 #                                   --around shows <n> messages either side of <seq> (default 5);
 #                                  --context only applies with --around
 #   prune [--dry-run]             Remove entries whose transcripts no longer exist
+#   forget <session-id> | --repo <path|name> | --folder <path> [--yes]
+#                                 Permanently delete conversations (messages, search index,
+#                                   topics, keywords) and block re-ingestion; exactly one
+#                                   selector is required; --folder matches the working
+#                                   directory exactly; prompts unless --yes
 #   export <session-id> [--format md|json] [--summarize]
 #   export --topic <name> [--format md|json] [--summarize]
 #   backfill [--dry-run] [--force] [--folder <path>]
@@ -103,6 +108,10 @@ case "${subcommand}" in
   prune)
     shift
     python3 "${HELPERS_DIR}/towit_prune.py" "$@" || exit $?
+    ;;
+  forget)
+    shift
+    python3 "${HELPERS_DIR}/towit_forget.py" "$@" || exit $?
     ;;
   export)
     shift
