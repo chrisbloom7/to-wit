@@ -138,6 +138,9 @@ def parse_transcript(path: str, redactor=None) -> ParsedTranscript:
                 entry_type = entry.get('type', '')
                 if entry_type not in ('user', 'assistant'):
                     continue
+                # Meta entries are harness-injected (e.g. local-command caveats), not conversation.
+                if entry.get('isMeta') is True:
+                    continue
                 msg = entry.get('message')
                 if not isinstance(msg, dict):
                     continue
