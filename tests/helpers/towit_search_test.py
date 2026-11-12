@@ -380,10 +380,11 @@ class TestTowitSearchArchive(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def test_table_has_turn_and_snippet_columns(self):
+    def test_table_has_msg_and_snippet_columns(self):
         r = run_search(self.config_path, ['recursion'])
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn('Turn', r.stdout)
+        self.assertIn('Msg', r.stdout)
+        self.assertNotIn('Turn', r.stdout)
         self.assertIn('Snippet', r.stdout)
         self.assertIn('[recursion]', r.stdout)
         self.assertIn('what about the hook?', r.stdout)  # title fallback

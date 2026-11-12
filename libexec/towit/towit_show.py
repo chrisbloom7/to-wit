@@ -3,7 +3,7 @@
 towit_show — Print the archived messages of a conversation.
 
 Usage:
-    python3 towit_show.py <session-id> [--around <seq>] [--context <n>] [--format text|json]
+    python3 towit_show.py <session-id> [--around <msg>] [--context <n>] [--format text|json]
 
 Reads from the archive, so it works after the original transcript is deleted.
 """
@@ -52,8 +52,9 @@ def _print_text(header: dict, messages: list, around) -> None:
 def main():
     parser = argparse.ArgumentParser(description='Show archived messages of a conversation.')
     parser.add_argument('session_id', metavar='SESSION_ID', help='Session ID to show')
-    parser.add_argument('--around', metavar='SEQ',
-                        help='Show only messages near this 0-based message number')
+    parser.add_argument('--around', metavar='MSG',
+                        help='Show only messages near this message number (0-based; '
+                             'the Msg column in `towit search` results)')
     parser.add_argument('--context', metavar='N', default=str(DEFAULT_CONTEXT),
                         help=f'Messages either side of --around (default: {DEFAULT_CONTEXT}); '
                              'only applies with --around')
