@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] - 2026-11-12
+
 ### Changed
 
 - `towit search` is about 25% faster on large archives when terms are common, because the per-term queries no longer sort their results or join `conversations` unless `--folder` or `--repo` needs it. Results and ranking are unchanged.
