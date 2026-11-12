@@ -7,6 +7,7 @@ This file provides guidance to AI coding agents when working with code in this r
 **To Wit** (`towit`) is a CLI tool that maintains a full-text SQLite archive of Claude Code conversations (message text, searchable with FTS5, that outlives Claude Code's own transcript retention) plus LLM-generated metadata (title, summary, keywords, topics). It archives sessions automatically through three Claude Code hooks (Stop, SessionEnd, SessionStart), and provides search, show, list, export, forget, prune, and stats subcommands.
 
 - **Entry point:** `bin/towit` (bash dispatcher; symlinked to `~/.local/bin/towit`)
+- **Version:** `libexec/towit/VERSION` (one line, no `v` prefix; `towit version` and `towit doctor` print it; the release skill writes it, and `docs_consistency_test.py` requires it to equal the newest `CHANGELOG.md` release)
 - **Helpers:** `libexec/towit/*.py` (Python modules, one per subcommand)
 - **Database:** `~/.towit/catalog.db` (SQLite WAL mode; set `[database] path` in `~/.towit/config.toml`, or the deprecated `TOWIT_DB_PATH`)
 - **Tests:** `tests/` (BATS integration tests + Python unit tests)

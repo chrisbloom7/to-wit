@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `towit version` (also `towit --version` and `towit -v`) prints the installed version, and `towit doctor` reports it. It is read from a `VERSION` file that ships with the install.
+
 ## [0.10.0] - 2026-11-12
 
 ### Changed

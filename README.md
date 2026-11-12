@@ -190,6 +190,8 @@ towit show aaaaaaaa-1111-2222-3333-444444444444 --around 1 --context 1
 
 `towit stats` prints conversation counts, then a block with the number of archived and metadata-only conversations, archived messages, and the database size.
 
+`towit version` (also `--version` and `-v`) prints the installed version, for example `towit 0.10.0`; `towit doctor` reports it as its first line. The version comes from the `libexec/towit/VERSION` file that ships with the install, and reads `towit unknown` if that file is missing.
+
 ## Retention and removing data
 
 **`claude purge` and Claude Code's retention sweep do not delete the To Wit archive.** That is the point of the archive, but it also means data you deliberately deleted from Claude Code is still here. To remove it:
