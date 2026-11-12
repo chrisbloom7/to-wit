@@ -96,11 +96,11 @@ The archive is append-only: each ingest compares the stored tail hash to the tra
 
 ## Release Process
 
-Use the **`release-towit` skill** (`.claude/skills/release-towit/SKILL.md`) for all releases. Read and follow it with the Read tool when the user asks to cut a release, bump a version, tag a release, or publish a new version. It covers: determining the version, auditing help text and README, updating CHANGELOG, committing with diff approval, tagging, and pushing.
+Use the **`release-towit` skill** (`.claude/skills/release-towit/SKILL.md`) for all releases. Read and follow it with the Read tool when the user asks to cut a release, bump a version, tag a release, or publish a new version. It covers: determining the version, auditing help text and README, updating CHANGELOG, committing, tagging, and pushing.
 
 Never bypass the skill — it catches README drift and other issues that ad-hoc releases miss.
 
 ## Directives
 
 - **Plan first:** Before implementing any non-trivial change, write out your plan and pause for acceptance before touching code.
-- **Test-driven development:** Write failing tests before writing implementation code. Run tests to confirm they fail, implement, then confirm they pass.
+- **Test-driven development:** Write failing tests before writing implementation code. Run tests to confirm they fail, implement, then confirm they pass. You do not need to ask permission before moving from failing tests to implementation.
