@@ -493,6 +493,7 @@ class Database:
                 c.title,
                 c.summary,
                 c.cwd,
+                c.folder,
                 c.started_at,
                 GROUP_CONCAT(DISTINCT t.name) AS topics,
                 GROUP_CONCAT(DISTINCT k.name) AS keywords
@@ -509,6 +510,7 @@ class Database:
             'title':      row['title'],
             'summary':    row['summary'],
             'cwd':        row['cwd'],
+            'folder':     row['folder'],
             'started_at': row['started_at'],
             'topics':     row['topics'] or '',
             'keywords':   row['keywords'] or '',
@@ -883,14 +885,7 @@ class Database:
             row = conn.execute(sql, (conv_id,)).fetchone()
             if row is None:
                 return None
-            # Also include folder (not in the shared select above)
-            result = self._row_to_dict(row)
-            folder_row = conn.execute(
-                "SELECT folder FROM conversations WHERE id = ?", (conv_id,)
-            ).fetchone()
-            if folder_row:
-                result['folder'] = folder_row['folder']
-            return result
+            return self._row_to_dict(row)
 
     def get_show_header(self, conv_id: str):
         """Header fields for `towit show`, or None if the conversation is unknown.
