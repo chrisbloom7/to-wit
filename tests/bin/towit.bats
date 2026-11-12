@@ -691,6 +691,55 @@ print("\n".join(r[0] for r in con.execute("SELECT text FROM messages")))
   [ ! -e "${TEST_TMPDIR}/claude_called" ] || { echo "claude was invoked"; return 1; }
 }
 
+@test "towit: search matches terms spread across messages and keeps the any-term retry" {
+  # Indexing is disabled; a stub claude on PATH fails and leaves a marker if ever called
+  printf '#!/usr/bin/env bash\ntouch "%s/claude_called"\nexit 1\n' "${TEST_TMPDIR}" > "${TEST_TMPDIR}/mock_bin/claude"
+  chmod +x "${TEST_TMPDIR}/mock_bin/claude"
+  ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
+  export HOME="${TEST_TMPDIR}/home"
+  mkdir -p "${HOME}"
+  printf '[indexing]\nenabled = false\n' >> "${TOWIT_CONFIG_PATH}"
+  "${TOWIT}" setup
+
+  local sessions="${TEST_TMPDIR}/sessions"
+  mkdir -p "${sessions}"
+  # 0001: redis and timeout live in different messages; 0002: redis only
+  cat > "${sessions}/session-rank-0001.jsonl" <<'JSONL'
+{"type":"user","timestamp":"2026-01-15T10:00:00Z","cwd":"/work/proj","sessionId":"session-rank-0001","message":{"role":"user","content":"Our redis cache keeps dropping keys."}}
+{"type":"assistant","timestamp":"2026-01-15T10:00:05Z","cwd":"/work/proj","sessionId":"session-rank-0001","message":{"role":"assistant","content":[{"type":"text","text":"Check the eviction policy first."}]}}
+{"type":"user","timestamp":"2026-01-15T10:01:00Z","cwd":"/work/proj","sessionId":"session-rank-0001","message":{"role":"user","content":"Now the client reports a timeout on connect."}}
+{"type":"assistant","timestamp":"2026-01-15T10:01:05Z","cwd":"/work/proj","sessionId":"session-rank-0001","message":{"role":"assistant","content":[{"type":"text","text":"Raise the connect limit."}]}}
+JSONL
+  cat > "${sessions}/session-rank-0002.jsonl" <<'JSONL'
+{"type":"user","timestamp":"2026-01-16T10:00:00Z","cwd":"/work/proj","sessionId":"session-rank-0002","message":{"role":"user","content":"How do I install redis locally?"}}
+{"type":"assistant","timestamp":"2026-01-16T10:00:05Z","cwd":"/work/proj","sessionId":"session-rank-0002","message":{"role":"assistant","content":[{"type":"text","text":"Use your package manager."}]}}
+{"type":"user","timestamp":"2026-01-16T10:01:00Z","cwd":"/work/proj","sessionId":"session-rank-0002","message":{"role":"user","content":"Thanks, that worked."}}
+{"type":"assistant","timestamp":"2026-01-16T10:01:05Z","cwd":"/work/proj","sessionId":"session-rank-0002","message":{"role":"assistant","content":[{"type":"text","text":"Glad to help."}]}}
+JSONL
+
+  run "${TOWIT}" backfill --folder "${sessions}"
+  [ "${status}" -eq 0 ]
+
+  # Every term appears somewhere in 0001 (different messages), so only it matches
+  run "${TOWIT}" search redis timeout --format json
+  [ "${status}" -eq 0 ]
+  run python3 -c '
+import json, sys
+rows = json.loads(sys.argv[1])
+print(",".join(r["id"] for r in rows), all("seq" in r and "score" in r for r in rows))
+' "${output}"
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "session-rank-0001 True" ] || { echo "Expected only session-rank-0001 with seq/score, got: ${output}"; return 1; }
+
+  # No conversation has every term, so the any-term retry notice goes to stderr
+  run --separate-stderr "${TOWIT}" search redis zzzmissing
+  [ "${status}" -eq 0 ]
+  [[ "${stderr}" == *"No results for all terms; showing results matching any term."* ]] || { echo "Expected retry notice, got stderr: ${stderr}"; return 1; }
+  [[ "${output}" == *"session-rank-0002"* ]] || { echo "Expected session-rank-0002, got: ${output}"; return 1; }
+  [[ "${output}" == *"session-rank-0001"* ]] || { echo "Expected session-rank-0001, got: ${output}"; return 1; }
+  [ ! -e "${TEST_TMPDIR}/claude_called" ] || { echo "claude was invoked"; return 1; }
+}
+
 @test "towit: setup migrates a v0.8.2 database and keeps rows searchable by metadata" {
   ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
   export HOME="${TEST_TMPDIR}/home"

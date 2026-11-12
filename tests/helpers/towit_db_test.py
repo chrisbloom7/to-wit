@@ -5,6 +5,7 @@
 
 import contextlib
 import io
+import math
 import threading
 import unittest
 import unittest.mock
@@ -19,6 +20,7 @@ sys.path.insert(0, HELPERS_DIR)
 
 import towit_db
 from towit_db import SCHEMA_VERSION, Database, message_hash, build_match_expression, is_fts_query_error
+from towit_db import distinct_search_terms, group_conversation_hits, ConversationHit, MAX_RANK_TERMS
 
 SAMPLE_CONV = {
     'id': 'test-session-001',
@@ -812,6 +814,121 @@ class TestBuildMatchExpression(unittest.TestCase):
         self.assertEqual(build_match_expression(['***', 'ok']), '"ok"')
 
 
+class TestDistinctSearchTerms(unittest.TestCase):
+    def test_dedupes_case_insensitively_keeping_first_spelling(self):
+        self.assertEqual(distinct_search_terms(['Redis', 'redis', 'timeout']), ['Redis', 'timeout'])
+
+    def test_drops_untokenizable_terms(self):
+        self.assertEqual(distinct_search_terms(['"', '*', 'redis']), ['redis'])
+
+    def test_empty(self):
+        self.assertEqual(distinct_search_terms([]), [])
+
+    def test_max_rank_terms(self):
+        self.assertEqual(MAX_RANK_TERMS, 8)
+
+
+def _row(conv, seq, rowid, score):
+    return {'id': conv, 'seq': seq, 'rowid': rowid, 'score': score}
+
+
+class TestGroupConversationHits(unittest.TestCase):
+    def test_no_rows_gives_no_hits(self):
+        self.assertEqual(group_conversation_hits([], None), {})
+        self.assertEqual(group_conversation_hits([[]], []), {})
+
+    def test_single_term_one_message(self):
+        hits = group_conversation_hits([[_row('c1', 2, 10, -3.0)]], None)
+        hit = hits['c1']
+        self.assertIsInstance(hit, ConversationHit)
+        self.assertEqual(hit.terms_covered, 1)
+        self.assertEqual(hit.rank_score, -3.0)
+        self.assertIs(hit.spread, False)
+        self.assertEqual((hit.seq, hit.rowid, hit.message_score), (2, 10, -3.0))
+
+    def test_many_matches_scale_the_score(self):
+        rows = [_row('c1', i, i + 1, -1.0) for i in range(300)]
+        hits = group_conversation_hits([rows], None)
+        self.assertEqual(list(hits), ['c1'])
+        self.assertEqual(hits['c1'].rank_score, -1.0 * (1 + math.log(300)))
+        self.assertEqual(hits['c1'].rowid, 1)
+
+    def test_many_matches_representative_is_best_score(self):
+        rows = [_row('c1', 1, 1, -1.0), _row('c1', 2, 2, -5.0), _row('c1', 3, 3, -2.0)]
+        self.assertEqual(group_conversation_hits([rows], None)['c1'].rowid, 2)
+
+    def test_and_spread_hit(self):
+        term_rows = [[_row('c1', 1, 1, -2.0)], [_row('c1', 2, 2, -3.0)]]
+        hit = group_conversation_hits(term_rows, [], 'and')['c1']
+        self.assertIs(hit.spread, True)
+        self.assertEqual(hit.terms_covered, 2)
+        self.assertEqual(hit.rank_score, (-2.0 + -3.0) * (1 + math.log(2)))
+        self.assertEqual(hit.rowid, 2)
+        self.assertEqual(hit.message_score, -3.0)
+
+    def test_term_order_does_not_change_scores(self):
+        scores = [-0.1, -0.2, -0.3]
+        forward = [[_row('c1', 1, 1, s)] for s in scores]
+        hit = group_conversation_hits(forward, None, 'or')['c1']
+        reverse = group_conversation_hits(forward[::-1], None, 'or')['c1']
+        self.assertEqual(hit.rank_score, reverse.rank_score)
+        self.assertEqual(hit.message_score, reverse.message_score)
+
+    def test_and_requires_every_term(self):
+        term_rows = [[_row('c1', 1, 1, -2.0)], []]
+        self.assertEqual(group_conversation_hits(term_rows, None, 'and'), {})
+        hits = group_conversation_hits(term_rows, None, 'or')
+        self.assertEqual(hits['c1'].terms_covered, 1)
+
+    def test_message_level_row_is_the_representative(self):
+        term_rows = [[_row('c1', 1, 1, -2.0), _row('c1', 5, 7, -1.0)],
+                     [_row('c1', 5, 7, -1.5)]]
+        hit = group_conversation_hits(term_rows, [_row('c1', 5, 7, -4.0)], 'and')['c1']
+        self.assertEqual((hit.seq, hit.rowid, hit.message_score), (5, 7, -4.0))
+        self.assertIs(hit.spread, False)
+
+    def test_spread_representative_prefers_more_terms(self):
+        term_rows = [[_row('c1', 1, 1, -1.0), _row('c1', 2, 2, -9.0)],
+                     [_row('c1', 1, 1, -2.0)]]
+        hit = group_conversation_hits(term_rows, None, 'or')['c1']
+        self.assertEqual(hit.rowid, 1)
+        self.assertEqual(hit.message_score, -3.0)
+        self.assertIs(hit.spread, False)
+
+    def test_partial_coverage_or_hit_is_spread(self):
+        term_rows = [[_row('c1', 1, 1, -1.0)], [_row('c1', 2, 2, -2.0)], []]
+        hit = group_conversation_hits(term_rows, None, 'or')['c1']
+        self.assertEqual(hit.terms_covered, 2)
+        self.assertIs(hit.spread, True)
+
+    def test_equal_scores_are_deterministic(self):
+        a, b = _row('c1', 1, 4, -2.0), _row('c1', 2, 3, -2.0)
+        for rows in ([a, b], [b, a]):
+            self.assertEqual(group_conversation_hits([rows], None)['c1'].rowid, 3)
+
+
+class TestBm25Additivity(unittest.TestCase):
+    def test_multi_term_and_bm25_is_sum_of_single_term_bm25(self):
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        db = Database(os.path.join(tmpdir, 'catalog.db'))
+        db.create_schema()
+        with db.connect() as conn:
+            conn.execute("INSERT INTO conversations (id, folder, cwd, started_at, last_active, archived) "
+                         "VALUES ('c1', 'f', '/x', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)")
+            conn.execute("INSERT INTO messages (conversation_id, seq, role, text) "
+                         "VALUES ('c1', 0, 'user', 'alpha and beta together')")
+            conn.execute("INSERT INTO messages (conversation_id, seq, role, text) "
+                         "VALUES ('c1', 1, 'user', 'alpha alone here')")
+            sql = "SELECT rowid, bm25(messages_fts) FROM messages_fts WHERE messages_fts MATCH ?"
+            both = dict(conn.execute(sql, (build_match_expression(['alpha', 'beta'], 'and'),)).fetchall())
+            alpha = dict(conn.execute(sql, (build_match_expression(['alpha']),)).fetchall())
+            beta = dict(conn.execute(sql, (build_match_expression(['beta']),)).fetchall())
+            self.assertEqual(len(both), 1)
+            rowid = next(iter(both))
+            self.assertAlmostEqual(both[rowid], alpha[rowid] + beta[rowid], places=5)
+
+
 class TestRepoFilter(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -995,6 +1112,13 @@ class TestSearchArchive(unittest.TestCase):
         self.assertIn('[guard]', res[0]['snippet'])
         self.assertIsInstance(res[0]['score'], float)
 
+    def test_duplicate_terms_differing_in_case_count_once(self):
+        self._spread_fixture()
+        dup = self.db.search_archive(['Redis', 'redis', 'timeout'], scope='text')
+        plain = self.db.search_archive(['redis', 'timeout'], scope='text')
+        self.assertTrue(plain)
+        self.assertEqual(dup, plain)
+
     def test_phrase_argument_is_exact_vs_and(self):
         self.assertEqual(self._ids(self.db.search_archive(['stop hook'], scope='text')), ['s1'])
         self.assertEqual(self.db.search_archive(['hook stop'], scope='text'), [])
@@ -1133,6 +1257,147 @@ class TestSearchArchive(unittest.TestCase):
         self.assertEqual(order, ['t1', 't2', 't3'])
         self.assertEqual(sorted(first), ['t1', 't2', 't3'])
 
+    def _archive(self, cid, texts, **conv):
+        self.db.archive_session(self._conv(cid, **conv), [
+            self._m('user' if i % 2 == 0 else 'assistant', t) for i, t in enumerate(texts)])
+
+    def _bm25(self, term, cid):
+        """Best single-term bm25 of the conversation's messages (lower is better)."""
+        sql, params = self.db._text_match_query(None, None)
+        with self.db.connect() as conn:
+            return min(r['score'] for r in conn.execute(sql, [build_match_expression([term])] + params)
+                       if r['id'] == cid)
+
+    def test_and_matches_terms_spread_across_messages(self):
+        self._archive('s10', ['redis is mentioned here', 'filler', 'more filler', 'filler again',
+                              'filler', 'a timeout happened at last'])
+        res = self.db.search_archive(['redis', 'timeout'], scope='text')
+        self.assertEqual(self._ids(res), ['s10'])
+        lower = 0 if self._bm25('redis', 's10') < self._bm25('timeout', 's10') else 5
+        self.assertEqual(res[0]['seq'], lower)
+        self.assertIn('[', res[0]['snippet'])
+
+    def test_and_needs_every_term_somewhere(self):
+        self._archive('s10', ['redis only here', 'nothing else'])
+        self.assertEqual(self.db.search_archive(['redis', 'timeout'], scope='text'), [])
+
+    def test_co_occurrence_hit_keeps_todays_seq_snippet_score(self):
+        self._archive('s10', ['first', 'redis timeout in one message', 'redis alone', 'timeout alone'])
+        res = self.db.search_archive(['redis', 'timeout'], scope='text')
+        self.assertEqual(self._ids(res), ['s10'])
+        sql, params = self.db._text_match_query(None, None)
+        with self.db.connect() as conn:
+            best = conn.execute(sql, [build_match_expression(['redis', 'timeout'], 'and')] + params).fetchone()
+        self.assertEqual((res[0]['seq'], res[0]['score']), (best['seq'], best['score']))
+        self.assertEqual(res[0]['seq'], 1)
+        self.assertIn('[redis]', res[0]['snippet'])
+        self.assertIn('[timeout]', res[0]['snippet'])
+
+    def test_more_terms_covered_ranks_first(self):
+        for i in range(10):
+            self._archive('f%d' % i, ['q', 'common filler thread %d' % i])
+        self._archive('one', ['q', 'rareterm rareterm rareterm'], started='2026-01-05T00:00:00Z')
+        self._archive('two', ['q', 'rareterm sits in a long long long long long message about things',
+                              'and a common word thread elsewhere'], started='2026-01-04T00:00:00Z')
+        self.assertLess(self._bm25('rareterm', 'one'), self._bm25('rareterm', 'two'))
+        res = self.db.search_archive(['rareterm', 'thread'], mode='or', scope='text')
+        self.assertEqual(self._ids(res)[:2], ['two', 'one'])
+
+    def test_more_matching_messages_beats_one_equal_hit(self):
+        self._archive('few', ['q', 'needle alpha'], started='2026-02-02T00:00:00Z')
+        self._archive('many', ['q', 'needle alpha', 'x', 'needle alpha', 'y', 'needle alpha'],
+                      started='2026-02-01T00:00:00Z')
+        self.assertEqual(self._bm25('needle', 'few'), self._bm25('needle', 'many'))
+        self.assertEqual(self._ids(self.db.search_archive(['needle'], scope='text')), ['many', 'few'])
+
+    def test_recency_only_breaks_exact_ties(self):
+        self._archive('old', ['q', 'needle alpha'], started='2026-02-01T00:00:00Z')
+        self._archive('new', ['q', 'needle alpha'], started='2026-02-02T00:00:00Z')
+        self.assertEqual(self._ids(self.db.search_archive(['needle'], scope='text')), ['new', 'old'])
+        self._archive('worse', ['q', 'a much longer message where the needle is lost among many many words'],
+                      started='2026-03-01T00:00:00Z')
+        self.assertEqual(self._ids(self.db.search_archive(['needle'], scope='text')),
+                         ['new', 'old', 'worse'])
+
+    def test_metadata_match_still_first(self):
+        self._archive('lots', ['q', 'capkw one', 'x', 'capkw two', 'y', 'capkw three'])
+        self._archive('kw', ['q', 'capkw'])
+        self.db.upsert_conversation({
+            'id': 'kw', 'folder': '/f', 'cwd': '/w/app', 'started_at': '2026-01-01T00:00:00Z',
+            'last_active': None, 'title': 't', 'summary': 's', 'topics': [], 'keywords': ['capkw']})
+        self.assertEqual(self._ids(self.db.search_archive(['capkw']))[:2], ['kw', 'lots'])
+
+    def _spread_fixture(self):
+        self._archive('a', ['alpha redis', 'x', 'timeout here'], started='2026-04-01T00:00:00Z')
+        self._archive('b', ['redis timeout together'], started='2026-04-02T00:00:00Z')
+        self._archive('c', ['redis redis', 'x', 'timeout timeout', 'redis'], started='2026-04-03T00:00:00Z')
+
+    def test_term_order_does_not_change_results(self):
+        self._spread_fixture()
+        fwd = self.db.search_archive(['redis', 'timeout'], scope='text')
+        rev = self.db.search_archive(['timeout', 'redis'], scope='text')
+        self.assertEqual(set(self._ids(fwd)), {'a', 'b', 'c'})
+        self.assertEqual(self._ids(fwd), self._ids(rev))
+
+    def test_forgotten_conversation_is_not_a_spread_hit(self):
+        self._archive('sp', ['redis one', 'x', 'timeout two'])
+        self.assertEqual(self._ids(self.db.search_archive(['redis', 'timeout'], scope='text')), ['sp'])
+        self.db.forget_conversation('sp')
+        self.assertEqual(self.db.search_archive(['redis', 'timeout'], scope='text'), [])
+
+    def test_unsearchable_extra_terms_are_ignored(self):
+        self._spread_fixture()
+        self.assertEqual(_snap(self.db.search_archive(['redis', '"', '*'], scope='text')),
+                         _snap(self.db.search_archive(['redis'], scope='text')))
+
+    def test_folder_and_repo_filters_apply_to_spread_hits(self):
+        self._archive('in', ['redis one', 'x', 'timeout two'], cwd='/w/in', repo='/src/in')
+        self._archive('out', ['redis one', 'x', 'timeout two'], cwd='/w/out', repo='/src/out')
+        self.assertEqual(self._ids(self.db.search_archive(['redis', 'timeout'], scope='text',
+                                                          folder='/w/in')), ['in'])
+        self.assertEqual(self._ids(self.db.search_archive(['redis', 'timeout'], scope='text',
+                                                          repo='out')), ['out'])
+
+    def test_limit_caps_text_only_spread_hits(self):
+        for i in range(5):
+            self._archive('sp%d' % i, ['redis one', 'x', 'timeout two'],
+                          started='2026-04-0%dT00:00:00Z' % (i + 1))
+        res = self.db.search_archive(['redis', 'timeout'], scope='text', limit=2)
+        self.assertEqual(self._ids(res), ['sp4', 'sp3'])
+
+    def test_more_than_500_conversations_spread(self):
+        for i in range(520):
+            self._archive('b%03d' % i, ['redis one', 'timeout two'])
+        res = self.db.search_archive(['redis', 'timeout'], scope='text', limit=None)
+        self.assertEqual(len(res), 520)
+        self.assertTrue(all('[' in r['snippet'] for r in res))
+
+    def test_nine_terms_use_message_level_rows_only(self):
+        terms = ['tw%d' % i for i in range(9)]
+        self._archive('nine', ['%s here' % t for t in terms])
+        self.assertEqual(self.db.search_archive(terms, scope='text'), [])
+        self.assertEqual(self._ids(self.db.search_archive(terms[:8], scope='text')), ['nine'])
+        self._archive('together', [' '.join(terms)])
+        self.assertEqual(self._ids(self.db.search_archive(terms, scope='text')), ['together'])
+
+    def test_fts_rejected_term_in_and_mode_empties_text_hits(self):
+        with self._with_failing_match('fts5: syntax error near "x"'):
+            res = self.db.search_archive(['recursion', 'sum3'])
+        self.assertEqual(res, [])
+        self.db.upsert_conversation({
+            'id': 's3', 'folder': '/f', 'cwd': '/w/app', 'started_at': '2026-01-03T00:00:00Z',
+            'last_active': '2026-01-03T00:00:00Z', 'title': 'T3', 'summary': 'sum3',
+            'topics': [], 'keywords': ['recursion', 'sum3']})
+        with self._with_failing_match('fts5: syntax error near "x"'):
+            res = self.db.search_archive(['recursion', 'sum3'])
+        self.assertEqual(self._ids(res), ['s3'])
+        self.assertIsNone(res[0]['seq'])
+
+    def test_non_fts_operational_error_propagates(self):
+        with self._with_failing_match('database is locked'):
+            with self.assertRaises(sqlite3.OperationalError):
+                self.db.search_archive(['redis', 'timeout'], scope='text')
+
     def test_query_plan_uses_fts_index(self):
         sql, params = self.db._text_match_query(None, None)
         with self.db.connect() as conn:
@@ -1226,9 +1491,10 @@ SNIPPET_PIN_EXPECTED = {
         ('p2', 2, 'the [zebra] again', -1.983775, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
         ('p5', 1, 'one single [zebra] mention buried in a much longer message that keeps…', -0.538138, 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', None, '', '', '/w/gamma', '2026-03-05T00:00:00Z'),
     ],
+    # p3 (four matching messages) now outranks p1 (three) at a close best score; fields unchanged.
     'text': [
-        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
         ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
         ('p4', 2, '[zebra] quagga', -2.222605, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
         ('p2', 2, 'the [zebra] again', -1.983775, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
         ('p5', 1, 'one single [zebra] mention buried in a much longer message that keeps…', -0.538138, 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', None, '', '', '/w/gamma', '2026-03-05T00:00:00Z'),
@@ -1241,20 +1507,22 @@ SNIPPET_PIN_EXPECTED = {
         ('p4', 2, '[zebra] [quagga]', -5.621657, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
         ('p2', 1, '[zebra] [quagga] hybrids are fictional', -4.130005, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
     ],
+    # Ranked by terms covered: p2 covers both terms and now precedes p7; p3 (more matching messages) precedes p1; fields unchanged.
     'or_two_terms': [
         ('p4', 2, '[zebra] [quagga]', -5.621657, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
-        ('p7', 2, '[quagga] [quagga]', -4.291698, 'quagga facts', None, '', '', '/w/gamma', '2026-03-07T00:00:00Z'),
         ('p2', 1, '[zebra] [quagga] hybrids are fictional', -4.130005, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
-        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
+        ('p7', 2, '[quagga] [quagga]', -4.291698, 'quagga facts', None, '', '', '/w/gamma', '2026-03-07T00:00:00Z'),
         ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
         ('p5', 1, 'one single [zebra] mention buried in a much longer message that keeps…', -0.538138, 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', None, '', '', '/w/gamma', '2026-03-05T00:00:00Z'),
     ],
+    # Same terms-covered reorder as or_two_terms among the text-only rows (p2 before p7); fields unchanged.
     'all_or': [
         ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
         ('p6', None, '', None, 'Horse', 'horses', 'animals', 'zebra', '/w/gamma', '2026-03-06T00:00:00Z'),
         ('p4', 2, '[zebra] [quagga]', -5.621657, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
-        ('p7', 2, '[quagga] [quagga]', -4.291698, 'quagga facts', None, '', '', '/w/gamma', '2026-03-07T00:00:00Z'),
         ('p2', 1, '[zebra] [quagga] hybrids are fictional', -4.130005, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
+        ('p7', 2, '[quagga] [quagga]', -4.291698, 'quagga facts', None, '', '', '/w/gamma', '2026-03-07T00:00:00Z'),
         ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
         ('p5', 1, 'one single [zebra] mention buried in a much longer message that keeps…', -0.538138, 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', None, '', '', '/w/gamma', '2026-03-05T00:00:00Z'),
     ],
@@ -1286,9 +1554,10 @@ SNIPPET_PIN_EXPECTED = {
         ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
         ('p4', 2, '[zebra] quagga', -2.222605, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
     ],
+    # Same order change as 'text': p3 before p1 under the per-conversation ranking; fields unchanged.
     'limit_text_2': [
-        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
         ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
     ],
     'limit_none': [
         ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
@@ -1300,9 +1569,10 @@ SNIPPET_PIN_EXPECTED = {
     ],
     'no_hits': [
     ],
+    # Same order change as 'text' (the unbalanced quote is stripped, leaving 'zebra'); fields unchanged.
     'unbalanced_quote': [
-        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
         ('p3', 2, '[zebra]', -2.526811, 'Tell me about zebra crossings and traffic law', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
+        ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
         ('p4', 2, '[zebra] quagga', -2.222605, 'second tie question', None, '', '', '/w/beta', '2026-03-03T00:00:00Z'),
         ('p2', 2, 'the [zebra] again', -1.983775, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
         ('p5', 1, 'one single [zebra] mention buried in a much longer message that keeps…', -0.538138, 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', None, '', '', '/w/gamma', '2026-03-05T00:00:00Z'),
@@ -1397,7 +1667,7 @@ class TestSearchArchiveWorkCount(unittest.TestCase):
                     'last_active': started, 'title': 'Title %d' % i, 'summary': 'Summary %d' % i,
                     'topics': ['t'], 'keywords': ['unrelated']})
 
-    def _statements(self, **kwargs):
+    def _statements(self, terms=('needle',), **kwargs):
         """Run one search_archive and return the SQL statements executed on its connections."""
         self.db.validate()  # warm the cached schema check so it is not counted
         seen = []
@@ -1409,7 +1679,7 @@ class TestSearchArchiveWorkCount(unittest.TestCase):
                 conn.set_trace_callback(seen.append)
                 yield conn
         with unittest.mock.patch.object(Database, 'connect', connect):
-            results = self.db.search_archive(['needle'], **kwargs)
+            results = self.db.search_archive(list(terms), **kwargs)
         return results, [q for q in seen if q.lstrip().upper().startswith(('SELECT', 'WITH'))]
 
     def _assert_constant_statements(self, titled):
@@ -1426,6 +1696,26 @@ class TestSearchArchiveWorkCount(unittest.TestCase):
         self.setUp()
         self._build(n, titled)
         return self._statements(limit=None)
+
+    def _spread_statements(self, n):
+        self.tearDown()
+        self.setUp()
+        for i in range(n):
+            self.db.archive_session(
+                {'id': 'v%03d' % i, 'folder': '/f', 'cwd': '/w/perf', 'started_at': None,
+                 'last_active': None, 'repo_key': '/src/perf', 'source_path': None},
+                [{'role': 'user', 'ts': None, 'text': 'needle first %d' % i},
+                 {'role': 'assistant', 'ts': None, 'text': 'thread second %d' % i}])
+        return self._statements(terms=('needle', 'thread'), limit=None)
+
+    def test_multi_term_statements_are_constant(self):
+        small, small_sql = self._spread_statements(5)
+        large, large_sql = self._spread_statements(30)
+        self.assertEqual((len(small), len(large)), (5, 30))
+        self.assertLessEqual(len(large_sql) - len(small_sql), 2,
+                             'statement count grows with conversations: %d -> %d'
+                             % (len(small_sql), len(large_sql)))
+        self.assertLessEqual(len(large_sql), 16, 'too many statements: %d' % len(large_sql))
 
     def test_summary_rows_are_batched_not_n_plus_one(self):
         self._assert_constant_statements(titled=True)

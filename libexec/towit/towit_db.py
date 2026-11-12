@@ -6,7 +6,9 @@ This module is imported by other towit scripts; it is not run directly.
 """
 
 import contextlib
+from dataclasses import dataclass
 import hashlib
+import math
 import os
 import sys
 import sqlite3
@@ -136,6 +138,11 @@ def is_fts_query_error(exc: Exception) -> bool:
     return isinstance(exc, sqlite3.OperationalError) and str(exc).startswith(FTS_QUERY_ERROR_PREFIXES)
 
 
+def _is_searchable(term: str) -> bool:
+    """True if term has a letter or digit, so FTS5 can produce a token from it."""
+    return any(ch.isalnum() for ch in term)
+
+
 def build_match_expression(terms: list, mode: str = 'and') -> str | None:
     """Build an FTS5 MATCH expression from user terms, or None if nothing is searchable.
 
@@ -143,10 +150,95 @@ def build_match_expression(terms: list, mode: str = 'and') -> str | None:
     column filters and punctuation in user input are always literal. Terms with
     no letter or digit cannot produce a token and are dropped.
     """
-    phrases = ['"%s"' % t.replace('"', '""') for t in terms if any(ch.isalnum() for ch in t)]
+    phrases = ['"%s"' % t.replace('"', '""') for t in terms if _is_searchable(t)]
     if not phrases:
         return None
     return (' OR ' if mode == 'or' else ' AND ').join(phrases)
+
+
+# Most terms a conversation-level search scores individually (one query per term).
+MAX_RANK_TERMS = 8
+
+
+def distinct_search_terms(terms: list) -> list:
+    """Searchable terms de-duplicated case-insensitively, in first-seen order and spelling."""
+    seen = set()
+    distinct = []
+    for term in terms:
+        if _is_searchable(term) and term.casefold() not in seen:
+            seen.add(term.casefold())
+            distinct.append(term)
+    return distinct
+
+
+@dataclass(frozen=True)
+class ConversationHit:
+    """One conversation's best match: its representative message and its rank score.
+
+    spread is False when the representative came from the message-level rows or covers
+    every term, so the full match expression matches it; True otherwise. It is
+    informational: search_archive chooses snippet expressions per rowid from the
+    message-level rows, not from this flag."""
+    conv_id: str
+    rowid: int
+    seq: int
+    message_score: float
+    terms_covered: int
+    rank_score: float
+    spread: bool
+
+
+def group_conversation_hits(term_rows: list, message_rows: list | None, mode: str = 'and') -> dict:
+    """Group per-term and message-level search rows into one ConversationHit per conversation.
+
+    term_rows[i] holds the rows (id, seq, rowid, score) of term i's single-term query;
+    message_rows holds the rows of the message-level query, or None. bm25 scores are
+    negative and lower is better, so "best" is the lowest score, ties broken by the
+    lowest rowid. rank_score sums each covered term's best score and scales it by
+    1 + ln(n), n being the distinct matching messages, so many hits outrank a few.
+    In 'and' mode a conversation needs a row for every term.
+    """
+    per_conv = {}
+    for index, rows in enumerate(term_rows):
+        for row in rows:
+            terms = per_conv.setdefault(row['id'], {})
+            terms.setdefault(index, []).append(row)
+
+    # Representative from the message-level query: its best row per conversation.
+    message_best = {}
+    for row in message_rows or []:
+        best = message_best.get(row['id'])
+        if best is None or (row['score'], row['rowid']) < (best['score'], best['rowid']):
+            message_best[row['id']] = row
+
+    hits = {}
+    for conv_id, by_term in per_conv.items():
+        if mode != 'or' and len(by_term) < len(term_rows):
+            continue
+        rowids = {row['rowid'] for rows in by_term.values() for row in rows}
+        base = math.fsum(min(row['score'] for row in rows) for rows in by_term.values())
+        rank_score = base * (1 + math.log(len(rowids)))
+
+        if conv_id in message_best:
+            rep = message_best[conv_id]
+            rowid, seq, message_score, spread = rep['rowid'], rep['seq'], rep['score'], False
+        else:
+            # No message holds every term: prefer the message covering most terms,
+            # then the lowest summed single-term score.
+            per_message = {}
+            for rows in by_term.values():
+                for row in rows:
+                    entry = per_message.setdefault(row['rowid'], [0, [], row['seq']])
+                    entry[0] += 1
+                    entry[1].append(row['score'])
+            totals = {r: math.fsum(e[1]) for r, e in per_message.items()}
+            rowid = min(per_message, key=lambda r: (-per_message[r][0], totals[r], r))
+            covered, seq = per_message[rowid][0], per_message[rowid][2]
+            message_score = totals[rowid]
+            spread = covered < len(term_rows)
+        hits[conv_id] = ConversationHit(conv_id, rowid, seq, message_score,
+                                        len(by_term), rank_score, spread)
+    return hits
 
 
 def _add_column(conn, column_def: str) -> None:
@@ -556,6 +648,20 @@ class Database:
             params += rparams
         return sql + " ORDER BY score", params
 
+    def _term_rows(self, conn, terms: list, folder, repo) -> list:
+        """One list of text-hit rows (best bm25 first) per term; a term FTS5 rejects gives []."""
+        sql, params = self._text_match_query(folder, repo)
+        per_term = []
+        for term in terms:
+            try:
+                per_term.append(conn.execute(
+                    sql, [build_match_expression([term], 'and')] + params).fetchall())
+            except sqlite3.OperationalError as e:
+                if not is_fts_query_error(e):
+                    raise
+                per_term.append([])
+        return per_term
+
     def search_archive(self, terms: list, mode: str = 'and', folder: str = None,
                        repo: str = None, scope: str = 'all', include_topics: bool = False,
                        include_summary: bool = False, include_title: bool = False,
@@ -564,12 +670,18 @@ class Database:
         Search archived message text and/or conversation metadata.
 
         scope='all'      — metadata (as `search`) plus message text; a conversation with
-                           a metadata match ranks above a text-only match, then bm25
-                           (lower is better), then recency
+                           a metadata match ranks first, then more query terms covered,
+                           then conversation relevance (summed best bm25 per term, scaled up
+                           by the number of matching messages), then newer, then id
         scope='text'     — message text only
         scope='metadata' — exactly `search` (keywords plus the include_* fields)
 
-        One result per conversation: its best-matching message (seq, snippet, score), or
+        A conversation matches in 'and' mode when every term appears somewhere in it (different
+        messages are fine) for 2 to MAX_RANK_TERMS distinct terms; with more, only the
+        message-level match applies (all terms in one message).
+
+        One result per conversation: a representative message (the best-matching one; seq,
+        snippet, score = its bm25, lower is better), or
         seq=None, snippet='', score=None for a metadata-only hit. A null title falls back
         to the first user message (80 chars). limit caps text-only rows (metadata
         hits are never dropped); limit=None means unlimited.
@@ -594,19 +706,26 @@ class Database:
                 self._fill_title_fallback(conn, results)
                 return results
 
-            hits = {}  # conversation id -> best text row (rows arrive best-first)
-            expr = build_match_expression(terms, mode)
+            message_rows = []  # rows of the message-level query, best-first
+            distinct = distinct_search_terms(terms)  # repeated terms would skew bm25
+            expr = build_match_expression(distinct, mode)
             if expr is not None:
                 sql, params = self._text_match_query(folder, repo)
                 try:
-                    for row in conn.execute(sql, [expr] + params):
-                        hits.setdefault(row['id'], row)
+                    message_rows = conn.execute(sql, [expr] + params).fetchall()
                 except sqlite3.OperationalError as e:
                     # A query FTS5 rejects despite quoting means "no text hits";
                     # lock/IO errors and non-FTS SQL errors must still propagate.
                     if not is_fts_query_error(e):
                         raise
-                    hits = {}
+
+            # Several terms are also scored one by one, so a conversation whose terms sit
+            # in different messages still matches; otherwise the message-level rows suffice.
+            if 2 <= len(distinct) <= MAX_RANK_TERMS:
+                per_term = self._term_rows(conn, distinct, folder, repo)
+            else:
+                per_term = [message_rows]
+            hits = group_conversation_hits(per_term, message_rows, mode)
 
             meta_by_id = {r['id']: r for r in meta}
             order = list(meta_by_id.keys() | hits.keys())  # sorted deterministically below
@@ -622,14 +741,23 @@ class Database:
             order.sort(key=lambda i: (
                 i not in meta_by_id,
                 i not in hits,
-                hits[i]['score'] if i in hits else 0.0,
+                -hits[i].terms_covered if i in hits else 0,
+                hits[i].rank_score if i in hits else 0.0,
             ))
             if limit:
                 # Cap text-only rows; every metadata-tier row is kept (tier 0 sorts first).
                 order = order[:len(meta_by_id) + limit]
 
-            snippets = self._hit_snippets(
-                conn, expr, [hits[i]['rowid'] for i in order if i in hits])
+            # Messages the message-level query matched are snippeted under its expression
+            # (unchanged output); a spread hit matches no single expression of all terms,
+            # so its snippet is taken under the OR of the distinct terms.
+            matched = {row['rowid'] for row in message_rows}
+            shown = [hits[i].rowid for i in order if i in hits]
+            snippets = self._hit_snippets(conn, expr, [r for r in shown if r in matched])
+            if len(matched.intersection(shown)) < len(shown):
+                snippets.update(self._hit_snippets(
+                    conn, build_match_expression(distinct, 'or'),
+                    [r for r in shown if r not in matched]))
             summary = self._get_summary_rows(
                 conn, [i for i in order if i not in meta_by_id])
 
@@ -641,9 +769,9 @@ class Database:
                 hit = hits.get(conv_id)
                 results.append(dict(
                     base,
-                    seq=hit['seq'] if hit else None,
-                    snippet=snippets[hit['rowid']] if hit else '',
-                    score=hit['score'] if hit else None,
+                    seq=hit.seq if hit else None,
+                    snippet=snippets.get(hit.rowid, '') if hit else '',
+                    score=hit.message_score if hit else None,
                 ))
             self._fill_title_fallback(conn, results)
             return results
