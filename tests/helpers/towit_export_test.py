@@ -1,4 +1,6 @@
 # tests/helpers/towit_export_test.py
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -185,13 +187,54 @@ class TestExportClosedPipe(unittest.TestCase):
                 towit_export.export_single(self.db, 'sess-0001', 'md', True)
 
     def test_broken_pipe_on_the_topic_print_exits_141(self):
-        # list_conversations omits the folder column, so hand export_topic a full row
-        conv = {**self.db.get_conversation('sess-0001'), 'folder': self.tmp}
-        with patch.object(self.db, 'list_conversations', return_value=[conv]), \
-             patch('towit_export.os.dup2'), patch('builtins.print', side_effect=BrokenPipeError):
+        with patch('towit_export.os.dup2'), patch('builtins.print', side_effect=BrokenPipeError):
             with self.assertRaises(SystemExit) as ctx:
                 towit_export.export_topic(self.db, 'demo', 'md', False)
         self.assertEqual(ctx.exception.code, 141)
+
+
+class TestExportTopicTranscripts(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = Database(os.path.join(self.tmp, 'catalog.db'))
+        self.db.create_schema()
+
+    def add_session(self, session_id, text, write_jsonl=True):
+        if write_jsonl:
+            with open(os.path.join(self.tmp, f'{session_id}.jsonl'), 'w', encoding='utf-8') as fh:
+                for role in ('user', 'assistant'):
+                    fh.write(json.dumps({'type': 'message',
+                                         'message': {'role': role, 'content': f'{text} {role}'}}) + '\n')
+        self.db.upsert_conversation({
+            'id': session_id, 'folder': self.tmp, 'cwd': '/w', 'started_at': '2026-01-01T00:00:00Z',
+            'last_active': None, 'title': 't', 'summary': 's', 'topics': ['demo'], 'keywords': []})
+
+    def export(self, fmt):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            towit_export.export_topic(self.db, 'demo', fmt, False)
+        return out.getvalue(), err.getvalue()
+
+    def test_markdown_prints_the_transcript(self):
+        self.add_session('sess-0001', 'hello-marker')
+        out, err = self.export('md')
+        self.assertIn('hello-marker user', out)
+        self.assertIn('hello-marker assistant', out)
+        self.assertNotIn('no folder recorded', err)
+
+    def test_json_prints_the_conversation(self):
+        self.add_session('sess-0001', 'hello-marker')
+        out, _ = self.export('json')
+        self.assertEqual(json.loads(out)['id'], 'sess-0001')
+
+    def test_a_missing_transcript_is_skipped_with_a_warning(self):
+        self.add_session('sess-0001', 'first-marker')
+        self.add_session('sess-0002', 'second-marker', write_jsonl=False)
+        out, err = self.export('md')
+        self.assertIn('first-marker', out)
+        self.assertNotIn('second-marker', out)
+        self.assertIn('sess-0002.jsonl, skipping', err)
 
 
 if __name__ == '__main__':

@@ -178,6 +178,13 @@ class TestTowitList(unittest.TestCase):
         for field in ('id', 'title', 'topics', 'cwd', 'date'):
             self.assertIn(field, row, f"Missing field: {field}")
 
+    def test_format_json_keys_are_exactly_the_documented_ones(self):
+        import json
+        result = run_list(self.config_path, ['--format', 'json'])
+        self.assertEqual(result.returncode, 0)
+        for row in json.loads(result.stdout):
+            self.assertEqual(list(row), ['id', 'title', 'keywords', 'topics', 'cwd', 'date'])
+
     def test_format_json_topics_is_list(self):
         import json
         result = run_list(self.config_path, ['--format', 'json'])
