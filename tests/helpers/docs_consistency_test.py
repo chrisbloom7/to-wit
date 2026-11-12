@@ -176,6 +176,14 @@ class TestSecurityMd(DocTestCase):
             self.assertContains(security, term, f"SECURITY.md does not mention {term!r}")
 
 
+class TestVersion(DocTestCase):
+    def test_version_file_matches_newest_changelog_release(self):
+        released = re.search(r'(?m)^## \[(\d+\.\d+\.\d+)\]', _read('CHANGELOG.md'))
+        self.assertIsNotNone(released, "CHANGELOG.md has no numbered release heading")
+        self.assertEqual(_read('libexec/towit/VERSION').strip(), released.group(1),
+                         "libexec/towit/VERSION must equal the newest CHANGELOG release")
+
+
 class TestChangelog(DocTestCase):
     @unittest.skipUnless(os.environ.get('TOWIT_RELEASE_CHECK') == '1',
                          'release gate: set TOWIT_RELEASE_CHECK=1')

@@ -98,12 +98,18 @@ Present a brief audit summary. If issues are found, propose edits and wait for a
 
 Use today's date from `gdate +%F` (GNU date on macOS). Move all existing Unreleased content under the new version heading. Do not alter the content itself.
 
-## Step 4 — Commit on the Release Branch
-
-Never commit the release to `main`. From the release worktree, stage only the files that were changed (CHANGELOG.md always; README.md, SECURITY.md, AGENTS.md if edited):
+4. Write the new version, with no `v` prefix, to `libexec/towit/VERSION` (`towit version` and `towit doctor` report it; `docs_consistency_test.py` fails if it differs from the newest CHANGELOG release):
 
 ```bash
-git add CHANGELOG.md README.md   # plus SECURITY.md / AGENTS.md if edited; just CHANGELOG.md if nothing else changed
+echo "X.Y.Z" > libexec/towit/VERSION
+```
+
+## Step 4 — Commit on the Release Branch
+
+Never commit the release to `main`. From the release worktree, stage only the files that were changed (CHANGELOG.md and libexec/towit/VERSION always; README.md, SECURITY.md, AGENTS.md if edited):
+
+```bash
+git add CHANGELOG.md libexec/towit/VERSION README.md   # plus SECURITY.md / AGENTS.md if edited; drop README.md if unchanged
 git commit -m "chore: release vX.Y.Z"
 ```
 

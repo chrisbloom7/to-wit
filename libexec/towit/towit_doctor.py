@@ -79,6 +79,25 @@ def check_python_version() -> CheckResult:
     return CheckResult('PASS', f'{label} (≥3.11 required for TOML support)')
 
 
+VERSION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'VERSION')
+
+
+def check_towit_version(path: str = VERSION_PATH) -> CheckResult:
+    """Report the installed To Wit version from the VERSION file shipped next to the helpers."""
+    try:
+        with open(path, encoding='utf-8') as fh:
+            version = fh.read().strip()
+    except OSError:
+        version = ''
+    if not version:
+        return CheckResult(
+            'WARN',
+            f'To Wit version unknown (no readable version in {path})',
+            remediation='Reinstall To Wit (for example: brew reinstall towit).',
+        )
+    return CheckResult('PASS', f'To Wit version {version}')
+
+
 def check_claude_cli() -> CheckResult:
     """Check that the claude CLI is installed and available on PATH."""
     path = shutil.which('claude')
@@ -528,6 +547,7 @@ def main():
     results = []
 
     # --- Python & tooling ---
+    results.append(check_towit_version())
     results.append(check_python_version())
     results.append(check_claude_cli())
 

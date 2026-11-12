@@ -69,6 +69,94 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
+# version subcommand
+# ---------------------------------------------------------------------------
+
+# A copy of bin/towit in a throwaway tree, so a test controls libexec/towit/VERSION.
+_version_tree() {
+  local tree="${TEST_TMPDIR}/version-tree"
+  mkdir -p "${tree}/bin" "${tree}/libexec/towit"
+  cp "${PROJECT_ROOT}/bin/towit" "${tree}/bin/towit"
+  echo "${tree}"
+}
+
+@test "towit: version prints the version from libexec/towit/VERSION" {
+  local expected
+  expected="towit $(tr -d '[:space:]' < "${PROJECT_ROOT}/libexec/towit/VERSION")"
+  run "${TOWIT}" version
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "${expected}" ]
+  [[ "${output}" =~ ^towit\ [0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
+@test "towit: --version and -v print the same as version" {
+  run "${TOWIT}" version
+  local expected="${output}"
+  run "${TOWIT}" --version
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "${expected}" ]
+  run "${TOWIT}" -v
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "${expected}" ]
+}
+
+@test "towit: version trims whitespace around the stored version" {
+  local tree; tree="$(_version_tree)"
+  printf '  1.2.3  \n\n' > "${tree}/libexec/towit/VERSION"
+  run "${tree}/bin/towit" version
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "towit 1.2.3" ]
+}
+
+@test "towit: version prints an unusual version string verbatim" {
+  local tree; tree="$(_version_tree)"
+  echo "1.2.3-rc.1+build.5" > "${tree}/libexec/towit/VERSION"
+  run "${tree}/bin/towit" version
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "towit 1.2.3-rc.1+build.5" ]
+}
+
+@test "towit: version prints 'unknown' when the VERSION file is missing" {
+  local tree; tree="$(_version_tree)"
+  run "${tree}/bin/towit" version
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "towit unknown" ]
+}
+
+@test "towit: version prints 'unknown' when the VERSION file is empty" {
+  local tree; tree="$(_version_tree)"
+  : > "${tree}/libexec/towit/VERSION"
+  run "${tree}/bin/towit" version
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "towit unknown" ]
+}
+
+@test "towit: version prints 'unknown' when the VERSION file is unreadable" {
+  [ "$(id -u)" -ne 0 ] || skip "root can read any file"
+  local tree; tree="$(_version_tree)"
+  echo "1.2.3" > "${tree}/libexec/towit/VERSION"
+  chmod 000 "${tree}/libexec/towit/VERSION"
+  run "${tree}/bin/towit" version
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "towit unknown" ]
+}
+
+@test "towit: version needs no database" {
+  [ ! -e "${TOWIT_DB_PATH}" ]
+  run "${TOWIT}" version
+  [ "${status}" -eq 0 ]
+  [ ! -e "${TOWIT_DB_PATH}" ]
+}
+
+@test "towit: help lists the version subcommand and its aliases" {
+  run "${TOWIT}" help
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"version"*"--version"*"-v"* ]] || {
+    echo "Expected version, --version and -v in help, got: ${output}"; return 1
+  }
+}
+
+# ---------------------------------------------------------------------------
 # setup subcommand
 # ---------------------------------------------------------------------------
 

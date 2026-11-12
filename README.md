@@ -141,6 +141,7 @@ Subcommands:
     [--install-dir <dir>]         Directory where towit was installed (default: ~/.local/bin)
   stats                         Show catalog statistics
   doctor                        Verify setup: config, database (FTS5, archive schema), and hooks
+  version | --version | -v      Print the installed version
   help                          Show this message
 ```
 
@@ -188,6 +189,8 @@ towit show aaaaaaaa-1111-2222-3333-444444444444 --around 1 --context 1
 `towit show <session-id>` prints the stored messages (`--around <seq> --context <n>` narrows it to the messages near a search hit; `--format json` prints an array of `seq`, `role`, `ts`, and `text`). It works after Claude Code has deleted the transcript. The text is archive content (including tool output and web content), so `show` strips terminal control sequences before printing it. The table output of `search` and `list` (titles, keywords, snippets, working directories) is sanitized the same way and kept on one line per row; `--format json` escapes non-ASCII characters and `--format csv` is printed as stored.
 
 `towit stats` prints conversation counts, then a block with the number of archived and metadata-only conversations, archived messages, and the database size.
+
+`towit version` (also `--version` and `-v`) prints the installed version, for example `towit 0.10.0`; `towit doctor` reports it as its first line. The version comes from the `libexec/towit/VERSION` file that ships with the install, and reads `towit unknown` if that file is missing.
 
 ## Retention and removing data
 
