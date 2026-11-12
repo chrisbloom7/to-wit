@@ -308,5 +308,37 @@ class TestTowitListArchiveOnlyTitle(unittest.TestCase):
         self.assertEqual(rows[1][1], 'How do I tune the flux capacitor?')
 
 
+class TestTowitListCsv(unittest.TestCase):
+    """CSV output round-trips awkward values as stored; an empty list prints no header."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 't.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        self.db = Database(self.db_path)
+        self.db.create_schema()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_awkward_values_round_trip(self):
+        self.db.upsert_conversation({
+            'id': 'c1', 'folder': '/f', 'cwd': '/w/app, "q"', 'started_at': '2026-01-01T00:00:00Z',
+            'last_active': None, 'title': '=HYPERLINK("x"), café\nnext', 'summary': 's',
+            'topics': ['t,1', 't"2'], 'keywords': ['k,w']})
+        r = run_list(self.config_path, ['--format', 'csv'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        rows = list(csv.reader(io.StringIO(r.stdout, newline='')))
+        self.assertEqual(rows[0], ['id', 'title', 'keywords', 'topics', 'cwd', 'date'])
+        self.assertEqual(rows[1], ['c1', '=HYPERLINK("x"), café\nnext', 'k,w', 't,1,t"2',
+                                   '/w/app, "q"', '2026-01-01'])
+
+    def test_no_results_prints_no_header_and_a_stderr_notice(self):
+        r = run_list(self.config_path, ['--format', 'csv'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, '')
+        self.assertIn('No conversations found', r.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()
