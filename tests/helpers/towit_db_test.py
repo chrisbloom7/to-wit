@@ -1406,6 +1406,20 @@ class TestSearchArchive(unittest.TestCase):
         self.assertIn('messages_fts', plan)
         self.assertNotRegex(plan, r'SCAN (TABLE )?m\b|SCAN TABLE messages\b')
 
+    def test_unordered_query_skips_sort_and_unneeded_join(self):
+        # Ranking takes each conversation's minimum score itself, so search_archive
+        # asks for no ORDER BY; the conversations join is only there for --folder/--repo.
+        ordered, _ = self.db._text_match_query(None, None)
+        self.assertIn('ORDER BY score', ordered)
+        unordered, _ = self.db._text_match_query(None, None, ordered=False)
+        self.assertNotIn('ORDER BY', unordered)
+        self.assertNotIn('conversations', unordered)
+        for kwargs in ({'folder': '/w/app'}, {'repo': 'app'}):
+            filtered, _ = self.db._text_match_query(kwargs.get('folder'), kwargs.get('repo'),
+                                                    ordered=False)
+            self.assertIn('JOIN conversations', filtered)
+            self.assertNotIn('ORDER BY', filtered)
+
 
 def build_snippet_fixture(db):
     """Realistic archive for search_archive output pins: metadata and archive-only

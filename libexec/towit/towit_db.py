@@ -625,19 +625,22 @@ class Database:
             params += [stripped + '.', stripped + '.']
         return sql + ')', params
 
-    def _text_match_query(self, folder, repo) -> tuple:
+    def _text_match_query(self, folder, repo, ordered: bool = True) -> tuple:
         """SQL + params (after the MATCH expression) for message-text hits, best bm25 first.
 
         Ranking only: snippet() is computed later, for the rows that are returned.
+        ordered=False drops the sort, for callers that take minimums themselves; the
+        conversations join is only present when folder or repo filters need it.
         """
         sql = (
             "SELECT m.conversation_id AS id, m.seq AS seq,"
             " messages_fts.rowid AS rowid, bm25(messages_fts) AS score"
             " FROM messages_fts"
             " JOIN messages m ON m.id = messages_fts.rowid"
-            " JOIN conversations c ON c.id = m.conversation_id"
-            " WHERE messages_fts MATCH ?"
         )
+        if folder or repo:
+            sql += " JOIN conversations c ON c.id = m.conversation_id"
+        sql += " WHERE messages_fts MATCH ?"
         params = []
         if folder:
             sql += " AND c.cwd = ?"
@@ -646,11 +649,11 @@ class Database:
             frag, rparams = self._repo_filter(repo)
             sql += " AND " + frag
             params += rparams
-        return sql + " ORDER BY score", params
+        return (sql + " ORDER BY score" if ordered else sql), params
 
     def _term_rows(self, conn, terms: list, folder, repo) -> list:
-        """One list of text-hit rows (best bm25 first) per term; a term FTS5 rejects gives []."""
-        sql, params = self._text_match_query(folder, repo)
+        """One list of text-hit rows (unordered) per term; a term FTS5 rejects gives []."""
+        sql, params = self._text_match_query(folder, repo, ordered=False)
         per_term = []
         for term in terms:
             try:
@@ -706,11 +709,11 @@ class Database:
                 self._fill_title_fallback(conn, results)
                 return results
 
-            message_rows = []  # rows of the message-level query, best-first
+            message_rows = []  # rows of the message-level query
             distinct = distinct_search_terms(terms)  # repeated terms would skew bm25
             expr = build_match_expression(distinct, mode)
             if expr is not None:
-                sql, params = self._text_match_query(folder, repo)
+                sql, params = self._text_match_query(folder, repo, ordered=False)
                 try:
                     message_rows = conn.execute(sql, [expr] + params).fetchall()
                 except sqlite3.OperationalError as e:
