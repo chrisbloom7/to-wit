@@ -648,5 +648,33 @@ class TestTowitSearchCsv(unittest.TestCase):
         self.assertIn('No conversations found', r.stderr)
 
 
+class TestTowitSearchClosedPipe(unittest.TestCase):
+    def test_closed_pipe_exits_141_without_traceback(self):
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        db_path = os.path.join(tmpdir, 'test.db')
+        config_path = write_config(tmpdir, db_path)
+        db = Database(db_path)
+        db.create_schema()
+        for i in range(400):
+            db.upsert_conversation({
+                'id': f'conv-{i:04d}', 'folder': '/f', 'cwd': '/work/proj',
+                'started_at': '2026-01-15T10:00:00Z', 'last_active': '2026-01-15T10:30:00Z',
+                'title': f'needle title {i}', 'summary': 'needle ' + 'padding ' * 30,
+                'topics': ['demo'], 'keywords': ['needle'],
+            })
+        proc = subprocess.Popen(
+            ['python3', SEARCH_SCRIPT] + ['needle', '--format', 'json'],
+            env={**os.environ, 'TOWIT_CONFIG_PATH': config_path},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        proc.stdout.readline()
+        proc.stdout.close()
+        _, stderr = proc.communicate(timeout=60)
+        self.assertNotIn('BrokenPipeError', stderr.decode())
+        self.assertNotIn('Traceback', stderr.decode())
+        self.assertEqual(proc.returncode, 141)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -702,6 +702,36 @@ EOF
   [[ "${output}" == *"not found"* ]]
 }
 
+@test "towit: show piped to a command that exits early prints no traceback and exits 141" {
+  ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
+  export HOME="${TEST_TMPDIR}/home"
+  mkdir -p "${HOME}"
+  printf '[indexing]\nenabled = false\n' >> "${TOWIT_CONFIG_PATH}"
+  "${TOWIT}" setup
+  local sessions="${TEST_TMPDIR}/sessions"
+  write_fixture_session "${sessions}" "session-big-0001"
+  # Grow the fixture past the pipe buffer so head closes the pipe mid-write
+  python3 - "${sessions}/session-big-0001.jsonl" <<'PY'
+import json, sys
+with open(sys.argv[1], 'a') as f:
+    for i in range(600):
+        role = 'user' if i % 2 == 0 else 'assistant'
+        content = f'filler message {i} ' + 'padding ' * 30
+        msg = {'role': role, 'content': content if role == 'user' else [{'type': 'text', 'text': content}]}
+        f.write(json.dumps({'type': role, 'timestamp': '2026-01-15T11:00:00Z', 'cwd': '/work/proj',
+                            'sessionId': 'session-big-0001', 'message': msg}) + '\n')
+PY
+  run "${TOWIT}" backfill --folder "${sessions}"
+  [ "${status}" -eq 0 ]
+
+  local errfile="${TEST_TMPDIR}/show.err"
+  "${TOWIT}" show session-big-0001 2>"${errfile}" | head -n 1
+  local show_status="${PIPESTATUS[0]}"
+  [ "${show_status}" -eq 141 ] || { echo "Expected status 141, got ${show_status}: $(cat "${errfile}")"; return 1; }
+  [[ "$(cat "${errfile}")" != *"Traceback"* ]] || { echo "Unexpected traceback: $(cat "${errfile}")"; return 1; }
+  [[ "$(cat "${errfile}")" != *"BrokenPipeError"* ]] || { echo "Unexpected error: $(cat "${errfile}")"; return 1; }
+}
+
 # ---------------------------------------------------------------------------
 # end-to-end archive flow
 # ---------------------------------------------------------------------------

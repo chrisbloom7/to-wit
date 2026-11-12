@@ -263,5 +263,21 @@ class TestGetMessagesHugeInts(ShowTestBase):
         self.assertEqual(self.db.get_messages('conv-show', around=2**70, context=1), [])
 
 
+class TestShowClosedPipe(ShowTestBase):
+    def test_closed_pipe_exits_141_without_traceback(self):
+        self.archive(make_messages(400))
+        proc = subprocess.Popen(
+            ['python3', SHOW_SCRIPT, 'conv-show'],
+            env={**os.environ, 'TOWIT_CONFIG_PATH': self.config_path},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        proc.stdout.readline()
+        proc.stdout.close()
+        _, stderr = proc.communicate(timeout=60)
+        self.assertNotIn('BrokenPipeError', stderr.decode())
+        self.assertNotIn('Traceback', stderr.decode())
+        self.assertEqual(proc.returncode, 141)
+
+
 if __name__ == '__main__':
     unittest.main()
