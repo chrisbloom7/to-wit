@@ -254,6 +254,163 @@ class TestShowCli(ShowTestBase):
         self.assertRegex(' '.join(r.stdout.split()), r'only (applies|used|has effect).*--around')
 
 
+class TestGetMessagesFilters(ShowTestBase):
+    TEXTS = ['Plan the Migration', 'Migrating now\n[Bash] ./migrate.sh', 'the café menu',
+             'my migration plan again', '100% done', 'snake_case here', 'plain', 'migration ok']
+
+    def setUp(self):
+        super().setUp()
+        self.archive([{'role': 'user' if i % 2 == 0 else 'assistant', 'ts': None, 'text': t}
+                      for i, t in enumerate(self.TEXTS)])
+
+    def seqs(self, **kw):
+        return [m['seq'] for m in self.db.get_messages('conv-show', **kw)]
+
+    def test_role_filters_and_preserves_seq(self):
+        self.assertEqual(self.seqs(role='user'), [0, 2, 4, 6])
+        self.assertEqual(self.seqs(role='assistant'), [1, 3, 5, 7])
+
+    def test_invalid_role_raises(self):
+        for bad in ('system', '', "user' OR 1=1 --"):
+            with self.assertRaises(ValueError, msg=bad):
+                self.db.get_messages('conv-show', role=bad)
+
+    def test_around_window_is_by_seq_then_role(self):
+        self.assertEqual(self.seqs(around=3, context=2, role='user'), [2, 4])
+        self.assertEqual(self.seqs(around=3, context=2, role='assistant'), [1, 3, 5])
+        self.assertEqual(self.seqs(around=3, context=0, role='user'), [])
+
+    def test_match_is_case_insensitive_substring(self):
+        self.assertEqual(self.seqs(match=['MIGRAT']), [0, 1, 3, 7])
+        self.assertEqual(self.seqs(match=['igrat']), [0, 1, 3, 7])
+
+    def test_match_folds_diacritics_both_ways(self):
+        self.assertEqual(self.seqs(match=['cafe']), [2])
+        self.assertEqual(self.seqs(match=['CAFÉ']), [2])
+
+    def test_match_all_terms_in_the_same_message(self):
+        self.assertEqual(self.seqs(match=['migration', 'plan']), [0, 3])
+        self.assertEqual(self.seqs(match=['migration', 'again']), [3])
+        self.assertEqual(self.seqs(match=['plan', 'menu']), [])
+
+    def test_percent_and_underscore_are_literal(self):
+        self.assertEqual(self.seqs(match=['%']), [4])
+        self.assertEqual(self.seqs(match=['_']), [5])
+        self.assertEqual(self.seqs(match=['e_c']), [5])
+        self.assertEqual(self.seqs(match=['n%']), [])
+
+    def test_tool_stub_text_is_matchable(self):
+        self.assertEqual(self.seqs(match=['[bash]']), [1])
+        self.assertEqual(self.seqs(match=['migrate.sh']), [1])
+
+    def test_no_match_is_empty(self):
+        self.assertEqual(self.seqs(match=['zzz']), [])
+
+    def test_role_and_match_combine(self):
+        self.assertEqual(self.seqs(role='user', match=['migration']), [0])
+        self.assertEqual(self.seqs(role='assistant', match=['migration']), [3, 7])
+
+    def test_match_inside_around_window(self):
+        self.assertEqual(self.seqs(around=3, context=2, match=['migrat']), [1, 3])
+
+
+class TestShowFilterCli(ShowTestBase):
+    def setUp(self):
+        super().setUp()
+        self.archive([
+            {'role': 'user', 'ts': '2026-01-15T10:00:00Z', 'text': 'start the Migration'},
+            {'role': 'assistant', 'ts': None, 'text': 'migration done\n[Bash] migrate.sh'},
+            {'role': 'user', 'ts': None, 'text': 'now the plan'},
+            {'role': 'assistant', 'ts': None, 'text': 'plan ready'},
+            {'role': 'user', 'ts': None, 'text': 'migration plan again'},
+            {'role': 'assistant', 'ts': None, 'text': 'ok'},
+        ])
+
+    def seqs(self, args):
+        r = self.run_show(['conv-show', '--format', 'json'] + args)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return [m['seq'] for m in json.loads(r.stdout)]
+
+    def test_role_user_outline(self):
+        r = self.run_show(['conv-show', '--role', 'user'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('[0] user', r.stdout)
+        self.assertIn('[4] user', r.stdout)
+        self.assertNotIn('assistant', r.stdout.split('\n', 2)[2])
+        self.assertNotIn('[Bash]', r.stdout)
+
+    def test_repeated_match_requires_every_term(self):
+        self.assertEqual(self.seqs(['--match', 'migration', '--match', 'plan']), [4])
+        self.assertEqual(self.seqs(['--match', 'migration']), [0, 1, 4])
+        self.assertEqual(self.seqs(['--role', 'user', '--match', 'migration']), [0, 4])
+
+    def test_match_before_session_id_is_not_swallowed(self):
+        r = self.run_show(['--match', 'migration', 'conv-show', '--format', 'json'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([m['seq'] for m in json.loads(r.stdout)], [0, 1, 4])
+
+    def test_marker_only_when_around_target_survives(self):
+        r = self.run_show(['conv-show', '--around', '2', '--context', '1', '--role', 'user'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('>> [2] user', r.stdout)
+        self.assertNotIn('[1] ', r.stdout)
+        r = self.run_show(['conv-show', '--around', '3', '--context', '1', '--role', 'user'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('[2] user', r.stdout)
+        self.assertIn('[4] user', r.stdout)
+        self.assertNotIn('>>', r.stdout)
+        r = self.run_show(['conv-show', '--around', '1', '--context', '1', '--match', 'plan'])
+        self.assertNotIn('>>', r.stdout)
+
+    def test_json_keeps_keys_and_original_seq(self):
+        r = self.run_show(['conv-show', '--role', 'user', '--format', 'json'])
+        data = json.loads(r.stdout)
+        self.assertEqual([m['seq'] for m in data], [0, 2, 4])
+        for m in data:
+            self.assertEqual(set(m), {'seq', 'role', 'ts', 'text'})
+
+    def test_empty_result_exits_1_with_filter_message(self):
+        for fmt in ('text', 'json'):
+            r = self.run_show(['conv-show', '--match', 'zzz', '--format', fmt])
+            self.assertEqual(r.returncode, 1, fmt)
+            self.assertIn('No messages match the given filters.', r.stderr)
+            self.assertEqual(r.stdout, '')
+        r = self.run_show(['conv-show', '--around', '3', '--context', '0', '--role', 'user'])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('No messages match the given filters.', r.stderr)
+
+    def test_empty_match_term_exits_1(self):
+        for bad in ('', '   '):
+            r = self.run_show(['conv-show', '--match', bad])
+            self.assertEqual(r.returncode, 1, repr(bad))
+            self.assertIn('--match', r.stderr)
+            self.assertNotIn('Traceback', r.stderr)
+
+    def test_bad_role_exits_2(self):
+        r = self.run_show(['conv-show', '--role', 'system'])
+        self.assertEqual(r.returncode, 2)
+        self.assertIn('--role', r.stderr)
+
+    def test_filtered_output_is_still_sanitized(self):
+        self.archive([{'role': 'user', 'ts': None, 'text': 'migration \x1b[31mred\x1b[0m \x07'},
+                      {'role': 'assistant', 'ts': None, 'text': 'x'}], conv_id='evil')
+        r = self.run_show(['evil', '--role', 'user', '--match', 'migration'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn('\x1b', r.stdout)
+        self.assertNotIn('\x07', r.stdout)
+        self.assertIn('migration red', r.stdout)
+
+    def test_unfiltered_empty_message_is_unchanged(self):
+        r = self.run_show(['conv-show', '--around', '50', '--context', '1'])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('no archived messages within 1 of --around 50', r.stderr)
+
+    def test_help_mentions_flags(self):
+        out = ' '.join(self.run_show(['--help']).stdout.split())
+        self.assertIn('--role', out)
+        self.assertIn('--match', out)
+
+
 class TestGetMessagesHugeInts(ShowTestBase):
     def test_huge_values_do_not_raise(self):
         self.archive(make_messages(10))
