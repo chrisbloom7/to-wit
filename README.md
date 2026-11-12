@@ -141,6 +141,7 @@ Subcommands:
     [--install-dir <dir>]         Directory where towit was installed (default: ~/.local/bin)
   stats                         Show catalog statistics
   doctor                        Verify setup: config, database (FTS5, archive schema), and hooks
+  version | --version | -v      Print the installed version
   help                          Show this message
 ```
 

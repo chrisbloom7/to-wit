@@ -47,6 +47,7 @@
 #                                   archive), and binary symlink
 #   stats                         Show catalog statistics
 #   doctor                        Verify setup: config, database (FTS5, archive schema), and hooks
+#   version | --version | -v      Print the installed version
 #   help                          Show this message
 
 set -euo pipefail
@@ -163,6 +164,12 @@ case "${subcommand}" in
   doctor)
     shift
     "${PYTHON}" "${HELPERS_DIR}/towit_doctor.py" "$@" || exit $?
+    ;;
+  version|--version|-v)
+    # Never fails: a missing, empty or unreadable VERSION file reports "unknown".
+    _version="$(cat "${HELPERS_DIR}/VERSION" 2>/dev/null || true)"
+    _version="${_version//[[:space:]]/}"
+    echo "towit ${_version:-unknown}"
     ;;
   help|--help|-h)
     usage
