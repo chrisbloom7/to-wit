@@ -4,6 +4,7 @@
 # Run with: python3 tests/helpers/towit_ingest_test.py
 
 import json
+import logging
 import os
 import shutil
 import sys
@@ -18,11 +19,41 @@ import unittest.mock
 HELPERS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit'))
 sys.path.insert(0, HELPERS_DIR)
 
+import towit_config
 import towit_ingest
 from towit_db import Database
 from towit_db_test import build_old_schema_db
 from towit_ingest import (MAX_MESSAGE_CHARS, ingest_transcript, parse_transcript,
                           resolve_repo_key)
+
+
+_ISOLATION = {}
+
+
+def setUpModule():
+    """Keep get_error_logger() off the real ~/.towit/errors.log.
+
+    CONFIG_PATH is read when the logger is first built and the logger caches its handler, so
+    both are swapped for the whole module and restored afterwards.
+    """
+    log_dir = tempfile.mkdtemp()
+    logger = logging.getLogger('towit.hook')
+    _ISOLATION.update(log_dir=log_dir, config_path=towit_config.CONFIG_PATH,
+                      handlers=list(logger.handlers))
+    towit_config.CONFIG_PATH = os.path.join(log_dir, 'config.toml')
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+
+
+def tearDownModule():
+    logger = logging.getLogger('towit.hook')
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        handler.close()
+    for handler in _ISOLATION['handlers']:
+        logger.addHandler(handler)
+    towit_config.CONFIG_PATH = _ISOLATION['config_path']
+    shutil.rmtree(_ISOLATION['log_dir'], ignore_errors=True)
 
 
 def _write_jsonl(path, entries):
@@ -882,6 +913,32 @@ class TestIngestResolvesDirectory(unittest.TestCase):
         db = self._db('plain.db')
         self.assertEqual(ingest_transcript(self.real_path, db), 'ingested')
         self.assertEqual(self._stored(db), [('sess-0001', self.real_dir, self.real_path)])
+
+
+class TestErrorLogIsolation(unittest.TestCase):
+    """No test in this module may write to the real ~/.towit/errors.log."""
+
+    REAL_DIR = os.path.dirname(os.path.abspath(towit_config._DEFAULT_CONFIG_PATH))
+
+    def _log_dir(self):
+        return os.path.dirname(os.path.abspath(os.path.expanduser(towit_config.CONFIG_PATH)))
+
+    def test_error_logger_is_not_the_real_one(self):
+        self.assertNotEqual(self._log_dir(), self.REAL_DIR)
+        handler = towit_config.get_error_logger().handlers[0]
+        self.assertNotEqual(os.path.dirname(handler.baseFilename), self.REAL_DIR)
+
+    def test_logged_error_lands_in_the_isolated_log(self):
+        self.assertNotEqual(self._log_dir(), self.REAL_DIR)  # before main() can log anything
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        outside = os.path.join(tmpdir, 'x.jsonl')
+        with unittest.mock.patch.dict(os.environ, {'HOME': tmpdir}), \
+             unittest.mock.patch('sys.argv', ['towit_ingest.py', outside]):
+            os.environ.pop('TOWIT_INDEXING', None)
+            towit_ingest.main()
+        with open(os.path.join(self._log_dir(), 'errors.log'), encoding='utf-8') as fh:
+            self.assertIn('path outside ~/.claude/projects', fh.read())
 
 
 if __name__ == '__main__':
