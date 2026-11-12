@@ -81,7 +81,7 @@ The archive is append-only: each ingest compares the stored tail hash to the tra
 - `tests/test_helper.bash` — Shared BATS setup/teardown (temp dirs, mocks, fixtures). `setup` points `TOWIT_SETTINGS_PATH` at a temp file so no test can edit the real `~/.claude/settings.json`; pass your own value only when a test needs a specific settings file
 - `tests/bin/towit.bats` — CLI integration tests
 - `tests/bin/uninstall.bats` — Install/uninstall tests
-- `tests/helpers/towit_*_test.py` — Python unit tests per module (`towit_ingest_test.py`, `towit_redact_test.py`, `towit_show_test.py`, `towit_forget_test.py`, `towit_config_test.py`, ... alongside the original per-subcommand files)
+- `tests/helpers/towit_*_test.py` — Python unit tests per module (`towit_ingest_test.py`, `towit_redact_test.py`, `towit_show_test.py`, `towit_forget_test.py`, `towit_config_test.py`, ... alongside the original per-subcommand files) A test that can reach `get_error_logger()` must not write to the real `~/.towit/errors.log`: `towit_ingest_test.py` redirects `towit_config.CONFIG_PATH` and resets the `towit.hook` logger in `setUpModule` (the logger caches its handler per process)
 - `tests/helpers/docs_consistency_test.py` — Checks that README, AGENTS.md, SECURITY.md, the help text, and the config template agree with the code (subcommands, flags, config keys, hook events, tables, env vars, the subprocess allowlist). When it fails after you add a flag, config key, table, or env var, update the docs it names. Run with `TOWIT_RELEASE_CHECK=1` to also require `CHANGELOG.md` `[Unreleased]` content (a release gate)
 
 ## Security Constraints
