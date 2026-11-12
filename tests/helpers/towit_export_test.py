@@ -155,13 +155,15 @@ class TestExportClosedPipe(unittest.TestCase):
 
     def test_closed_pipe_exits_141_without_traceback(self):
         script = os.path.join(os.path.dirname(towit_export.__file__), 'towit_export.py')
+        # No reader at all: the first write fails with EPIPE whatever the output size
+        read_end, write_end = os.pipe()
+        os.close(read_end)
         proc = subprocess.Popen(
             ['python3', script, 'sess-0001'],
             env={**os.environ, 'TOWIT_CONFIG_PATH': self.config_path},
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdout=write_end, stderr=subprocess.PIPE,
         )
-        proc.stdout.readline()
-        proc.stdout.close()
+        os.close(write_end)
         _, stderr = proc.communicate(timeout=60)
         self.assertNotIn('BrokenPipeError', stderr.decode())
         self.assertNotIn('Traceback', stderr.decode())

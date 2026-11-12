@@ -710,13 +710,13 @@ EOF
   "${TOWIT}" setup
   local sessions="${TEST_TMPDIR}/sessions"
   write_fixture_session "${sessions}" "session-big-0001"
-  # Grow the fixture past the pipe buffer so head closes the pipe mid-write
+  # Grow the fixture to ~2.4 MB, far past any pipe buffer, so head closes the pipe mid-write
   python3 - "${sessions}/session-big-0001.jsonl" <<'PY'
 import json, sys
 with open(sys.argv[1], 'a') as f:
     for i in range(600):
         role = 'user' if i % 2 == 0 else 'assistant'
-        content = f'filler message {i} ' + 'padding ' * 30
+        content = f'filler message {i} ' + 'x' * 4000
         msg = {'role': role, 'content': content if role == 'user' else [{'type': 'text', 'text': content}]}
         f.write(json.dumps({'type': role, 'timestamp': '2026-01-15T11:00:00Z', 'cwd': '/work/proj',
                             'sessionId': 'session-big-0001', 'message': msg}) + '\n')

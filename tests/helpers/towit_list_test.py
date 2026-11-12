@@ -355,13 +355,15 @@ class TestTowitListClosedPipe(unittest.TestCase):
                 'title': f'needle title {i}', 'summary': 'needle ' + 'padding ' * 30,
                 'topics': ['demo'], 'keywords': ['needle'],
             })
+        # No reader at all: the first write fails with EPIPE whatever the output size
+        read_end, write_end = os.pipe()
+        os.close(read_end)
         proc = subprocess.Popen(
             ['python3', LIST_SCRIPT] + ['--format', 'json'],
             env={**os.environ, 'TOWIT_CONFIG_PATH': config_path},
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdout=write_end, stderr=subprocess.PIPE,
         )
-        proc.stdout.readline()
-        proc.stdout.close()
+        os.close(write_end)
         _, stderr = proc.communicate(timeout=60)
         self.assertNotIn('BrokenPipeError', stderr.decode())
         self.assertNotIn('Traceback', stderr.decode())
