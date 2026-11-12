@@ -666,12 +666,18 @@ class Database:
         Search archived message text and/or conversation metadata.
 
         scope='all'      — metadata (as `search`) plus message text; a conversation with
-                           a metadata match ranks above a text-only match, then bm25
-                           (lower is better), then recency
+                           a metadata match ranks first, then more query terms covered,
+                           then conversation relevance (summed best bm25 per term, scaled up
+                           by the number of matching messages), then newer, then id
         scope='text'     — message text only
         scope='metadata' — exactly `search` (keywords plus the include_* fields)
 
-        One result per conversation: its best-matching message (seq, snippet, score), or
+        A conversation matches in 'and' mode when every term appears somewhere in it (different
+        messages are fine) for 2 to MAX_RANK_TERMS distinct terms; with more, only the
+        message-level match applies (all terms in one message).
+
+        One result per conversation: a representative message (the best-matching one; seq,
+        snippet, score = its bm25, lower is better), or
         seq=None, snippet='', score=None for a metadata-only hit. A null title falls back
         to the first user message (80 chars). limit caps text-only rows (metadata
         hits are never dropped); limit=None means unlimited.

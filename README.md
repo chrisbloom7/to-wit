@@ -164,7 +164,7 @@ Hooks are skipped when Claude Code runs with `--bare` and when `disableAllHooks`
 
 ## Searching and reading the archive
 
-`towit search` looks in message text, keywords, titles, and summaries by default, and ranks conversations with a metadata match first and then by relevance (`bm25`) of the best-matching message. Each result shows the **Turn** (the 0-based message number) and a snippet with the matching words in `[brackets]`:
+`towit search` looks in message text, keywords, titles, and summaries by default, and ranks conversations with a metadata match first, then those covering more of your terms, then by relevance and how many messages match, then the newest. Each result shows its best-matching message. Each result shows the **Turn** (the 0-based message number) and a snippet with the matching words in `[brackets]`:
 
 ```shell
 towit search recursion
@@ -176,7 +176,7 @@ towit search recursion
 towit show aaaaaaaa-1111-2222-3333-444444444444 --around 1 --context 1
 ```
 
-- Every argument is a term and terms are combined with AND (`--or` for OR). If an AND search finds nothing and there are two or more terms, it is retried with OR and `No results for all terms; showing results matching any term.` is printed to stderr (so `--format json` and `csv` output on stdout stays parseable). The retry does not apply with `--or` or `--only metadata`. An argument that contains a space is an exact phrase: `towit search "stop hook"`. Punctuation and FTS5 operators in your input are treated literally.
+- Every argument is a term and terms are combined with AND (`--or` for OR). A conversation matches when every term appears somewhere in it, even in different messages. With more than 8 distinct terms (ignoring case duplicates and terms with no letter or digit), all terms must appear in one message. If an AND search finds nothing and there are two or more terms, it is retried with OR and `No results for all terms; showing results matching any term.` is printed to stderr (so `--format json` and `csv` output on stdout stays parseable). The retry does not apply with `--or` or `--only metadata`. An argument that contains a space is an exact phrase: `towit search "stop hook"`. Punctuation and FTS5 operators in your input are treated literally.
 - `--only text` searches message text alone. `--only metadata` restores the pre-archive scope: keywords only, plus titles, summaries, and topics when you add `--title`, `--summary`, `--all`, or `--topic`. `--topic` adds topics to any scope.
 - Tool calls are stored only as short stubs (at most 200 characters) and tool results are not stored, except failures as `[error]` lines of at most 300 characters, so the output of commands is not searchable. Ranking favors short matching messages: a brief passing mention can outrank the long message that is really about the term, so scan past the top few results.
 - Text matches are capped at 50 conversations. Metadata matches are never capped.
