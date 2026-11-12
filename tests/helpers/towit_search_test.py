@@ -570,5 +570,82 @@ class TestTowitSearchSanitizesTable(unittest.TestCase):
         self.assertNotIn('\x07', r.stdout)
 
 
+class TestTowitSearchCsv(unittest.TestCase):
+    """CSV output is machine-readable: values round-trip through a CSV parser as stored."""
+
+    TEXT = 'He said "hi", then\nleft;\ttab =SUM(A1) café \U0001F600'
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 't.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        db = Database(self.db_path)
+        db.create_schema()
+        for cid, cwd, repo, title, text, keywords, topics in (
+                ('a1', '/w/app, "q"', '/src/app', '=HYPERLINK("x")', 'needle ' + self.TEXT,
+                 ['needle', 'k,w'], ['t,1', 't"2']),
+                ('b2', '/w/other', '/src/other', 'Other', 'needle \x1b[31mred\x1b[0m', [], [])):
+            started = '2026-01-01T00:00:00Z'
+            db.archive_session(
+                {'id': cid, 'folder': '/f', 'cwd': cwd, 'started_at': started,
+                 'last_active': started, 'repo_key': repo, 'source_path': None},
+                [{'role': 'user', 'ts': None, 'text': 'question'},
+                 {'role': 'assistant', 'ts': None, 'text': text}])
+            db.upsert_conversation({
+                'id': cid, 'folder': '/f', 'cwd': cwd, 'started_at': started,
+                'last_active': started, 'title': title, 'summary': 's',
+                'topics': topics, 'keywords': keywords})
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def rows(self, *args):
+        r = run_search(self.config_path, ['needle', '--format', 'csv'] + list(args))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return list(csv.reader(io.StringIO(r.stdout, newline='')))
+
+    def by_id(self, *args):
+        rows = self.rows(*args)
+        return rows[0], {row[0]: row for row in rows[1:]}
+
+    def test_awkward_values_round_trip(self):
+        header, rows = self.by_id('--only', 'text')
+        row = dict(zip(header, rows['a1']))
+        self.assertEqual(row['title'], '=HYPERLINK("x")')
+        self.assertEqual(row['cwd'], '/w/app, "q"')
+        self.assertEqual(row['keywords'], 'needle,k,w')
+        self.assertEqual(row['topics'], 't,1,t"2')
+        self.assertIn('He said "hi", then\nleft;\ttab =SUM(A1) café \U0001F600', row['snippet'])
+
+    def test_cells_are_printed_as_stored(self):
+        # Documented: no spreadsheet-formula or terminal-escape neutralizing in CSV.
+        _, rows = self.by_id('--only', 'text')
+        self.assertTrue(rows['a1'][1].startswith('='))
+        self.assertIn('\x1b[31m', rows['b2'][7])
+
+    def test_column_count_follows_scope(self):
+        header, rows = self.by_id()
+        self.assertEqual(header[-3:], ['seq', 'snippet', 'score'])
+        self.assertEqual({len(r) for r in rows.values()}, {9})
+        header, rows = self.by_id('--only', 'text')
+        self.assertEqual(len(header), 9)
+        self.assertEqual({len(r) for r in rows.values()}, {9})
+        header, rows = self.by_id('--only', 'metadata')
+        self.assertEqual(header, ['id', 'title', 'keywords', 'topics', 'cwd', 'date'])
+        self.assertEqual({len(r) for r in rows.values()}, {6})
+
+    def test_repo_and_folder_filter_csv_rows(self):
+        _, rows = self.by_id('--only', 'text', '--repo', 'other')
+        self.assertEqual(sorted(rows), ['b2'])
+        _, rows = self.by_id('--only', 'text', '--folder', '/w/other')
+        self.assertEqual(sorted(rows), ['b2'])
+
+    def test_no_results_prints_no_header_and_a_stderr_notice(self):
+        r = run_search(self.config_path, ['zzzmissing', '--format', 'csv'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, '')
+        self.assertIn('No conversations found', r.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()
