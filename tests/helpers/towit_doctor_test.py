@@ -10,7 +10,8 @@ from unittest.mock import patch
 from collections import namedtuple
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit')))
-from towit_doctor import CheckResult, format_result, summarise, check_python_version, check_claude_cli
+from towit_doctor import (CheckResult, format_result, summarise, check_python_version, check_claude_cli,
+                          check_towit_version)
 
 class TestCheckResult(unittest.TestCase):
     def test_pass_has_no_remediation_line(self):
@@ -47,6 +48,40 @@ class TestCheckResult(unittest.TestCase):
         self.assertIn('1 warning(s)', msg)
         self.assertIn('1 failure(s)', msg)
         self.assertEqual(code, 1)
+
+
+class TestVersionCheck(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.path = os.path.join(self.tmp, 'VERSION')
+
+    def _write(self, text):
+        with open(self.path, 'w') as fh:
+            fh.write(text)
+
+    def test_pass_reports_the_version(self):
+        self._write('1.2.3\n')
+        result = check_towit_version(self.path)
+        self.assertEqual(result.status, 'PASS')
+        self.assertEqual(result.label, 'To Wit version 1.2.3')
+
+    def test_surrounding_whitespace_is_trimmed(self):
+        self._write('  1.2.3  \n\n')
+        self.assertEqual(check_towit_version(self.path).label, 'To Wit version 1.2.3')
+
+    def test_missing_file_is_warn_with_remediation(self):
+        result = check_towit_version(self.path)
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn(self.path, result.label)
+        self.assertTrue(result.remediation)
+
+    def test_empty_file_is_warn(self):
+        self._write('\n')
+        self.assertEqual(check_towit_version(self.path).status, 'WARN')
+
+    def test_shipped_version_file_passes(self):
+        self.assertEqual(check_towit_version().status, 'PASS')
 
 
 class TestChecks(unittest.TestCase):
