@@ -1,7 +1,7 @@
 # Conversation-Level Search Design
 
 **Date:** 2026-11-11
-**Status:** Draft, awaiting review
+**Status:** Approved; amended during planning (see "Planning amendments")
 **Plan:** not written yet
 
 ## Overview
@@ -17,7 +17,7 @@ This change makes matching and ranking work per conversation, with no schema cha
 
 - `AND` matches a conversation when every term appears somewhere in it, in any of its messages
 - Rank a conversation by how many query terms it covers, how well they match, and how many messages match, with recency as the tiebreak
-- Keep every result that matches today, with the same `seq`, `snippet` and `score`: the change only adds matches and reorders
+- Keep every result that matches today, with the same `seq`, `snippet` and `score`: the change only adds matches and reorders (a result's order may change; its fields do not)
 - No schema change, no migration, nothing new stored (so nothing new for `forget`, redaction or `SECURITY.md`)
 
 ## Non-Goals
@@ -45,13 +45,13 @@ For a query with two or more distinct terms (after de-duplicating case-insensiti
 - `mode='and'`: a conversation matches when it appears in every term's result (a *spread hit* when no single message holds all the terms).
 - `mode='or'`: matching is unchanged; the per-term rows only provide term coverage and counts for ranking.
 
-A single-term query, `scope='metadata'`, and queries beyond the 8-term cap take today's code path.
+A single-term query needs no per-term queries: the message-level query already returns every matching message, so the conversation's best `bm25` and match count come from its rows. `scope='metadata'` is unchanged. Queries beyond the 8-term cap skip the per-term queries and are ranked from the message-level rows only (terms covered counts as 1).
 
 **Representative message** (the `seq` and snippet shown): the message that matches the most terms, ties broken by best `bm25`. For a co-occurrence hit this is today's message.
 
 ### Ranking
 
-Within `scope='all'` results, sort by this key, ascending:
+The key applies to every text search, single-term included (a conversation about the topic throughout should beat one with a single strong message). Within `scope='all'` results, sort by it, ascending:
 
 | Order | Key |
 |---|---|
@@ -61,13 +61,13 @@ Within `scope='all'` results, sort by this key, ascending:
 | 4 | newer `started_at` |
 | 5 | id |
 
-**Conversation score** = `(Σ over terms of that term's best message bm25)` × `(1 + ln(n))`, where `n` is the number of distinct messages that match any term. FTS5 sums per-term contributions within a message, so when all terms sit in one message the sum equals that message's own `bm25`. This keeps co-occurrence and spread hits comparable. `bm25` values are negative and `n = 1` gives a multiplier of 1, so a single-hit conversation is scored as it is today. There is no tuned constant.
+**Conversation score** = `(Σ over terms of that term's best message bm25)` × `(1 + ln(n))` (for one term, that term's best bm25), where `n` is the number of distinct messages that match any term. FTS5 sums per-term contributions within a message, so when all terms sit in one message the sum equals that message's own `bm25`. This keeps co-occurrence and spread hits comparable. `bm25` values are negative and `n = 1` gives a multiplier of 1, so a single-hit conversation keeps its raw score. There is no tuned constant. Because `bm25` is negative, a larger multiplier makes the score more negative, i.e. better.
 
 `limit` still caps text-only rows after sorting; metadata-tier rows are never dropped.
 
 ### Output
 
-`score` is the representative message's `bm25`. When that message matches only some of the terms (a spread hit), it is the `bm25` of the message under the terms it matches (open question 2). The conversation score is used only for ordering.
+`score` is the representative message's `bm25`. For a co-occurrence hit it is today's value. For a spread hit the representative message matches only some of the terms, and `score` is the sum of that message's single-term `bm25` values for the terms it matches (`bm25` is additive over terms within a message, which a test pins). The conversation score is used only for ordering.
 
 ### Error handling
 
@@ -77,7 +77,7 @@ Within `scope='all'` results, sort by this key, ascending:
 
 ### Cost
 
-The extra cost is `k` single-term queries for a `k`-term search (`2 ≤ k ≤ 8`). Before the plan is final, time it read-only against a real archive. If it is noticeably slower than today, group rows in SQL (open question 1) or lower the cap.
+The extra cost is `k` single-term queries for a `k`-term search (`2 ≤ k ≤ 8`), grouped in Python. A read-only spike on a real archive (16,389 messages, 35 conversations) measured 0–16 ms per single-term query, and SQLite refuses `bm25()` inside an aggregate (`unable to use function bm25 in the requested context`), so SQL-side grouping is not available. The statement count stays constant in the number of conversations (bounded by the work-count tests).
 
 ## Testing
 
@@ -90,7 +90,7 @@ TDD, failing tests first, ZOMBIES:
 - **I:** `--format json` and `csv` keep `score` semantics; `--folder`, `--repo` and `scope` apply to the per-term queries; `towit show --around <seq>` accepts the representative message's `seq`.
 - **E:** an FTS-rejected term; a non-FTS `OperationalError` still propagates.
 - **S:** a multi-conversation scenario through the CLI in BATS.
-- **Compat pin:** every existing search test, including the 17 pin cases in `towit_db_test.py`, passes unchanged: that is the proof that results which match today do not move.
+- **Compat pin:** the 17 pin cases in `towit_db_test.py` are re-captured, not left untouched, because ranking now applies to every search. The invariant that must hold for every conversation the old code returned: same `seq`, `snippet` and `score` (and the same metadata fields). Only the order may differ, and each reordered pin is reviewed and explained in the commit. Multi-term `AND` pins may also gain conversations.
 
 ## Documentation
 
@@ -104,8 +104,9 @@ TDD, failing tests first, ZOMBIES:
 
 Three commits of under 300 lines each: per-term grouping and matching, then the ranking key, then docs.
 
-## Open Questions
+## Planning amendments
 
-1. Can `bm25` be aggregated per conversation in SQL, or must Python group the rows? Decided by a timing spike on a real archive.
-2. How exactly is `score` defined for a spread hit whose representative message matches only some of the terms?
-3. Should the conversation-level rank be exposed as an output field, or stay internal?
+- Ranking by match count applies to single-term searches too (decided with the user while planning); the single-term carve-out in the first draft is removed.
+- Open question 1 (aggregating `bm25` in SQL) is closed by a spike: it is not possible, so rows are grouped in Python; cost is negligible.
+- Open question 2 (`score` for a spread hit) is closed: the sum of the representative message's single-term `bm25` values.
+- Open question 3 (exposing the conversation rank) stays closed: it is internal.
