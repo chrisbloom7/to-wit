@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `towit search` matches a conversation when every term appears somewhere in it, not only in one message, and ranks conversations by terms covered, relevance, number of matching messages and recency. Searches with more than 8 distinct terms still need all terms in one message. Results that matched before keep their message, snippet and score, but their order can change.
+- `towit search` matches a conversation when every term appears somewhere in its messages, not only in one message, and ranks conversations by terms covered, relevance, number of matching messages and recency. Searches with more than 8 distinct terms still need all terms in one message. Results that matched before keep their message, snippet and score, but the order, and which results make the 50-result text cap, can change.
 
 ## [0.9.6] - 2026-11-11
 

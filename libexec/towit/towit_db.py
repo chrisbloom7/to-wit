@@ -176,7 +176,9 @@ class ConversationHit:
     """One conversation's best match: its representative message and its rank score.
 
     spread is False when the representative came from the message-level rows or covers
-    every term, so the full match expression matches it; True otherwise."""
+    every term, so the full match expression matches it; True otherwise. It is
+    informational: search_archive chooses snippet expressions per rowid from the
+    message-level rows, not from this flag."""
     conv_id: str
     rowid: int
     seq: int
@@ -214,7 +216,7 @@ def group_conversation_hits(term_rows: list, message_rows: list | None, mode: st
         if mode != 'or' and len(by_term) < len(term_rows):
             continue
         rowids = {row['rowid'] for rows in by_term.values() for row in rows}
-        base = sum(min(row['score'] for row in rows) for rows in by_term.values())
+        base = math.fsum(min(row['score'] for row in rows) for rows in by_term.values())
         rank_score = base * (1 + math.log(len(rowids)))
 
         if conv_id in message_best:
@@ -226,11 +228,13 @@ def group_conversation_hits(term_rows: list, message_rows: list | None, mode: st
             per_message = {}
             for rows in by_term.values():
                 for row in rows:
-                    entry = per_message.setdefault(row['rowid'], [0, 0.0, row['seq']])
+                    entry = per_message.setdefault(row['rowid'], [0, [], row['seq']])
                     entry[0] += 1
-                    entry[1] += row['score']
-            rowid = min(per_message, key=lambda r: (-per_message[r][0], per_message[r][1], r))
-            covered, message_score, seq = per_message[rowid]
+                    entry[1].append(row['score'])
+            totals = {r: math.fsum(e[1]) for r, e in per_message.items()}
+            rowid = min(per_message, key=lambda r: (-per_message[r][0], totals[r], r))
+            covered, seq = per_message[rowid][0], per_message[rowid][2]
+            message_score = totals[rowid]
             spread = covered < len(term_rows)
         hits[conv_id] = ConversationHit(conv_id, rowid, seq, message_score,
                                         len(by_term), rank_score, spread)
@@ -703,7 +707,8 @@ class Database:
                 return results
 
             message_rows = []  # rows of the message-level query, best-first
-            expr = build_match_expression(terms, mode)
+            distinct = distinct_search_terms(terms)  # repeated terms would skew bm25
+            expr = build_match_expression(distinct, mode)
             if expr is not None:
                 sql, params = self._text_match_query(folder, repo)
                 try:
@@ -716,7 +721,6 @@ class Database:
 
             # Several terms are also scored one by one, so a conversation whose terms sit
             # in different messages still matches; otherwise the message-level rows suffice.
-            distinct = distinct_search_terms(terms)
             if 2 <= len(distinct) <= MAX_RANK_TERMS:
                 per_term = self._term_rows(conn, distinct, folder, repo)
             else:

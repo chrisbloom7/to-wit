@@ -866,6 +866,14 @@ class TestGroupConversationHits(unittest.TestCase):
         self.assertEqual(hit.rowid, 2)
         self.assertEqual(hit.message_score, -3.0)
 
+    def test_term_order_does_not_change_scores(self):
+        scores = [-0.1, -0.2, -0.3]
+        forward = [[_row('c1', 1, 1, s)] for s in scores]
+        hit = group_conversation_hits(forward, None, 'or')['c1']
+        reverse = group_conversation_hits(forward[::-1], None, 'or')['c1']
+        self.assertEqual(hit.rank_score, reverse.rank_score)
+        self.assertEqual(hit.message_score, reverse.message_score)
+
     def test_and_requires_every_term(self):
         term_rows = [[_row('c1', 1, 1, -2.0)], []]
         self.assertEqual(group_conversation_hits(term_rows, None, 'and'), {})
@@ -1103,6 +1111,13 @@ class TestSearchArchive(unittest.TestCase):
         self.assertEqual(res[0]['seq'], 3)
         self.assertIn('[guard]', res[0]['snippet'])
         self.assertIsInstance(res[0]['score'], float)
+
+    def test_duplicate_terms_differing_in_case_count_once(self):
+        self._spread_fixture()
+        dup = self.db.search_archive(['Redis', 'redis', 'timeout'], scope='text')
+        plain = self.db.search_archive(['redis', 'timeout'], scope='text')
+        self.assertTrue(plain)
+        self.assertEqual(dup, plain)
 
     def test_phrase_argument_is_exact_vs_and(self):
         self.assertEqual(self._ids(self.db.search_archive(['stop hook'], scope='text')), ['s1'])
