@@ -7,12 +7,12 @@ To Wit is a searchable catalog of your [Claude Code](https://claude.ai/code) con
 ```shell
 towit search hook
 /Users/chrisbloom7
-  ID                                    Title                        Keywords   Turn  Snippet                          Date
+  ID                                    Title                        Keywords   Msg   Snippet                          Date
   ------------------------------------  ---------------------------  ---------  ----  -------------------------------  ----------
   350fa22f-10b7-48ff-ac9d-bd9f1081c23b  Debugging non-firing Stop …  stop-hook  14    …why the Stop [hook] never ran…  2026-03-31
 
 towit show 350fa22f-10b7-48ff-ac9d-bd9f1081c23b --around 14 --context 2
-# => turn 14 and two messages either side, straight from the archive
+# => message 14 and two messages either side, straight from the archive
 
 towit resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
 # => switch to `/Users/chrisbloom7` and call `claude --resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b`
@@ -106,7 +106,7 @@ Subcommands:
     [--folder <path>]             Scope to a working directory
     [--repo <path|name>]          Scope to a repo (its key, directory name, or `name.<branch>` worktrees)
   show <session-id>             Print the archived messages of a conversation
-    [--around <seq>]              Only messages near this 0-based message number
+    [--around <msg>]              Only messages near this message number (0-based; the Msg column in `towit search` results)
     [--context <n>]               Messages either side of --around (default: 5)
     [--format text|json]          Output format (default: text)
   list                          List all indexed conversations
@@ -165,12 +165,12 @@ Hooks are skipped when Claude Code runs with `--bare` and when `disableAllHooks`
 
 ## Searching and reading the archive
 
-`towit search` looks in message text, keywords, titles, and summaries by default, and ranks conversations with a metadata match first, then those covering more of your terms, then by relevance and how many messages match, then the newest. Each result shows its best-matching message: the **Turn** (the 0-based message number) and a snippet with the matching words in `[brackets]`:
+`towit search` looks in message text, keywords, titles, and summaries by default, and ranks conversations with a metadata match first, then those covering more of your terms, then by relevance and how many messages match, then the newest. Each result shows its best-matching message: the **Msg** (the 0-based message number, which is what `towit show --around` takes) and a snippet with the matching words in `[brackets]`:
 
 ```shell
 towit search recursion
 /tmp/demo
-  ID                                    Title                      Keywords  Turn  Snippet                     Date
+  ID                                    Title                      Keywords  Msg   Snippet                     Date
   ------------------------------------  -------------------------  --------  ----  --------------------------  ----------
   aaaaaaaa-1111-2222-3333-444444444444  How does the stop hook r…            0     How does the stop hook [r…  2026-03-31
 
@@ -182,11 +182,11 @@ towit show aaaaaaaa-1111-2222-3333-444444444444 --around 1 --context 1
 - Tool calls are stored only as short stubs (at most 200 characters) and tool results are not stored, except failures as `[error]` lines of at most 300 characters, so the output of commands is not searchable. Within a message, relevance favors short messages, so a brief mention can outrank a long message about the term; conversations with many matching messages are boosted; scan past the top few results.
 - Text matches are capped at 50 conversations. Metadata matches are never capped.
 - `--folder` matches a conversation's working directory exactly. `--repo` matches a repo by its key (the exact path) or by its final path component, e.g. `--repo to-wit`. The name also matches keys whose final component starts with `name.`, so `--repo studio-app` finds `studio-app.phase-2a-payments` (the worktree of a repo whose directory had already been deleted). It does not match `studio-app2`, `other-studio-app.x`, or a `studio-app.x` that is only a parent directory. `towit forget --repo` lists the matched repo keys (up to 10, then `+N more`) before it asks you to confirm (and before deleting, even with `--yes`), so check them when a name matches more than you expect.
-- `--format json` and `--format csv` add `seq`, `snippet`, and `score` to each result (the conversation's id stays in `id`).
+- `--format json` and `--format csv` add `seq` (the message number), `snippet`, and `score` to each result (the conversation's id stays in `id`).
 
 **Repo grouping.** A conversation's repo key is the git common directory of its working directory, so all the worktrees of a repo group under the main checkout. The key is resolved once, when the session is first archived, and kept on later ingests (a resumed session, a `towit backfill`), so deleting a worktree afterwards does not change it. If the working directory no longer exists (or is not a git checkout) at that first archive, the working directory itself becomes the key; for example `studio-app.phase-2a-payments` is its own stored key. Only the `--repo` match widens: `--repo studio-app` matches that key by its `studio-app.` prefix, so such sessions are found without having to name the worktree.
 
-`towit show <session-id>` prints the stored messages (`--around <seq> --context <n>` narrows it to the messages near a search hit; `--format json` prints an array of `seq`, `role`, `ts`, and `text`). It works after Claude Code has deleted the transcript. The text is archive content (including tool output and web content), so `show` strips terminal control sequences before printing it. The table output of `search` and `list` (titles, keywords, snippets, working directories) is sanitized the same way and kept on one line per row; `--format json` escapes non-ASCII characters and `--format csv` is printed as stored, so a cell can start with `=`, `+`, `-` or `@` (a spreadsheet runs it as a formula) or carry terminal escapes; review a CSV before opening it in a spreadsheet or printing it to a terminal. With no results `--format csv` prints nothing on stdout (no header row), while `--format json` prints `[]`.
+`towit show <session-id>` prints the stored messages (`--around <msg> --context <n>` narrows it to the messages near a search hit, where `<msg>` is the Msg column of `towit search`; `--format json` prints an array of `seq`, `role`, `ts`, and `text`). It works after Claude Code has deleted the transcript. The text is archive content (including tool output and web content), so `show` strips terminal control sequences before printing it. The table output of `search` and `list` (titles, keywords, snippets, working directories) is sanitized the same way and kept on one line per row; `--format json` escapes non-ASCII characters and `--format csv` is printed as stored, so a cell can start with `=`, `+`, `-` or `@` (a spreadsheet runs it as a formula) or carry terminal escapes; review a CSV before opening it in a spreadsheet or printing it to a terminal. With no results `--format csv` prints nothing on stdout (no header row), while `--format json` prints `[]`.
 
 `towit stats` prints conversation counts, then a block with the number of archived and metadata-only conversations, archived messages, and the database size.
 

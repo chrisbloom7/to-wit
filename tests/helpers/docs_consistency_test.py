@@ -195,5 +195,40 @@ class TestChangelog(DocTestCase):
         self.assertTrue(section.strip(), "CHANGELOG.md [Unreleased] section is empty")
 
 
+class TestMessageNumberTerminology(DocTestCase):
+    """The search table's Msg column is the number `towit show --around` takes."""
+
+    def _subcommand_help(self, name):
+        return subprocess.run([os.path.join(ROOT, 'bin', 'towit'), name, '--help'],
+                              capture_output=True, text=True, check=True).stdout
+
+    def test_search_help_links_msg_column_to_show_around(self):
+        out = ' '.join(self._subcommand_help('search').split())
+        self.assertContains(out, 'Msg', "towit search --help does not mention the Msg column")
+        self.assertContains(out, 'towit show --around',
+                            "towit search --help does not mention `towit show --around`")
+
+    def test_bin_help_links_msg_column_to_show_around(self):
+        out = ' '.join(_help_output().split())
+        self.assertContains(out, 'Msg column', "bin/towit help does not mention the Msg column")
+        self.assertContains(out, 'towit show --around',
+                            "bin/towit search help does not mention `towit show --around`")
+
+    def test_around_uses_msg_placeholder_everywhere(self):
+        show_help = self._subcommand_help('show')
+        self.assertContains(show_help, '--around MSG', "towit show --help should use --around MSG")
+        self.assertNotIn('SEQ', show_help)
+        for name, text in (('README.md', _read('README.md')), ('bin/towit', _read('bin/towit')),
+                           ('towit_show.py', _read('libexec/towit/towit_show.py'))):
+            self.assertContains(text, '--around <msg>', f"{name} should use --around <msg>")
+            self.assertNotIn('--around <seq>', text, f"{name} still uses --around <seq>")
+
+    def test_readme_tables_do_not_use_turn_header(self):
+        readme = _read('README.md')
+        self.assertMatches(readme, r'Keywords\s+Msg\b', "README tables should use the Msg header")
+        self.assertIsNone(re.search(r'Keywords\s+Turn\b', readme), "README table still has a Turn header")
+        self.assertNotIn('**Turn**', readme)
+
+
 if __name__ == '__main__':
     unittest.main()

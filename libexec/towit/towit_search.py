@@ -52,14 +52,14 @@ def _filter_keywords(keywords_str, terms):
 def _print_table(rows, terms=None, group_by_path=False, show_text=False):
     """Print results as a formatted text table, optionally grouped by CWD.
 
-    show_text adds Turn and Snippet columns for message-text hits.
+    show_text adds Msg and Snippet columns for message-text hits.
     """
     if not rows:
         return
 
     headers = ['ID', 'Title', 'Keywords', 'Date']
     if show_text:
-        headers = ['ID', 'Title', 'Keywords', 'Turn', 'Snippet', 'Date']
+        headers = ['ID', 'Title', 'Keywords', 'Msg', 'Snippet', 'Date']
     sep = '  '
     indent = '  ' if group_by_path else ''
 
@@ -72,8 +72,8 @@ def _print_table(rows, terms=None, group_by_path=False, show_text=False):
             keywords = _filter_keywords(keywords, terms)
         cells = [r['id'], r['title'], keywords, date]
         if show_text:
-            turn = '' if r.get('seq') is None else str(r['seq'])
-            cells[3:3] = [turn, r.get('snippet')]
+            msg = '' if r.get('seq') is None else str(r['seq'])
+            cells[3:3] = [msg, r.get('snippet')]
         processed.append((sanitize_cell(r['cwd']), [sanitize_cell(c) for c in cells]))
 
     # Compute natural column widths across all rows
@@ -170,7 +170,9 @@ def _print_json(rows, show_text=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Search cataloged Claude conversations.'
+        description='Search cataloged Claude conversations.',
+        epilog='The Msg column of the results is the message number; pass it to '
+               '`towit show --around` to read the surrounding messages.'
     )
     parser.add_argument('terms', nargs='+', metavar='TERM',
                         help='Search terms')
