@@ -727,7 +727,7 @@ PY
   local errfile="${TEST_TMPDIR}/show.err"
   "${TOWIT}" show session-big-0001 2>"${errfile}" | head -n 1
   local show_status="${PIPESTATUS[0]}"
-  [ "${show_status}" -eq 141 ] || { echo "Expected status 141, got ${show_status}: $(cat "${errfile}")"; return 1; }
+  [ "${show_status}" -eq 141 ] || { echo "Expected status 141, got ${show_status}: $(cat "${errfile}")"; echo "DIAG bash=${BASH_VERSION} head=$(command -v head) bytes=$("${TOWIT}" show session-big-0001 | wc -c) msgs=$("${TOWIT}" show session-big-0001 --format json | python3 -c 'import json,sys; print(len(json.load(sys.stdin)))') sigpipe=$(trap -p SIGPIPE; python3 -c 'import signal; print(signal.getsignal(signal.SIGPIPE))')"; return 1; }
   [[ "$(cat "${errfile}")" != *"Traceback"* ]] || { echo "Unexpected traceback: $(cat "${errfile}")"; return 1; }
   [[ "$(cat "${errfile}")" != *"BrokenPipeError"* ]] || { echo "Unexpected error: $(cat "${errfile}")"; return 1; }
 }
