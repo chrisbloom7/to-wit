@@ -110,3 +110,4 @@ Three commits of under 300 lines each: per-term grouping and matching, then the 
 - Open question 1 (aggregating `bm25` in SQL) is closed by a spike: it is not possible, so rows are grouped in Python; cost is negligible.
 - Open question 2 (`score` for a spread hit) is closed: the sum of the representative message's single-term `bm25` values.
 - Open question 3 (exposing the conversation rank) stays closed: it is internal.
+- Representative message: when a conversation has a row in the message-level query, that row is the representative for `AND` and `OR` alike (so a result's `seq`, `snippet` and `score` never change); only a spread hit gets a computed representative (most terms covered, ties to the lowest sum of single-term `bm25`). Spread-hit snippets are taken under the `OR` expression of the same terms.
