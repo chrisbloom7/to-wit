@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `towit show`, `search`, `list`, `export`, `stats`, `doctor` and `prune` no longer print a `BrokenPipeError` traceback when piped to a command that exits early, such as `head`; they exit quietly with status 141.
+
 ### Changed
 
 - The `Turn` column of `towit search` table output is now `Msg`, because it holds the 0-based message number (a turn is a user and assistant exchange; this counts single messages). Anything that parses the table output should look for `Msg`. The `seq` keys in `--format json` and `--format csv` and in `towit show --format json` are unchanged.
