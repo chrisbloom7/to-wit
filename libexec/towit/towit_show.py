@@ -15,6 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_db import Database
+from towit_pipe import run_cli
 from towit_sanitize import sanitize
 
 DEFAULT_CONTEXT = 5
@@ -95,4 +96,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    run_cli(main)

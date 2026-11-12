@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_config import _KNOWN_KEYS
 from towit_db import SCHEMA_VERSION
 from towit_install_hook import HOOK_EVENTS
+from towit_pipe import run_cli
 
 
 @dataclass
@@ -594,4 +595,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    run_cli(main)
