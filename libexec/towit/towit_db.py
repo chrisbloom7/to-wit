@@ -12,6 +12,7 @@ import math
 import os
 import sys
 import sqlite3
+import unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_config import config
@@ -186,6 +187,21 @@ class ConversationHit:
     terms_covered: int
     rank_score: float
     spread: bool
+
+
+ROLES = ('user', 'assistant')
+
+
+def _check_role(role) -> None:
+    """Raise ValueError for a role other than None, 'user' or 'assistant'."""
+    if role is not None and role not in ROLES:
+        raise ValueError(f"role must be one of {', '.join(ROLES)}, got {role!r}")
+
+
+def _fold(text: str) -> str:
+    """Case- and diacritic-insensitive form of text, for literal substring matching."""
+    decomposed = unicodedata.normalize('NFKD', text.casefold())
+    return ''.join(c for c in decomposed if not unicodedata.combining(c))
 
 
 def group_conversation_hits(term_rows: list, message_rows: list | None, mode: str = 'and') -> dict:
@@ -625,8 +641,10 @@ class Database:
             params += [stripped + '.', stripped + '.']
         return sql + ')', params
 
-    def _text_match_query(self, folder, repo, ordered: bool = True) -> tuple:
+    def _text_match_query(self, folder, repo, ordered: bool = True, role: str = None) -> tuple:
         """SQL + params (after the MATCH expression) for message-text hits, best bm25 first.
+
+        role ('user' or 'assistant') keeps only messages of that role; it is only ever bound.
 
         Ranking only: snippet() is computed later, for the rows that are returned.
         ordered=False drops the sort, for callers that take minimums themselves; the
@@ -649,11 +667,14 @@ class Database:
             frag, rparams = self._repo_filter(repo)
             sql += " AND " + frag
             params += rparams
+        if role:
+            sql += " AND m.role = ?"
+            params.append(role)
         return (sql + " ORDER BY score" if ordered else sql), params
 
-    def _term_rows(self, conn, terms: list, folder, repo) -> list:
+    def _term_rows(self, conn, terms: list, folder, repo, role: str = None) -> list:
         """One list of text-hit rows (unordered) per term; a term FTS5 rejects gives []."""
-        sql, params = self._text_match_query(folder, repo, ordered=False)
+        sql, params = self._text_match_query(folder, repo, ordered=False, role=role)
         per_term = []
         for term in terms:
             try:
@@ -668,7 +689,7 @@ class Database:
     def search_archive(self, terms: list, mode: str = 'and', folder: str = None,
                        repo: str = None, scope: str = 'all', include_topics: bool = False,
                        include_summary: bool = False, include_title: bool = False,
-                       limit: int = 50) -> list:
+                       limit: int = 50, role: str = None) -> list:
         """
         Search archived message text and/or conversation metadata.
 
@@ -688,7 +709,13 @@ class Database:
         seq=None, snippet='', score=None for a metadata-only hit. A null title falls back
         to the first user message (80 chars). limit caps text-only rows (metadata
         hits are never dropped); limit=None means unlimited.
+
+        role='user' or 'assistant' matches text only in messages of that role: the message-level
+        query and every per-term query are restricted, so ranking, coverage, the representative
+        message and the snippet all come from those messages. Metadata matches ignore role and
+        still rank first (a metadata-only hit has seq=None).
         """
+        _check_role(role)
         self.validate()
         meta = []
         if scope in ('all', 'metadata'):
@@ -713,7 +740,7 @@ class Database:
             distinct = distinct_search_terms(terms)  # repeated terms would skew bm25
             expr = build_match_expression(distinct, mode)
             if expr is not None:
-                sql, params = self._text_match_query(folder, repo, ordered=False)
+                sql, params = self._text_match_query(folder, repo, ordered=False, role=role)
                 try:
                     message_rows = conn.execute(sql, [expr] + params).fetchall()
                 except sqlite3.OperationalError as e:
@@ -725,7 +752,7 @@ class Database:
             # Several terms are also scored one by one, so a conversation whose terms sit
             # in different messages still matches; otherwise the message-level rows suffice.
             if 2 <= len(distinct) <= MAX_RANK_TERMS:
-                per_term = self._term_rows(conn, distinct, folder, repo)
+                per_term = self._term_rows(conn, distinct, folder, repo, role)
             else:
                 per_term = [message_rows]
             hits = group_conversation_hits(per_term, message_rows, mode)
@@ -910,16 +937,25 @@ class Database:
             self._fill_title_fallback(conn, [header])
             return header
 
-    def get_messages(self, conv_id: str, around: int = None, context: int = 5) -> list:
+    def get_messages(self, conv_id: str, around: int = None, context: int = 5,
+                     role: str = None, match: list = None) -> list:
         """
         Return archived messages (keys seq, role, ts, text) ordered by seq.
 
         With `around`, only messages whose seq is within [around - context, around + context];
         the window clamps at both ends and may be empty. Unknown conversations return [].
+        The window is selected first (by message number); role and match then filter it.
+
+        role ('user' or 'assistant') keeps only that role. match is a list of terms; a message
+        is kept when it contains every term as a literal substring, ignoring case and diacritics.
         """
+        _check_role(role)
         self.validate()
         sql = "SELECT seq, role, ts, text FROM messages WHERE conversation_id = ?"
         params = [conv_id]
+        if role:
+            sql += " AND role = ?"
+            params.append(role)
         if around is not None:
             sql += " AND seq BETWEEN ? AND ?"
             # Clamp so huge Python ints never overflow SQLite's 64-bit integers.
@@ -927,7 +963,11 @@ class Database:
             params += [min(max(0, around - context), top), min(around + context, top)]
         sql += " ORDER BY seq"
         with self.connect() as conn:
-            return [dict(r) for r in conn.execute(sql, params).fetchall()]
+            rows = [dict(r) for r in conn.execute(sql, params).fetchall()]
+        if match:
+            folded = [_fold(term) for term in match]
+            rows = [r for r in rows if all(t in _fold(r['text']) for t in folded)]
+        return rows
 
     def all_conversation_stubs(self) -> list:
         """Return (id, folder, cwd, archived) for every conversation — used by prune and stats."""

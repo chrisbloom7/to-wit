@@ -3,7 +3,7 @@
 towit_search — Search cataloged Claude conversations.
 
 Usage:
-    python3 towit_search.py [--or] [--topic] [--all | --summary | --title] [--only text|metadata] [--format json|csv] [--folder <path>] [--repo <path|name>] <terms...>
+    python3 towit_search.py [--or] [--topic] [--all | --summary | --title] [--only text|metadata] [--format json|csv] [--folder <path>] [--repo <path|name>] [--role user|assistant] <terms...>
 """
 
 import argparse
@@ -201,7 +201,17 @@ def main():
     parser.add_argument('--repo', metavar='PATH|NAME',
                         help='Restrict search to a repo: its key, its directory name, or a worktree of it '
                              '(a directory named NAME.<branch>)')
+    parser.add_argument('--role', choices=['user', 'assistant'], metavar='user|assistant',
+                        help='Match message text only in messages of this role (ranking, the Msg '
+                             'column and the snippet then come from those messages); `--role user` '
+                             'skips assistant replies and the [Bash]-style tool stubs inside them. '
+                             'Keyword, title, summary and topic matches are not affected')
     args = parser.parse_args()
+
+    if args.role and args.only == 'metadata':
+        print("Error: --role has no effect with --only metadata (it restricts message text only).",
+              file=sys.stderr)
+        sys.exit(1)
 
     db = Database()
     db.validate()
@@ -220,7 +230,7 @@ def main():
         return db.search_archive(args.terms, mode=search_mode, folder=args.folder, repo=args.repo,
                                  scope=scope, include_topics=include_topics,
                                  include_summary=include_summary, include_title=include_title,
-                                 limit=50 if show_text else None)
+                                 limit=50 if show_text else None, role=args.role)
 
     results = run(mode)
     if not results and mode == 'and' and show_text and len(args.terms) >= 2:
