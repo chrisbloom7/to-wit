@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `towit search --role user|assistant` matches message text only in messages of that role, so `--role user` finds your own prompt instead of an assistant reply or a `[Bash]` stub. Ranking, coverage, the Msg column and the snippet come from those messages; keyword, title, summary and topic matches are unaffected, and combining it with `--only metadata` is an error.
+- `towit show --role user|assistant` prints only messages of that role (on its own, an outline of your prompts with their Msg numbers).
+- `towit show --match TERM` prints only messages containing the term (literal, case- and diacritic-insensitive substring); repeat it to require every term in the same message. `--around` windows are counted by message number before `--role` and `--match` filter them, and an empty result prints `No messages match the given filters.` and exits 1.
+- There is no database change and no migration. The JSON and CSV output of `search` is unchanged, and `show --format json` keeps the original message numbers.
+
 ### Fixed
 
 - `towit show`, `search`, `list`, `export`, `stats`, `doctor` and `prune` no longer print a `BrokenPipeError` traceback when piped to a command that exits early, such as `head`; they exit quietly with status 141.
