@@ -6,7 +6,9 @@ This module is imported by other towit scripts; it is not run directly.
 """
 
 import contextlib
+from dataclasses import dataclass
 import hashlib
+import math
 import os
 import sys
 import sqlite3
@@ -136,6 +138,11 @@ def is_fts_query_error(exc: Exception) -> bool:
     return isinstance(exc, sqlite3.OperationalError) and str(exc).startswith(FTS_QUERY_ERROR_PREFIXES)
 
 
+def _is_searchable(term: str) -> bool:
+    """True if term has a letter or digit, so FTS5 can produce a token from it."""
+    return any(ch.isalnum() for ch in term)
+
+
 def build_match_expression(terms: list, mode: str = 'and') -> str | None:
     """Build an FTS5 MATCH expression from user terms, or None if nothing is searchable.
 
@@ -143,10 +150,88 @@ def build_match_expression(terms: list, mode: str = 'and') -> str | None:
     column filters and punctuation in user input are always literal. Terms with
     no letter or digit cannot produce a token and are dropped.
     """
-    phrases = ['"%s"' % t.replace('"', '""') for t in terms if any(ch.isalnum() for ch in t)]
+    phrases = ['"%s"' % t.replace('"', '""') for t in terms if _is_searchable(t)]
     if not phrases:
         return None
     return (' OR ' if mode == 'or' else ' AND ').join(phrases)
+
+
+# Most terms a conversation-level search scores individually (one query per term).
+MAX_RANK_TERMS = 8
+
+
+def distinct_search_terms(terms: list) -> list:
+    """Searchable terms de-duplicated case-insensitively, in first-seen order and spelling."""
+    seen = set()
+    distinct = []
+    for term in terms:
+        if _is_searchable(term) and term.casefold() not in seen:
+            seen.add(term.casefold())
+            distinct.append(term)
+    return distinct
+
+
+@dataclass(frozen=True)
+class ConversationHit:
+    """One conversation's best match: its representative message and its rank score."""
+    conv_id: str
+    rowid: int
+    seq: int
+    message_score: float
+    terms_covered: int
+    rank_score: float
+    spread: bool
+
+
+def group_conversation_hits(term_rows: list, message_rows: list | None, mode: str = 'and') -> dict:
+    """Group per-term and message-level search rows into one ConversationHit per conversation.
+
+    term_rows[i] holds the rows (id, seq, rowid, score) of term i's single-term query;
+    message_rows holds the rows of the message-level query, or None. bm25 scores are
+    negative and lower is better, so "best" is the lowest score, ties broken by the
+    lowest rowid. rank_score sums each covered term's best score and scales it by
+    1 + ln(n), n being the distinct matching messages, so many hits outrank a few.
+    In 'and' mode a conversation needs a row for every term.
+    """
+    per_conv = {}
+    for index, rows in enumerate(term_rows):
+        for row in rows:
+            terms = per_conv.setdefault(row['id'], {})
+            terms.setdefault(index, []).append(row)
+
+    # Representative from the message-level query: its first row per conversation.
+    message_best = {}
+    for row in message_rows or []:
+        best = message_best.get(row['id'])
+        if best is None or (row['score'], row['rowid']) < (best['score'], best['rowid']):
+            message_best[row['id']] = row
+
+    hits = {}
+    for conv_id, by_term in per_conv.items():
+        if mode != 'or' and len(by_term) < len(term_rows):
+            continue
+        rowids = {row['rowid'] for rows in by_term.values() for row in rows}
+        base = sum(min(row['score'] for row in rows) for rows in by_term.values())
+        rank_score = base * (1 + math.log(len(rowids)))
+
+        if conv_id in message_best:
+            rep = message_best[conv_id]
+            rowid, seq, message_score, spread = rep['rowid'], rep['seq'], rep['score'], False
+        else:
+            # No message holds every term: prefer the message covering most terms,
+            # then the lowest summed single-term score.
+            per_message = {}
+            for rows in by_term.values():
+                for row in rows:
+                    entry = per_message.setdefault(row['rowid'], [0, 0.0, row['seq']])
+                    entry[0] += 1
+                    entry[1] += row['score']
+            rowid = min(per_message, key=lambda r: (-per_message[r][0], per_message[r][1], r))
+            covered, message_score, seq = per_message[rowid]
+            spread = covered < len(term_rows)
+        hits[conv_id] = ConversationHit(conv_id, rowid, seq, message_score,
+                                        len(by_term), rank_score, spread)
+    return hits
 
 
 def _add_column(conn, column_def: str) -> None:

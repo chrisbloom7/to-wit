@@ -5,6 +5,7 @@
 
 import contextlib
 import io
+import math
 import threading
 import unittest
 import unittest.mock
@@ -19,6 +20,7 @@ sys.path.insert(0, HELPERS_DIR)
 
 import towit_db
 from towit_db import SCHEMA_VERSION, Database, message_hash, build_match_expression, is_fts_query_error
+from towit_db import distinct_search_terms, group_conversation_hits, ConversationHit, MAX_RANK_TERMS
 
 SAMPLE_CONV = {
     'id': 'test-session-001',
@@ -810,6 +812,105 @@ class TestBuildMatchExpression(unittest.TestCase):
 
     def test_untokenizable_terms_dropped_when_others_remain(self):
         self.assertEqual(build_match_expression(['***', 'ok']), '"ok"')
+
+
+class TestDistinctSearchTerms(unittest.TestCase):
+    def test_dedupes_case_insensitively_keeping_first_spelling(self):
+        self.assertEqual(distinct_search_terms(['Redis', 'redis', 'timeout']), ['Redis', 'timeout'])
+
+    def test_drops_untokenizable_terms(self):
+        self.assertEqual(distinct_search_terms(['"', '*', 'redis']), ['redis'])
+
+    def test_empty(self):
+        self.assertEqual(distinct_search_terms([]), [])
+
+    def test_max_rank_terms(self):
+        self.assertEqual(MAX_RANK_TERMS, 8)
+
+
+def _row(conv, seq, rowid, score):
+    return {'id': conv, 'seq': seq, 'rowid': rowid, 'score': score}
+
+
+class TestGroupConversationHits(unittest.TestCase):
+    def test_no_rows_gives_no_hits(self):
+        self.assertEqual(group_conversation_hits([], None), {})
+        self.assertEqual(group_conversation_hits([[]], []), {})
+
+    def test_single_term_one_message(self):
+        hits = group_conversation_hits([[_row('c1', 2, 10, -3.0)]], None)
+        hit = hits['c1']
+        self.assertIsInstance(hit, ConversationHit)
+        self.assertEqual(hit.terms_covered, 1)
+        self.assertEqual(hit.rank_score, -3.0)
+        self.assertIs(hit.spread, False)
+        self.assertEqual((hit.seq, hit.rowid, hit.message_score), (2, 10, -3.0))
+
+    def test_many_matches_scale_the_score(self):
+        rows = [_row('c1', i, i + 1, -1.0) for i in range(300)]
+        hits = group_conversation_hits([rows], None)
+        self.assertEqual(list(hits), ['c1'])
+        self.assertEqual(hits['c1'].rank_score, -1.0 * (1 + math.log(300)))
+        self.assertEqual(hits['c1'].rowid, 1)
+
+    def test_many_matches_representative_is_best_score(self):
+        rows = [_row('c1', 1, 1, -1.0), _row('c1', 2, 2, -5.0), _row('c1', 3, 3, -2.0)]
+        self.assertEqual(group_conversation_hits([rows], None)['c1'].rowid, 2)
+
+    def test_and_spread_hit(self):
+        term_rows = [[_row('c1', 1, 1, -2.0)], [_row('c1', 2, 2, -3.0)]]
+        hit = group_conversation_hits(term_rows, [], 'and')['c1']
+        self.assertIs(hit.spread, True)
+        self.assertEqual(hit.terms_covered, 2)
+        self.assertEqual(hit.rank_score, (-2.0 + -3.0) * (1 + math.log(2)))
+        self.assertEqual(hit.rowid, 2)
+        self.assertEqual(hit.message_score, -3.0)
+
+    def test_and_requires_every_term(self):
+        term_rows = [[_row('c1', 1, 1, -2.0)], []]
+        self.assertEqual(group_conversation_hits(term_rows, None, 'and'), {})
+        hits = group_conversation_hits(term_rows, None, 'or')
+        self.assertEqual(hits['c1'].terms_covered, 1)
+
+    def test_message_level_row_is_the_representative(self):
+        term_rows = [[_row('c1', 1, 1, -2.0), _row('c1', 5, 7, -1.0)],
+                     [_row('c1', 5, 7, -1.5)]]
+        hit = group_conversation_hits(term_rows, [_row('c1', 5, 7, -4.0)], 'and')['c1']
+        self.assertEqual((hit.seq, hit.rowid, hit.message_score), (5, 7, -4.0))
+        self.assertIs(hit.spread, False)
+
+    def test_spread_representative_prefers_more_terms(self):
+        term_rows = [[_row('c1', 1, 1, -1.0), _row('c1', 2, 2, -9.0)],
+                     [_row('c1', 1, 1, -2.0)]]
+        hit = group_conversation_hits(term_rows, None, 'or')['c1']
+        self.assertEqual(hit.rowid, 1)
+        self.assertEqual(hit.message_score, -3.0)
+
+    def test_equal_scores_are_deterministic(self):
+        a, b = _row('c1', 1, 4, -2.0), _row('c1', 2, 3, -2.0)
+        for rows in ([a, b], [b, a]):
+            self.assertEqual(group_conversation_hits([rows], None)['c1'].rowid, 3)
+
+
+class TestBm25Additivity(unittest.TestCase):
+    def test_multi_term_and_bm25_is_sum_of_single_term_bm25(self):
+        tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmpdir, ignore_errors=True)
+        db = Database(os.path.join(tmpdir, 'catalog.db'))
+        db.create_schema()
+        with db.connect() as conn:
+            conn.execute("INSERT INTO conversations (id, folder, cwd, started_at, last_active, archived) "
+                         "VALUES ('c1', 'f', '/x', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1)")
+            conn.execute("INSERT INTO messages (conversation_id, seq, role, text) "
+                         "VALUES ('c1', 0, 'user', 'alpha and beta together')")
+            conn.execute("INSERT INTO messages (conversation_id, seq, role, text) "
+                         "VALUES ('c1', 1, 'user', 'alpha alone here')")
+            sql = "SELECT rowid, bm25(messages_fts) FROM messages_fts WHERE messages_fts MATCH ?"
+            both = dict(conn.execute(sql, (build_match_expression(['alpha', 'beta'], 'and'),)).fetchall())
+            alpha = dict(conn.execute(sql, (build_match_expression(['alpha']),)).fetchall())
+            beta = dict(conn.execute(sql, (build_match_expression(['beta']),)).fetchall())
+            rowid = next(iter(both))
+            self.assertAlmostEqual(both[rowid], alpha[rowid] + beta[rowid], places=5)
 
 
 class TestRepoFilter(unittest.TestCase):
