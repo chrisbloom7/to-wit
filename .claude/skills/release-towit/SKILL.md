@@ -107,8 +107,6 @@ git add CHANGELOG.md README.md   # plus SECURITY.md / AGENTS.md if edited; just 
 git commit -m "chore: release vX.Y.Z"
 ```
 
-Show the diff before committing and wait for approval.
-
 ## Step 5 — Open the PR
 
 Push the release branch (never `main`) and open a PR with `gh`:
