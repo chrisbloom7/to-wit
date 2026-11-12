@@ -16,6 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_config import config, safe_subprocess_env
 from towit_db import Database
+from towit_pipe import quiet_broken_pipe
 from towit_redact import redact
 
 
@@ -188,13 +189,18 @@ def export_single(db: Database, session_id: str, fmt: str, summarize: bool):
             f"- Project: {cwd}\n\n"
             f"Transcript:\n\n{transcript_text}"
         )
-        print(_call_claude(prompt))
+        summary = _call_claude(prompt)
+        with quiet_broken_pipe():
+            print(summary)
         return
 
-    if fmt == 'json':
-        print(_format_json_export(conv, messages))
-    else:
-        print(_format_markdown(conv, messages))
+    # Only the print is wrapped: a BrokenPipeError from the claude subprocess above
+    # is a real error, not a closed stdout
+    with quiet_broken_pipe():
+        if fmt == 'json':
+            print(_format_json_export(conv, messages))
+        else:
+            print(_format_markdown(conv, messages))
 
 
 def export_topic(db: Database, topic: str, fmt: str, summarize: bool):
@@ -227,7 +233,9 @@ def export_topic(db: Database, topic: str, fmt: str, summarize: bool):
             f"Format each reference as: [Session <short-id>] <date> | <cwd>\n\n"
             f"Session summaries:\n\n{all_summaries}"
         )
-        print(_call_claude(prompt))
+        summary = _call_claude(prompt)
+        with quiet_broken_pipe():
+            print(summary)
         return
 
     # Full transcript export for each conversation
@@ -253,7 +261,8 @@ def export_topic(db: Database, topic: str, fmt: str, summarize: bool):
         print("No transcripts could be exported.", file=sys.stderr)
         sys.exit(1)
 
-    print(separator.join(outputs))
+    with quiet_broken_pipe():
+        print(separator.join(outputs))
 
 
 # ---------------------------------------------------------------------------

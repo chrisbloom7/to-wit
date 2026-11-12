@@ -2,6 +2,7 @@
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -132,6 +133,65 @@ class TestSummarizeRedaction(unittest.TestCase):
             towit_export.export_single(self.db, 'sess-0001', 'md', False)
         run.assert_not_called()
         self.assertIn(FAKE_KEY, pr.call_args.args[0])
+
+
+class TestExportClosedPipe(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.db = Database(os.path.join(self.tmp, 'catalog.db'))
+        self.db.create_schema()
+        with open(os.path.join(self.tmp, 'sess-0001.jsonl'), 'w', encoding='utf-8') as fh:
+            for i in range(2000):
+                role = 'user' if i % 2 == 0 else 'assistant'
+                fh.write(json.dumps({'type': 'message',
+                                     'message': {'role': role, 'content': f'message {i} ' + 'padding ' * 20}}) + '\n')
+        self.db.upsert_conversation({
+            'id': 'sess-0001', 'folder': self.tmp, 'cwd': '/w', 'started_at': '2026-01-01T00:00:00Z',
+            'last_active': None, 'title': 't', 'summary': 's', 'topics': ['demo'], 'keywords': []})
+        self.config_path = os.path.join(self.tmp, 'config.toml')
+        with open(self.config_path, 'w') as fh:
+            fh.write(f'[database]\npath = "{os.path.join(self.tmp, "catalog.db")}"\n')
+
+    def test_closed_pipe_exits_141_without_traceback(self):
+        script = os.path.join(os.path.dirname(towit_export.__file__), 'towit_export.py')
+        # No reader at all: the first write fails with EPIPE whatever the output size
+        read_end, write_end = os.pipe()
+        os.close(read_end)
+        proc = subprocess.Popen(
+            ['python3', script, 'sess-0001'],
+            env={**os.environ, 'TOWIT_CONFIG_PATH': self.config_path},
+            stdout=write_end, stderr=subprocess.PIPE,
+        )
+        os.close(write_end)
+        _, stderr = proc.communicate(timeout=60)
+        self.assertNotIn('BrokenPipeError', stderr.decode())
+        self.assertNotIn('Traceback', stderr.decode())
+        self.assertEqual(proc.returncode, 141)
+
+    def test_broken_pipe_on_the_summary_print_exits_141(self):
+        completed = MagicMock(returncode=0, stdout='summary\n', stderr='')
+        with patch('towit_export.subprocess.run', return_value=completed), \
+             patch('towit_export.os.dup2'), \
+             patch('builtins.print', side_effect=BrokenPipeError):
+            with self.assertRaises(SystemExit) as ctx:
+                towit_export.export_single(self.db, 'sess-0001', 'md', True)
+        self.assertEqual(ctx.exception.code, 141)
+
+    def test_broken_pipe_from_the_claude_call_is_not_treated_as_a_stdout_error(self):
+        with patch('towit_export.subprocess.run', side_effect=BrokenPipeError), \
+             patch('builtins.print'):
+            with self.assertRaises(BrokenPipeError):
+                towit_export.export_single(self.db, 'sess-0001', 'md', True)
+
+    def test_broken_pipe_on_the_topic_print_exits_141(self):
+        # list_conversations omits the folder column, so hand export_topic a full row
+        conv = {**self.db.get_conversation('sess-0001'), 'folder': self.tmp}
+        with patch.object(self.db, 'list_conversations', return_value=[conv]), \
+             patch('towit_export.os.dup2'), patch('builtins.print', side_effect=BrokenPipeError):
+            with self.assertRaises(SystemExit) as ctx:
+                towit_export.export_topic(self.db, 'demo', 'md', False)
+        self.assertEqual(ctx.exception.code, 141)
 
 
 if __name__ == '__main__':
