@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `towit search` is about 25% faster on large archives when terms are common, because the per-term queries no longer sort their results or join `conversations` unless `--folder` or `--repo` needs it. Results and ranking are unchanged.
+- The README and SECURITY.md now say that `--format csv` output is printed as stored, so a cell starting with `=`, `+`, `-` or `@` runs as a formula in a spreadsheet, and that an empty CSV result prints no header row. CSV output itself is unchanged.
 
 ## [0.11.0] - 2026-11-12
 
