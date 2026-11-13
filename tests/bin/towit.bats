@@ -702,6 +702,28 @@ EOF
   [[ "${output}" == *"not found"* ]]
 }
 
+@test "towit: show filters by --role and --match through the dispatcher" {
+  ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
+  export HOME="${TEST_TMPDIR}/home"
+  mkdir -p "${HOME}"
+  printf '[indexing]\nenabled = false\n' >> "${TOWIT_CONFIG_PATH}"
+  "${TOWIT}" setup
+  local sessions="${TEST_TMPDIR}/sessions"
+  write_fixture_session "${sessions}" "session-aaa-0001"
+  run "${TOWIT}" backfill --folder "${sessions}"
+  [ "${status}" -eq 0 ]
+
+  run "${TOWIT}" show session-aaa-0001 --role user --match CONCURRENCY
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"[2] user"* ]] || { echo "Expected seq 2, got: ${output}"; return 1; }
+  [[ "${output}" != *"[0] user"* ]] || { echo "Unexpected seq 0, got: ${output}"; return 1; }
+  [[ "${output}" != *"assistant"* ]] || { echo "Unexpected assistant, got: ${output}"; return 1; }
+
+  run "${TOWIT}" show session-aaa-0001 --role user --match nonexistentterm
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"No messages match the given filters."* ]] || { echo "Got: ${output}"; return 1; }
+}
+
 @test "towit: show piped to a command that exits early prints no traceback and exits 141" {
   ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
   export HOME="${TEST_TMPDIR}/home"

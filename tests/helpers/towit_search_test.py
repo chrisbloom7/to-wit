@@ -494,6 +494,60 @@ class TestTowitSearchArchive(unittest.TestCase):
         self.assertEqual(sorted(d['id'] for d in json.loads(r.stdout)), ['arc-1', 'arc-2'])
         self.assertIn(self.NOTICE, r.stderr)
 
+    def test_role_user_end_to_end(self):
+        import json
+        r = run_search(self.config_path, ['recursion', '--only', 'text', '--role', 'user',
+                                          '--format', 'json'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), [])  # only the assistant said it
+        r = run_search(self.config_path, ['hook', '--only', 'text', '--role', 'user',
+                                          '--format', 'json'])
+        data = json.loads(r.stdout)
+        self.assertEqual([d['id'] for d in data], ['arc-1'])
+        self.assertEqual(data[0]['seq'], 0)
+        self.assertEqual(set(data[0]), {'id', 'title', 'keywords', 'topics', 'cwd', 'date',
+                                        'seq', 'snippet', 'score'})
+        r = run_search(self.config_path, ['hook', '--only', 'text', '--role', 'user'])
+        self.assertIn('arc-1', r.stdout)
+        self.assertIn('Msg', r.stdout)
+        r = run_search(self.config_path, ['hook', '--only', 'text', '--role', 'user',
+                                          '--format', 'csv'])
+        self.assertEqual(next(csv.reader(io.StringIO(r.stdout))),
+                         ['id', 'title', 'keywords', 'topics', 'cwd', 'date', 'seq', 'snippet', 'score'])
+
+    def test_role_assistant_end_to_end(self):
+        import json
+        r = run_search(self.config_path, ['recursion', '--role', 'assistant', '--format', 'json'])
+        self.assertEqual([(d['id'], d['seq']) for d in json.loads(r.stdout)], [('arc-1', 1)])
+
+    def test_role_does_not_hide_metadata_hits(self):
+        import json
+        r = run_search(self.config_path, ['guard-rails', '--role', 'user', '--format', 'json'])
+        data = json.loads(r.stdout)
+        self.assertEqual(data[0]['id'], 'meta-1')
+        self.assertIsNone(data[0]['seq'])
+
+    def test_role_with_only_metadata_is_an_error(self):
+        r = run_search(self.config_path, ['guard-rails', '--only', 'metadata', '--role', 'user'])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('--role', r.stderr)
+        self.assertIn('--only metadata', r.stderr)
+        self.assertEqual(r.stdout, '')
+
+    def test_bad_role_exits_2(self):
+        r = run_search(self.config_path, ['guard', '--role', 'system'])
+        self.assertEqual(r.returncode, 2)
+
+    def test_or_fallback_keeps_the_role(self):
+        import json
+        # 'guard' is in arc-1's assistant reply and arc-2's user prompt; 'yes' only in arc-2's reply.
+        r = run_search(self.config_path, ['guard', 'yes', '--only', 'text', '--role', 'user',
+                                          '--format', 'json'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual([d['id'] for d in json.loads(r.stdout)], ['arc-2'])
+        self.assertEqual(json.loads(r.stdout)[0]['seq'], 0)
+        self.assertIn(self.NOTICE, r.stderr)
+
     def test_no_fallback_when_all_terms_match(self):
         import json
         r = run_search(self.config_path, ['recursion', 'guard', '--format', 'json'])

@@ -2047,5 +2047,104 @@ class TestRepoKeyKeptOnReingest(unittest.TestCase):
         self.assertEqual(self._stored_key(), '/wt/feature')
 
 
+class TestSearchArchiveRole(unittest.TestCase):
+    """search_archive(role=...) restricts text matching to messages of one role."""
+
+    def _conv(self, cid, cwd='/w/app', repo='/src/app', started='2026-01-01T00:00:00Z'):
+        return {'id': cid, 'folder': '/f', 'cwd': cwd, 'started_at': started,
+                'last_active': started, 'repo_key': repo, 'source_path': None}
+
+    def _archive(self, cid, texts, **conv):
+        self.db.archive_session(self._conv(cid, **conv), [
+            {'role': 'user' if i % 2 == 0 else 'assistant', 'ts': None, 'text': t}
+            for i, t in enumerate(texts)])
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db = Database(os.path.join(self.tmpdir, 't.db'))
+        self.db.create_schema()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _search(self, terms, **kw):
+        return self.db.search_archive(terms, scope='text', **kw)
+
+    def test_user_role_returns_the_user_message(self):
+        self._archive('s1', ['please plan the migration',
+                             'migration migration migration done\n[Bash] run migration.sh'])
+        plain = self._search(['migration'])
+        self.assertEqual(plain[0]['seq'], 1)  # the assistant message wins without a role
+        res = self._search(['migration'], role='user')
+        self.assertEqual((res[0]['seq']), 0)
+        self.assertIn('[migration]', res[0]['snippet'])
+        self.assertNotIn('[Bash]', res[0]['snippet'])
+
+    def test_assistant_role_returns_the_assistant_message(self):
+        self._archive('s1', ['please plan the migration', 'the migration is done'])
+        self.assertEqual(self._search(['migration'], role='assistant')[0]['seq'], 1)
+
+    def test_relevance_ignores_assistant_rows(self):
+        self._archive('a', ['needle alpha', 'needle', 'x', 'needle', 'y', 'needle'],
+                      started='2026-02-01T00:00:00Z')
+        self._archive('b', ['needle alpha', 'filler'], started='2026-02-02T00:00:00Z')
+        self.assertEqual([r['id'] for r in self._search(['needle'])], ['a', 'b'])
+        # With only user rows the conversations tie, so recency decides.
+        self.assertEqual([r['id'] for r in self._search(['needle'], role='user')], ['b', 'a'])
+
+    def test_coverage_ignores_assistant_rows(self):
+        self._archive('c', ['redis only', 'timeout only'], started='2026-03-02T00:00:00Z')
+        self._archive('d', ['redis timeout both', 'x'], started='2026-03-01T00:00:00Z')
+        res = self._search(['redis', 'timeout'], mode='or', role='user')
+        self.assertEqual([r['id'] for r in res], ['d', 'c'])  # d covers 2 terms, c covers 1
+        self.assertEqual(res[1]['seq'], 0)
+
+    def test_and_across_messages_counts_only_the_role(self):
+        self._archive('c', ['redis in my prompt', 'timeout in the answer'])
+        self._archive('d', ['redis here', 'x', 'timeout later'])
+        self.assertEqual([r['id'] for r in self._search(['redis', 'timeout'])], ['d', 'c'])
+        self.assertEqual([r['id'] for r in self._search(['redis', 'timeout'], role='user')], ['d'])
+
+    def test_metadata_hit_is_kept_without_text_hit(self):
+        self._archive('m', ['hello', 'the migration is done'])
+        self.db.upsert_conversation({
+            'id': 'm', 'folder': '/f', 'cwd': '/w/app', 'started_at': '2026-01-01T00:00:00Z',
+            'last_active': None, 'title': 't', 'summary': 's', 'topics': [], 'keywords': ['migration']})
+        self._archive('t', ['plan the migration', 'ok'])
+        res = self.db.search_archive(['migration'], role='user')
+        self.assertEqual([r['id'] for r in res], ['m', 't'])  # metadata still first
+        self.assertIsNone(res[0]['seq'])
+        self.assertEqual(res[0]['snippet'], '')
+        self.assertIsNone(res[0]['score'])
+        self.assertEqual(res[1]['seq'], 0)
+
+    def test_role_none_is_unchanged(self):
+        self._archive('s1', ['please plan the migration', 'the migration is done'])
+        self.assertEqual(self._search(['migration']), self._search(['migration'], role=None))
+
+    def test_invalid_role_raises(self):
+        for bad in ('system', '', 'USER', "user' OR '1'='1"):
+            with self.assertRaises(ValueError, msg=bad):
+                self.db.search_archive(['migration'], role=bad)
+
+    def test_role_with_folder_and_repo(self):
+        self._archive('a', ['migration plan', 'migration'], cwd='/w/app', repo='/src/app')
+        self._archive('b', ['migration plan', 'migration'], cwd='/w/other', repo='/src/other')
+        self._archive('c', ['x', 'migration'], cwd='/w/app', repo='/src/app')
+        res = self._search(['migration'], role='user', folder='/w/app', repo='app')
+        self.assertEqual([r['id'] for r in res], ['a'])
+        self.assertEqual(res[0]['seq'], 0)
+        res = self._search(['migration'], role='assistant', folder='/w/app', repo='/src/app')
+        self.assertEqual(sorted(r['id'] for r in res), ['a', 'c'])
+
+    def test_more_than_max_rank_terms_with_a_role(self):
+        terms = ['t%d' % i for i in range(MAX_RANK_TERMS + 1)]
+        self._archive('all', [' '.join(terms), 'x'])
+        self._archive('asst', ['x', ' '.join(terms)])
+        res = self._search(terms, role='user')
+        self.assertEqual([r['id'] for r in res], ['all'])
+        self.assertEqual(res[0]['seq'], 0)
+
+
 if __name__ == '__main__':
     unittest.main()

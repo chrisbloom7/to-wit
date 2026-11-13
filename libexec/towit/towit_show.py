@@ -3,9 +3,11 @@
 towit_show — Print the archived messages of a conversation.
 
 Usage:
-    python3 towit_show.py <session-id> [--around <msg>] [--context <n>] [--format text|json]
+    python3 towit_show.py <session-id> [--around <msg>] [--context <n>] [--role user|assistant]
+                             [--match <term>]... [--format text|json]
 
 Reads from the archive, so it works after the original transcript is deleted.
+--around windows are counted by message number before --role and --match filter them.
 """
 
 import argparse
@@ -59,12 +61,26 @@ def main():
     parser.add_argument('--context', metavar='N', default=str(DEFAULT_CONTEXT),
                         help=f'Messages either side of --around (default: {DEFAULT_CONTEXT}); '
                              'only applies with --around')
+    parser.add_argument('--role', choices=['user', 'assistant'], metavar='user|assistant',
+                        help='Show only messages of this role (alone, an outline of the session\'s '
+                             'prompts with their Msg numbers). Under `--role user` an [error] row '
+                             '(a failed tool result) can still appear; under `--role assistant` '
+                             '[Bash]-style tool stubs remain, as they sit inside assistant messages')
+    parser.add_argument('--match', metavar='TERM', action='append',
+                        help='Show only messages containing TERM (literal substring, ignoring case '
+                             'and diacritics; not whole-word). Repeat to require every term in the '
+                             'same message')
     parser.add_argument('--format', dest='format', choices=['text', 'json'], default='text',
                         help='Output format (default: text)')
     args = parser.parse_args()
 
     around = _non_negative_int('--around', args.around) if args.around is not None else None
     context = _non_negative_int('--context', args.context)
+
+    for term in args.match or []:
+        if not term.strip():
+            print("Error: --match needs a non-empty term.", file=sys.stderr)
+            sys.exit(1)
 
     db = Database()
     db.validate()
@@ -81,9 +97,12 @@ def main():
         )
         sys.exit(1)
 
-    messages = db.get_messages(args.session_id, around=around, context=context)
+    messages = db.get_messages(args.session_id, around=around, context=context,
+                               role=args.role, match=args.match)
     if not messages:
-        if around is None:
+        if args.role or args.match:
+            print("No messages match the given filters.", file=sys.stderr)
+        elif around is None:
             print(f"Error: session '{args.session_id}' has no archived messages.", file=sys.stderr)
         else:
             print(f"Error: no archived messages within {context} of --around {around}.", file=sys.stderr)

@@ -223,6 +223,17 @@ class TestMessageNumberTerminology(DocTestCase):
             self.assertContains(text, '--around <msg>', f"{name} should use --around <msg>")
             self.assertNotIn('--around <seq>', text, f"{name} still uses --around <seq>")
 
+    def test_role_and_match_are_documented(self):
+        for text, where in ((self._subcommand_help('search'), 'towit search --help'),
+                            (self._subcommand_help('show'), 'towit show --help'),
+                            (_help_output(), 'bin/towit help'), (_read('README.md'), 'README')):
+            self.assertContains(text, '--role', f"{where} does not mention --role")
+        for text, where in ((self._subcommand_help('show'), 'towit show --help'),
+                            (_help_output(), 'bin/towit help'), (_read('README.md'), 'README')):
+            self.assertContains(text, '--match', f"{where} does not mention --match")
+        self.assertContains(_read('README.md'), 'Finding a prompt in a long session',
+                            "README lacks the 'Finding a prompt in a long session' section")
+
     def test_readme_tables_do_not_use_turn_header(self):
         readme = _read('README.md')
         self.assertMatches(readme, r'Keywords\s+Msg\b', "README tables should use the Msg header")
