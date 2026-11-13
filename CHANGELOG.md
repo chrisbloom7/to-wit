@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-13
+
 ### Added
 
 - `towit search --role user|assistant` matches message text only in messages of that role, so `--role user` finds your own prompt instead of an assistant reply or a `[Bash]` stub. Ranking, coverage, the Msg column and the snippet come from those messages; keyword, title, summary and topic matches are unaffected, and combining it with `--only metadata` is an error.
