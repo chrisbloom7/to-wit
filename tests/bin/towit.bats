@@ -883,6 +883,32 @@ print(",".join(r["id"] for r in rows), all("seq" in r and "score" in r for r in 
   [ ! -e "${TEST_TMPDIR}/claude_called" ] || { echo "claude was invoked"; return 1; }
 }
 
+@test "towit: search stems English words in message text" {
+  printf '#!/usr/bin/env bash\ntouch "%s/claude_called"\nexit 1\n' "${TEST_TMPDIR}" > "${TEST_TMPDIR}/mock_bin/claude"
+  chmod +x "${TEST_TMPDIR}/mock_bin/claude"
+  ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
+  export HOME="${TEST_TMPDIR}/home"
+  mkdir -p "${HOME}"
+  printf '[indexing]\nenabled = false\n' >> "${TOWIT_CONFIG_PATH}"
+  "${TOWIT}" setup
+
+  local sessions="${TEST_TMPDIR}/sessions"
+  mkdir -p "${sessions}"
+  cat > "${sessions}/session-stem-0001.jsonl" <<'JSONL'
+{"type":"user","timestamp":"2026-01-15T10:00:00Z","cwd":"/work/proj","sessionId":"session-stem-0001","message":{"role":"user","content":"We removed the flaky cache layer."}}
+{"type":"assistant","timestamp":"2026-01-15T10:00:05Z","cwd":"/work/proj","sessionId":"session-stem-0001","message":{"role":"assistant","content":[{"type":"text","text":"Good, fewer moving parts."}]}}
+{"type":"user","timestamp":"2026-01-15T10:01:00Z","cwd":"/work/proj","sessionId":"session-stem-0001","message":{"role":"user","content":"Thanks, that settles it."}}
+{"type":"assistant","timestamp":"2026-01-15T10:01:05Z","cwd":"/work/proj","sessionId":"session-stem-0001","message":{"role":"assistant","content":[{"type":"text","text":"Glad to help."}]}}
+JSONL
+
+  run "${TOWIT}" backfill --folder "${sessions}"
+  [ "${status}" -eq 0 ]
+
+  run "${TOWIT}" search remove --only text
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"session-stem-0001"* ]] || { echo "Expected 'remove' to find 'removed', got: ${output}"; return 1; }
+}
+
 @test "towit: setup migrates a v0.8.2 database and keeps rows searchable by metadata" {
   ln -sf "$(python3 -c 'import sys; print(sys.executable)')" "${TEST_TMPDIR}/mock_bin/python3"
   export HOME="${TEST_TMPDIR}/home"

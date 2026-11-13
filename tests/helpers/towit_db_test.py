@@ -1573,6 +1573,8 @@ SNIPPET_PIN_EXPECTED = {
     ],
     'include_title': [
         ('p2', None, '', None, 'Plain notes', 'a zebra mention in summary', 'notes', 'notes', '/w/alpha', '2026-03-02T00:00:00Z'),
+        # Porter stems 'plains' to 'plain', so p1's text now matches too (it did not before).
+        ('p1', 3, '…about savanna ecology and the migration of many other animals across [plains]', -1.561419, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
     ],
     'limit_2': [
         ('p1', 1, '[zebra] [zebra] [zebra] [zebra] herds roam', -2.749383, 'Zebra migration', 'about herds', 'animals,africa', 'zebra,stripes', '/w/alpha', '2026-03-01T00:00:00Z'),
@@ -2156,6 +2158,165 @@ class TestSearchArchiveRole(unittest.TestCase):
         res = self._search(terms, role='user')
         self.assertEqual([r['id'] for r in res], ['all'])
         self.assertEqual(res[0]['seq'], 0)
+
+
+class TestPorterStemming(unittest.TestCase):
+    """The FTS index stems English words (Porter) but keeps identifiers whole."""
+
+    def _conv(self, cid, started='2026-01-01T00:00:00Z'):
+        return {'id': cid, 'folder': '/f', 'cwd': '/w/app', 'started_at': started,
+                'last_active': started, 'repo_key': '/src/app', 'source_path': None}
+
+    def _archive(self, cid, texts):
+        self.db.archive_session(self._conv(cid), [
+            {'role': 'user' if i % 2 == 0 else 'assistant', 'ts': None, 'text': t}
+            for i, t in enumerate(texts)])
+
+    def _ids(self, term):
+        return [r['id'] for r in self.db.search_archive([term], scope='text')]
+
+    def _q(self, sql):
+        conn = sqlite3.connect(self.db_path)
+        try:
+            return conn.execute(sql).fetchall()
+        finally:
+            conn.close()
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 't.db')
+        self.db = Database(self.db_path)
+        self.db.create_schema()
+
+    def test_porter_stems_cross_match(self):
+        self._archive('plural', ['we run the tests', 'ok'])
+        self._archive('singular', ['one test only', 'ok'])
+        self.assertEqual(sorted(self._ids('test')), ['plural', 'singular'])
+        self.assertEqual(sorted(self._ids('tests')), ['plural', 'singular'])
+        for i, word in enumerate(('remove', 'removed', 'removing')):
+            self._archive('r%d' % i, ['please %s it' % word, 'ok'])
+        for query in ('remove', 'removed', 'removing'):
+            self.assertEqual(sorted(self._ids(query)), ['r0', 'r1', 'r2'], query)
+        res = self.db.search_archive(['remove'], scope='text')
+        by_id = {r['id']: r['snippet'] for r in res}
+        self.assertIn('[removed]', by_id['r1'])
+        self.assertIn('[removing]', by_id['r2'])
+
+    def test_identifiers_stay_single_tokens(self):
+        self._archive('ident', ['edit towit_db.py and my-var and snake_case', 'ok'])
+        self._archive('plain', ['towit is a tool', 'ok'])
+        for term in ('towit_db.py', 'my-var', 'snake_case'):
+            self.assertEqual(self._ids(term), ['ident'], term)
+        self.assertEqual(self._ids('towit'), ['plain'])  # no split into parts
+
+    def test_fresh_db_uses_porter_tokenizer(self):
+        sql = self._q("SELECT sql FROM sqlite_master WHERE name = 'messages_fts'")[0][0]
+        self.assertIn('porter', sql)
+        self.assertEqual(self._q("PRAGMA user_version"), [(2,)])
+        self.assertEqual(SCHEMA_VERSION, 2)
+
+    def _build_v1(self):
+        """A v1 database: archive tables with the old tokenizer, stamped 1, populated."""
+        path = os.path.join(self.tmpdir, 'v1.db')
+        old_ddl = towit_db.ARCHIVE_DDL.replace("porter unicode61", "unicode61")
+        self.assertNotEqual(old_ddl, towit_db.ARCHIVE_DDL)
+        with unittest.mock.patch.object(towit_db, 'ARCHIVE_DDL', old_ddl):
+            Database(path).create_schema()
+        conn = sqlite3.connect(path)
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+        self.assertNotIn('porter', conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name='messages_fts'").fetchone()[0])
+        conn.execute("INSERT INTO conversations (id, folder, cwd, started_at, last_active, "
+                     "archived, archived_message_count) VALUES ('v1', '/f', '/w', "
+                     "'2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 1, 2)")
+        conn.execute("INSERT INTO messages (conversation_id, seq, role, text) "
+                     "VALUES ('v1', 0, 'user', 'we removed the tests; see towit_db.py')")
+        conn.execute("INSERT INTO messages (conversation_id, seq, role, text) "
+                     "VALUES ('v1', 1, 'assistant', 'done')")
+        conn.commit()
+        conn.close()
+        return Database(path), path
+
+    def _raw_match(self, path, term):
+        conn = sqlite3.connect(path)  # no validate(), so no migration
+        try:
+            return conn.execute("SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?",
+                                ('"%s"' % term,)).fetchall()
+        finally:
+            conn.close()
+
+    def _v1_rows(self, path):
+        conn = sqlite3.connect(path)
+        try:
+            return conn.execute("SELECT * FROM messages ORDER BY id").fetchall()
+        finally:
+            conn.close()
+
+    def test_migration_v1_rebuilds_fts_index(self):
+        db, path = self._build_v1()
+        before = self._v1_rows(path)
+        self.assertEqual(db.schema_version(), 1)
+        self.assertEqual(self._raw_match(path, 'remove'), [])  # old index: no stemming
+        db.validate()
+        res = Database(path).search_archive(['remove'], scope='text')
+        self.assertEqual([r['id'] for r in res], ['v1'])
+        self.assertIn('[removed]', res[0]['snippet'])
+        self.assertEqual(Database(path).search_archive(['test'], scope='text')[0]['id'], 'v1')
+        self.assertEqual(Database(path).search_archive(['towit_db.py'], scope='text')[0]['id'], 'v1')
+        self.assertEqual(db.schema_version(), 2)
+        self.assertEqual(self._v1_rows(path), before)
+        conn = sqlite3.connect(path)
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')")
+        names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
+        self.assertTrue({'messages_ai', 'messages_ad', 'messages_au'} <= names)
+        schema = conn.execute("SELECT type, name, sql FROM sqlite_master ORDER BY name").fetchall()
+        conn.close()
+        db.run_migrations()  # a second run changes nothing
+        conn = sqlite3.connect(path)
+        self.assertEqual(conn.execute(
+            "SELECT type, name, sql FROM sqlite_master ORDER BY name").fetchall(), schema)
+        conn.close()
+        self.assertEqual(self._v1_rows(path), before)
+
+    def test_migration_rollback_leaves_v1_intact(self):
+        db, path = self._build_v1()
+        schema = lambda: sqlite3.connect(path).execute(  # noqa: E731
+            "SELECT type, name, sql FROM sqlite_master ORDER BY name").fetchall()
+        before = schema()
+        with unittest.mock.patch.object(
+                towit_db, '_rebuild_fts_index', side_effect=sqlite3.OperationalError('boom')):
+            with self.assertRaises(sqlite3.OperationalError):
+                db.validate()
+        self.assertEqual(db.schema_version(), 1)
+        self.assertEqual(schema(), before)
+        self.assertEqual(self._raw_match(path, 'remove'), [])
+        self.assertNotIn('porter', ''.join(r[2] or '' for r in schema() if r[1] == 'messages_fts'))
+        # next first use retries and succeeds
+        retry = Database(path)
+        self.assertEqual([r['id'] for r in retry.search_archive(['remove'], scope='text')], ['v1'])
+        self.assertEqual(retry.schema_version(), 2)
+
+    def test_older_stamp_never_downgraded(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA user_version = 3")
+        conn.close()
+        self.db.run_migrations()
+        self.assertEqual(self.db.schema_version(), 3)
+        self.assertIn('porter', self._q(
+            "SELECT sql FROM sqlite_master WHERE name = 'messages_fts'")[0][0])
+
+    def test_forget_still_clears_index_after_migration(self):
+        db, path = self._build_v1()
+        db.validate()
+        self.assertEqual(Database(path).forget_conversations(['v1']), 1)
+        conn = sqlite3.connect(path)
+        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('integrity-check')")
+        self.assertEqual(conn.execute(
+            "SELECT count(*) FROM messages_fts WHERE messages_fts MATCH '\"remove\"'").fetchone()[0], 0)
+        conn.close()
+        self.assertEqual(Database(path).search_archive(['remove'], scope='text'), [])
 
 
 if __name__ == '__main__':

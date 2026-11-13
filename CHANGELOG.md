@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `towit search --role user|assistant` matches message text only in messages of that role, so `--role user` finds your own prompt instead of an assistant reply or a `[Bash]` stub. Ranking, coverage, the Msg column and the snippet come from those messages; keyword, title, summary and topic matches are unaffected, and combining it with `--only metadata` is an error.
 - `towit show --role user|assistant` prints only messages of that role (on its own, an outline of your prompts with their Msg numbers).
 - `towit show --match TERM` prints only messages containing the term (literal, case- and diacritic-insensitive substring); repeat it to require every term in the same message. `--around` windows are counted by message number before `--role` and `--match` filter them, and an empty result prints `No messages match the given filters.` and exits 1.
-- There is no database change and no migration. The JSON and CSV output of `search` is unchanged, and `show --format json` keeps the original message numbers.
+- The JSON and CSV output of `search` is unchanged, and `show --format json` keeps the original message numbers.
 
 ### Fixed
 
@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `towit search` now stems English words in message text (Porter), so "test" finds "tests" and "remove" finds "removed". Identifiers such as `towit_db.py` and `my-var` are still single tokens. The first command after upgrading rebuilds the search index automatically (a second or so for typical archives, longer for very large ones); no action is needed. Keyword, topic, title, and summary matching is unchanged, and `show --match` remains a literal substring filter. Stemming can over-match and is English only. An older towit keeps working on a migrated database.
 - The `Turn` column of `towit search` table output is now `Msg`, because it holds the 0-based message number (a turn is a user and assistant exchange; this counts single messages). Anything that parses the table output should look for `Msg`. The `seq` keys in `--format json` and `--format csv` and in `towit show --format json` are unchanged.
 - The help text and README now say that the Msg number is what `towit show --around` takes (`--around <msg>`, previously `<seq>`).
 

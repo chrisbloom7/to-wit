@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
   text, content='messages', content_rowid='id',
-  tokenize="unicode61 tokenchars '_-.'"
+  tokenize="porter unicode61 tokenchars '_-.'"
 );
 
 CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS meta (
 """
 
 # Bump whenever run_migrations gains steps; stored in PRAGMA user_version.
-SCHEMA_VERSION = 1
+# 2: messages_fts uses the Porter stemmer (the v2 step rebuilds a v1 index).
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -266,6 +267,19 @@ def _add_column(conn, column_def: str) -> None:
             raise
 
 
+def _rebuild_fts_index(conn) -> None:
+    """
+    Recreate messages_fts (and its sync triggers) from ARCHIVE_DDL, then repopulate it
+    from messages. Runs inside the caller's transaction. The triggers go first because
+    they reference the table; ARCHIVE_DDL recreates both with the current tokenizer.
+    """
+    for trigger in ("messages_ai", "messages_ad", "messages_au"):
+        conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+    conn.execute("DROP TABLE messages_fts")
+    _execute_script(conn, ARCHIVE_DDL)
+    conn.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+
+
 def _execute_script(conn, script: str) -> None:
     """
     Run a multi-statement script inside the caller's open transaction.
@@ -388,6 +402,12 @@ class Database:
                 "CREATE INDEX IF NOT EXISTS idx_conversations_repo_key ON conversations(repo_key);"
                 + ARCHIVE_DDL
             )
+            # CREATE ... IF NOT EXISTS never changes an existing index, so a pre-Porter
+            # (v1) index is detected by its definition and rebuilt in this transaction.
+            fts = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name = 'messages_fts'").fetchone()
+            if fts and "porter" not in (fts[0] or ""):
+                _rebuild_fts_index(conn)
             if not conn.in_transaction:
                 # SQLite can roll back by itself on SQLITE_FULL/IOERR; never stamp that.
                 raise RuntimeError("schema migration transaction was lost; not stamping version")

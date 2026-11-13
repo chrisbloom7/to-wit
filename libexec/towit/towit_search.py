@@ -172,7 +172,8 @@ def _print_json(rows, show_text=False):
 def main():
     parser = argparse.ArgumentParser(
         description='Search cataloged Claude conversations.',
-        epilog='The Msg column of the results is the message number; pass it to '
+        epilog='Terms match message text as English-stemmed words ("test" also finds '
+               '"tests"). The Msg column of the results is the message number; pass it to '
                '`towit show --around` to read the surrounding messages.'
     )
     parser.add_argument('terms', nargs='+', metavar='TERM',

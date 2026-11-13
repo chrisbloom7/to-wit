@@ -68,7 +68,7 @@ def main():
                              '[Bash]-style tool stubs remain, as they sit inside assistant messages')
     parser.add_argument('--match', metavar='TERM', action='append',
                         help='Show only messages containing TERM (literal substring, ignoring case '
-                             'and diacritics; not whole-word). Repeat to require every term in the '
+                             'and diacritics; not whole-word; search stems words, this does not). Repeat to require every term in the '
                              'same message')
     parser.add_argument('--format', dest='format', choices=['text', 'json'], default='text',
                         help='Output format (default: text)')
