@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `towit show`, `search`, `list`, `export`, `stats`, `doctor` and `prune` no longer print a `BrokenPipeError` traceback when piped to a command that exits early, such as `head`; they exit quietly with status 141.
+- `towit export --topic <name>` (without `--summarize`) no longer fails with `no folder recorded for session ...`; it now prints the transcripts of every conversation under the topic.
 
 ### Changed
 

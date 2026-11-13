@@ -347,6 +347,18 @@ class TestDatabaseList(unittest.TestCase):
         self.assertIn(SAMPLE_CONV['id'], ids)
         self.assertNotIn(SAMPLE_CONV_B['id'], ids)
 
+    def test_list_conversations_includes_folder(self):
+        expected = {SAMPLE_CONV['id']: SAMPLE_CONV['folder'], SAMPLE_CONV_B['id']: SAMPLE_CONV_B['folder']}
+        self.assertEqual({r['id']: r['folder'] for r in self.db.list_conversations()}, expected)
+        filtered = self.db.list_conversations(topic='SQLite')
+        self.assertEqual({r['id']: r['folder'] for r in filtered},
+                         {SAMPLE_CONV['id']: SAMPLE_CONV['folder']})
+
+    def test_get_conversation_folder_matches_list_conversations(self):
+        listed = {r['id']: r['folder'] for r in self.db.list_conversations()}
+        for conv_id, folder in listed.items():
+            self.assertEqual(self.db.get_conversation(conv_id)['folder'], folder)
+
     def test_list_conversations_with_folder_filter(self):
         results = self.db.list_conversations(folder='/Users/alice/src/myapp')
         ids = self._ids(results)
