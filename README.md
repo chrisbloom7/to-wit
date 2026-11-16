@@ -2,7 +2,7 @@
 
 > _to wit: to make clearer or more particular something that you have already said_
 
-Claude Code deletes old conversation transcripts. To Wit keeps a private, searchable copy on your machine, so you can still answer "where did I decide that three weeks ago?" You get full-text search of every substantive session, plus LLM-generated metadata (title, summary, keywords, and topics) for each, kept current by [Claude Code](https://www.anthropic.com/claude-code) hooks.
+To Wit keeps a private, searchable archive of your sessions on your machine, so you can answer "where did I decide that three weeks ago?" even when it was in another worktree, and even after Claude Code has deleted the transcript. You get full-text search of every substantive session, plus LLM-generated metadata (title, summary, keywords, and topics) for each, kept current by [Claude Code](https://www.anthropic.com/claude-code) hooks.
 
 **Terms.** A *session* is one Claude Code conversation. The *archive* is the stored message text of your sessions. *Metadata* is the LLM-generated title, summary, keywords, and topics.
 
@@ -28,8 +28,9 @@ Claude Code deletes old conversation transcripts. To Wit keeps a private, search
 
 ## Why
 
-To Wit keeps what was said and makes it searchable:
+I was constantly losing track of which conversations happened in which project, and which insight happened in which conversation. To Wit keeps what was said and makes it searchable:
 
+- **It finds the conversation wherever it happened.** One archive covers every project; `--repo` narrows a search to one repository and all of its worktrees (see [Searching and reading the archive](#searching-and-reading-the-archive)).
 - **It outlives Claude Code's retention.** The archive is yours; `claude purge` and the retention sweep do not touch it (see [Retention and removing data](#retention-and-removing-data)).
 - **It stays local and private.** No service and no account; see [Privacy and cost](#privacy-and-cost).
 - **It keeps itself current.** Hooks archive each session as it ends, so there is nothing to remember to run.
