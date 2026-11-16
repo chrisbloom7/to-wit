@@ -2,7 +2,7 @@
 
 > _to wit: to make clearer or more particular something that you have already said_
 
-I love using Claude Code, but I was constantly losing track of which conversations happened in which project, and which insight happened in which conversation. To Wit keeps a private, searchable archive of your sessions on your machine, so you can answer "where did I decide that three weeks ago?" even when it was in another worktree, and even after Claude Code has deleted the transcript. You get full-text search of every substantive session, plus LLM-generated metadata (title, summary, keywords, and topics) for each, kept current by [Claude Code](https://www.anthropic.com/claude-code) hooks.
+I was constantly losing track of which conversations happened in which project, and which insight happened in which conversation. To Wit keeps a private, searchable archive of your sessions on your machine, so you can answer "where did I decide that three weeks ago?" even when it was in another worktree, and even after Claude Code has deleted the transcript. You get full-text search of every substantive session, plus LLM-generated metadata (title, summary, keywords, and topics) for each, kept current by [Claude Code](https://www.anthropic.com/claude-code) hooks.
 
 **Terms.** A *session* is one Claude Code conversation. The *archive* is the stored message text of your sessions. *Metadata* is the LLM-generated title, summary, keywords, and topics.
 
