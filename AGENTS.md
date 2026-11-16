@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents when working with code in this r
 
 ## What This Project Is
 
-**To Wit** (`towit`) is a CLI tool that maintains a full-text SQLite archive of Claude Code conversations (message text, searchable with FTS5, that outlives Claude Code's own transcript retention) plus LLM-generated metadata (title, summary, keywords, topics). It archives sessions automatically through three Claude Code hooks (Stop, SessionEnd, SessionStart), and provides search, show, list, export, forget, prune, and stats subcommands.
+**To Wit** (`towit`) is a CLI tool that maintains a full-text SQLite archive of Claude Code conversations (message text, searchable with FTS5, that outlives Claude Code's own transcript retention) plus LLM-generated metadata (title, summary, keywords, topics). It archives sessions automatically through three Claude Code hooks (Stop, SessionEnd, SessionStart), and provides subcommands to search, list, show, resume, open, export, forget, prune, backfill and report on it (`stats`, `doctor`) and to manage the install (`setup`, `install-hook`, `uninstall-hook`, `teardown`, `implode`). `bin/towit help` is the canonical list.
 
 - **Entry point:** `bin/towit` (bash dispatcher; symlinked to `~/.local/bin/towit`)
 - **Version:** `libexec/towit/VERSION` (one line, no `v` prefix; `towit version` and `towit doctor` print it; the release skill writes it, and `docs_consistency_test.py` requires it to equal the newest `CHANGELOG.md` release)
@@ -27,9 +27,12 @@ This file provides guidance to AI coding agents when working with code in this r
 
 # Install test dependency (once)
 brew install bats-core
+
+# Lint like the CI ShellCheck job (every tracked shell script)
+shellcheck --shell=bash --severity=warning bin/towit install uninstall run-tests completions/towit.bash tests/test_helper.bash .claude/hooks/docs-drift.sh
 ```
 
-Requires python3 (3.11+, standard library only, built with SQLite FTS5), bats-core and jq (jq and `rg` are used by `.claude/hooks/docs-drift.sh`, not by the CLI or `./run-tests`). No build step required — it's a bash/Python CLI tool.
+Requires python3 (3.11+, standard library only, built with SQLite FTS5), bats-core and jq (jq and `rg` are used by `.claude/hooks/docs-drift.sh`, not by the CLI or `./run-tests`). No build step required — it's a bash/Python CLI tool. CI (`.github/workflows/ci.yml`) runs the tests on macOS and Linux with Python 3.11 and 3.x, an install smoke test and the ShellCheck job; `ci-gate` is the single required check. `run-tests` still has Ruby spec handling, but the repo has no Ruby files, so ignore it.
 
 ## Architecture
 
@@ -38,7 +41,7 @@ Requires python3 (3.11+, standard library only, built with SQLite FTS5), bats-co
 
 ### Python Modules (libexec/towit/)
 
-Subcommand modules map 1:1 to `bin/towit` cases (`towit_search.py`, `towit_show.py`, `towit_forget.py`, `towit_prune.py`, `towit_stats.py`, `towit_doctor.py`, ...). The modules below are not subcommands:
+Subcommand modules map 1:1 to `bin/towit` cases (`towit_search.py`, `towit_show.py`, `towit_resume.py`, `towit_forget.py`, `towit_prune.py`, `towit_stats.py`, `towit_doctor.py`, `towit_teardown.py`, `towit_uninstall_hook.py`, ...). The modules below are not subcommands:
 
 - `towit_config.py` — Loads `~/.towit/config.toml` (typed accessors, warnings for unknown keys), `safe_subprocess_env()`, session-id and transcript-path validation, the rotating error logger
 - `towit_db.py` — Database abstraction layer; all SQL lives here (schema, migrations, search, forget, archive writes). Search ranking, `_repo_filter` (`--repo`), the optional `role` filter and `get_messages` are documented in the module and function docstrings; read them before changing a query (`_repo_filter` deliberately avoids `LIKE`, so wildcards in `--repo` stay literal). `towit_forget` prints `repo_keys_for_scope` before the prompt (also with `--yes`)
@@ -92,7 +95,8 @@ The archive is append-only: each ingest compares the stored tail hash to the tra
 
 - `tests/test_helper.bash` — Shared BATS setup/teardown (temp dirs, mocks, fixtures). `_setup_common` puts a stub `claude` on PATH that reports no plugins and accepts everything, so no test can query or remove the developer's real plugins; a test that needs another behavior writes its own `mock_bin/claude`, and one that needs `claude` absent must delete it. `setup` points `TOWIT_SETTINGS_PATH` at a temp file so no test can edit the real `~/.claude/settings.json`; pass your own value only when a test needs a specific settings file
 - `tests/bin/towit.bats` — CLI integration tests
-- `tests/bin/uninstall.bats` — Install/uninstall tests
+- `tests/bin/install.bats` — `install` script tests
+- `tests/bin/uninstall.bats` — `uninstall` script tests
 - `tests/helpers/towit_*_test.py` — Python unit tests per module (`towit_ingest_test.py`, `towit_redact_test.py`, `towit_show_test.py`, `towit_forget_test.py`, `towit_config_test.py`, ... alongside the original per-subcommand files). A test that can reach `get_error_logger()` must not write to the real `~/.towit/errors.log`: `towit_ingest_test.py` redirects `towit_config.CONFIG_PATH` and resets the `towit.hook` logger in `setUpModule` (the logger caches its handler per process)
 - `tests/helpers/towit_completion_test.py` — Checks that the Bash and Zsh completion scripts list every subcommand, flag and fixed value in the CLI (read from the dispatcher and the argparse code). When it fails after you add or rename a flag, update `completions/towit.bash` and `completions/_towit`
 - `tests/helpers/docs_consistency_test.py` — Checks that README, AGENTS.md, SECURITY.md, the help text, and the config template agree with the code (subcommands, flags, config keys, hook events, tables, env vars, the subprocess allowlist). When it fails after you add a flag, config key, table, or env var, update the docs it names. Run with `TOWIT_RELEASE_CHECK=1` to also require `CHANGELOG.md` `[Unreleased]` content (a release gate)
