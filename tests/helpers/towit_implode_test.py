@@ -28,6 +28,38 @@ def write_config(tmpdir, db_path):
     return config_path
 
 
+CLAUDE_STUB = """#!/usr/bin/env bash
+# Stand-in for `claude plugin ...`; state lives in $STUB_DIR so tests never reach the real CLI.
+echo "$*" >> "$STUB_DIR/claude_calls"
+case "$*" in
+  "plugin marketplace list --json")
+    if [ -f "$STUB_DIR/installed" ]; then
+      echo '[{"name":"to-wit","source":"github","repo":"chrisbloom7/to-wit","ref":"v0.12.0"}]'
+    else echo '[]'; fi ;;
+  "plugin list --json")
+    if [ -f "$STUB_DIR/installed" ]; then echo '[{"id":"towit@to-wit"}]'; else echo '[]'; fi ;;
+  "plugin uninstall"*|"plugin marketplace remove"*)
+    if [ -f "$STUB_DIR/fail_remove" ]; then
+      echo '{"outcome":"failed","message":"boom"}'; exit 1
+    fi
+    rm -f "$STUB_DIR/installed"; echo '{"outcome":"ok"}' ;;
+  *) echo '{"outcome":"ok"}' ;;
+esac
+"""
+
+
+def claude_stub_env(home):
+    """Env that puts the claude stub first on PATH; `home` holds its state and call log."""
+    stub_dir = os.path.join(home, 'stub_bin')
+    os.makedirs(stub_dir, exist_ok=True)
+    stub = os.path.join(stub_dir, 'claude')
+    if not os.path.exists(stub):
+        with open(stub, 'w') as fh:
+            fh.write(CLAUDE_STUB)
+        os.chmod(stub, 0o755)
+    return {'PATH': f"{stub_dir}{os.pathsep}{os.environ['PATH']}", 'STUB_DIR': home}
+
+
 def run_setup(db_path, config_path, home):
     env = {**os.environ, 'TOWIT_CONFIG_PATH': config_path, 'HOME': home}
     return subprocess.run(['python3', SETUP_SCRIPT], env=env, capture_output=True, text=True)
@@ -41,7 +73,7 @@ def run_install_hook(home, settings_path=None):
 
 
 def run_implode(db_path, config_path, home, settings_path=None, args=None, stdin_input=None):
-    env = {**os.environ, 'TOWIT_CONFIG_PATH': config_path, 'HOME': home}
+    env = {**os.environ, 'TOWIT_CONFIG_PATH': config_path, 'HOME': home, **claude_stub_env(home)}
     if settings_path:
         env['TOWIT_SETTINGS_PATH'] = settings_path
     return subprocess.run(
@@ -76,6 +108,76 @@ def dir_contains(directory, needle):
                 if needle in fh.read().lower():
                     return True
     return False
+
+
+class TestImplodeSkillPlugin(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        self.install_dir = os.path.join(self.tmpdir, 'bin')
+        os.makedirs(self.install_dir)
+        self.settings_path = os.path.join(self.tmpdir, SETTINGS_REL_PATH)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _install_plugin(self):
+        open(os.path.join(self.tmpdir, 'installed'), 'w').close()
+
+    def _plugin_installed(self):
+        return os.path.exists(os.path.join(self.tmpdir, 'installed'))
+
+    def _calls(self):
+        path = os.path.join(self.tmpdir, 'claude_calls')
+        return open(path).read() if os.path.exists(path) else ''
+
+    def _implode(self, args=('--yes',), stdin_input=None):
+        return run_implode(self.db_path, self.config_path, self.tmpdir,
+                           settings_path=self.settings_path,
+                           args=[*args, '--install-dir', self.install_dir],
+                           stdin_input=stdin_input)
+
+    def test_yes_removes_the_plugin_and_its_marketplace(self):
+        run_setup(self.db_path, self.config_path, self.tmpdir)
+        self._install_plugin()
+        result = self._implode()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self._plugin_installed())
+        self.assertIn('plugin uninstall towit@to-wit', self._calls())
+        self.assertIn('plugin marketplace remove to-wit', self._calls())
+        self.assertIn('Claude Code skill', result.stdout)
+
+    def test_the_plugin_alone_is_something_to_remove(self):
+        self._install_plugin()
+        result = self._implode()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('Nothing to remove', result.stdout)
+        self.assertFalse(self._plugin_installed())
+
+    def test_declining_the_prompt_keeps_the_plugin(self):
+        run_setup(self.db_path, self.config_path, self.tmpdir)
+        self._install_plugin()
+        result = self._implode(args=(), stdin_input='n\n')
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue(self._plugin_installed())
+        self.assertNotIn('plugin uninstall', self._calls())
+
+    def test_no_plugin_means_no_removal_calls_and_nothing_to_remove(self):
+        result = self._implode()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Nothing to remove', result.stdout)
+        self.assertNotIn('uninstall', self._calls())
+
+    def test_a_failing_plugin_removal_warns_but_the_rest_is_removed(self):
+        run_setup(self.db_path, self.config_path, self.tmpdir)
+        self._install_plugin()
+        open(os.path.join(self.tmpdir, 'fail_remove'), 'w').close()
+        result = self._implode()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(os.path.exists(self.db_path), "the database must still be deleted")
+        self.assertIn('boom', result.stdout + result.stderr)
+        self.assertIn('claude plugin uninstall towit@to-wit', result.stdout + result.stderr)
 
 
 class TestTowitImplode(unittest.TestCase):

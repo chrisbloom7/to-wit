@@ -180,6 +180,22 @@ class TestStatus(SkillTestCase):
         self.assertEqual(self.run_with(fake, towit_skill.status, '0.12.0')[0], 'stale')
 
 
+class TestPresent(SkillTestCase):
+    def test_false_without_claude(self):
+        self.assertFalse(self.run_with(FakeClaude(), towit_skill.present, which=None))
+
+    def test_false_when_nothing_is_installed(self):
+        self.assertFalse(self.run_with(FakeClaude(), towit_skill.present))
+
+    def test_true_when_the_plugin_is_installed(self):
+        fake = FakeClaude(marketplaces=[pinned('v0.12.0')], plugins=['towit@to-wit'])
+        self.assertTrue(self.run_with(fake, towit_skill.present))
+
+    def test_true_for_a_marketplace_left_without_its_plugin(self):
+        fake = FakeClaude(marketplaces=[pinned('v0.12.0')])
+        self.assertTrue(self.run_with(fake, towit_skill.present))
+
+
 class TestMain(SkillTestCase):
     """The `install` / `uninstall` entry points that bin/towit and implode call."""
 

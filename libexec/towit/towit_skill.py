@@ -134,6 +134,13 @@ def uninstall():
     return removed
 
 
+def present():
+    """True when claude is available and the plugin or its marketplace is installed."""
+    if shutil.which('claude') is None:
+        return False
+    return _plugin_installed() or _marketplace_entry() is not None
+
+
 def status(version):
     """(state, detail): 'unavailable', 'missing', 'stale' or 'ok'.
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-towit_implode — remove the To Wit hook, database, and binary symlink.
+towit_implode — remove the To Wit hook, Claude Code skill plugin, database, and binary symlink.
 
 Performs a full uninstall: removes the To Wit hooks from ~/.claude/settings.json,
-deletes the database, and removes the towit binary symlink. After completing,
+uninstalls the Claude Code skill plugin if present, deletes the database, and removes
+the towit binary symlink. After completing,
 prints the data directory path so the user can verify or manually remove any
 remaining files.
 """
@@ -16,6 +17,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
 from towit_config import config, database_sidecar_paths, remove_database_files
+import towit_skill
 
 DEFAULT_INSTALL_DIR = os.path.expanduser('~/.local/bin')
 
@@ -42,12 +44,14 @@ def main():
     homebrew = is_homebrew_install(os.path.abspath(__file__))
     binary = os.path.join(args.install_dir, 'towit')
     hook_installed = _check_hook_installed()
+    skill_installed = _check_skill_installed()
     db_exists = os.path.exists(db_path)
     sidecars = database_sidecar_paths(db_path)
     binary_is_symlink = not homebrew and os.path.islink(binary)
     binary_exists = not homebrew and os.path.exists(binary)
 
-    if not hook_installed and not db_exists and not sidecars and not binary_is_symlink:
+    if not hook_installed and not skill_installed and not db_exists and not sidecars \
+            and not binary_is_symlink:
         if homebrew:
             print("Nothing to remove — hook is not installed and database does not exist.")
         elif binary_exists:
@@ -64,6 +68,8 @@ def main():
     print("The following will be removed:")
     if hook_installed:
         print("  • To Wit hooks from ~/.claude/settings.json")
+    if skill_installed:
+        print(f"  • Claude Code skill plugin ({towit_skill.PLUGIN_ID})")
     if db_exists:
         print(f"  • Database at {db_path}")
     for sidecar in sidecars:
@@ -83,6 +89,9 @@ def main():
 
     if hook_installed:
         _remove_hook()
+
+    if skill_installed:
+        _remove_skill()
 
     if db_exists or sidecars:
         remove_database_files(db_path)
@@ -117,6 +126,24 @@ def _print_data_dir(data_dir):
             print("  (empty)")
     else:
         print("  (does not exist)")
+
+
+def _check_skill_installed():
+    """True if the skill plugin is installed; a claude that cannot be asked counts as no."""
+    try:
+        return towit_skill.present()
+    except towit_skill.SkillError:
+        return False
+
+
+def _remove_skill():
+    """Uninstall the plugin; on failure warn and carry on, so the rest of the uninstall runs."""
+    try:
+        towit_skill.uninstall()
+        print("Claude Code skill removed.")
+    except towit_skill.SkillError as exc:
+        print(f"Warning: could not remove the Claude Code skill: {exc}")
+        print(f"         Remove it manually with: claude plugin uninstall {towit_skill.PLUGIN_ID}")
 
 
 def _check_hook_installed():

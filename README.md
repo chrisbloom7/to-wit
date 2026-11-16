@@ -142,7 +142,7 @@ Subcommands:
   install-hook                  Add the To Wit hooks (Stop, SessionEnd, SessionStart) to Claude Code settings
   uninstall-hook                Remove the To Wit hooks from Claude Code settings
   teardown [--yes]              Remove hooks and delete database (including the archive)
-  implode [--yes]               Full uninstall: remove hooks, database (including the archive), and binary symlink
+  implode [--yes]               Full uninstall: remove hooks, skill plugin, database (including the archive), and binary symlink
     [--install-dir <dir>]         Directory where towit was installed (default: ~/.local/bin)
   stats                         Show catalog statistics
   doctor                        Verify setup: config, database (FTS5, archive schema), and hooks
