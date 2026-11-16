@@ -34,7 +34,7 @@ def _shrink(widths, floors, overflow):
     return [w - r for w, r in zip(widths, base)]
 
 
-def fit_widths(widths, floors, target, sep_width, indent_width, droppable=None):
+def fit_widths(widths, floors, target, sep_width, indent_width, droppable=None, *, omit_droppable=False):
     """Fit column widths into `target` characters.
 
     widths: natural width of each column. floors: per column, the minimum width it may shrink to,
@@ -42,6 +42,7 @@ def fit_widths(widths, floors, target, sep_width, indent_width, droppable=None):
     already below its floor never grows. target: maximum line width. sep_width: gap between
     columns. indent_width: fixed left indent. droppable: index of a column to remove entirely
     when shrinking alone cannot fit the table (the least valuable one), or None.
+    omit_droppable: remove that column before fitting, for example when all its cells are empty.
 
     Returns (widths, kept): the new widths (same length as the input; a dropped column keeps its
     natural width but is not in kept) and the indexes of the columns to print, in order. When
@@ -54,7 +55,10 @@ def fit_widths(widths, floors, target, sep_width, indent_width, droppable=None):
         raise ValueError('droppable is out of range')
     widths = list(widths)
     kept = list(range(len(widths)))
-    if not widths:
+    if omit_droppable and droppable is not None:
+        kept.remove(droppable)
+        droppable = None
+    if not kept:
         return widths, kept
 
     def overhead(columns):

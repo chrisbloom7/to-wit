@@ -111,12 +111,14 @@ New here? Run `towit setup --full` (see [Get started](#get-started)). Use `towit
 ```shell
 towit search recursion
 /tmp/demo
-  ID                                    Title                      Keywords  Msg   Snippet                     Date
-  ------------------------------------  -------------------------  --------  ----  --------------------------  ----------
-  aaaaaaaa-1111-2222-3333-444444444444  How does the stop hook r…            0     How does the stop hook [r…  2026-03-31
+  ID                                    Title                      Msg  Snippet                     Date
+  ------------------------------------  -------------------------  ---  --------------------------  ----------
+  aaaaaaaa-1111-2222-3333-444444444444  How does the stop hook r…  0    How does the stop hook [r…  2026-03-31
 
 towit show aaaaaaaa-1111-2222-3333-444444444444 --around 1 --context 1
 ```
+
+In `towit search` and `towit list` text tables, **Keywords** appears when at least one result has a keyword to display and there is room for the column.
 
 ### Finding a prompt in a long session
 

@@ -238,8 +238,9 @@ class TestMessageNumberTerminology(DocTestCase):
 
     def test_readme_tables_do_not_use_turn_header(self):
         readme = _read('README.md')
-        self.assertMatches(readme, r'Keywords\s+Msg\b', "README tables should use the Msg header")
-        self.assertIsNone(re.search(r'Keywords\s+Turn\b', readme), "README table still has a Turn header")
+        header_prefix = r'(?m)^ *ID +Title +(?:Keywords +)?'
+        self.assertMatches(readme, rf'{header_prefix}Msg\b', "README tables should use the Msg header")
+        self.assertIsNone(re.search(rf'{header_prefix}Turn\b', readme), "README table still has a Turn header")
         self.assertNotIn('**Turn**', readme)
 
 

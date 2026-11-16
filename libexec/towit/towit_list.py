@@ -41,12 +41,16 @@ def _print_table(rows, group_by_path=False):
         for i, val in enumerate(row_data):
             col_widths[i] = max(col_widths[i], len(val))
 
-    # Shrink Title and Keywords to fit the terminal; drop Keywords if that is not enough
+    # Fit the table after omitting any entirely empty Keywords column.
     term_width = shutil.get_terminal_size((120, 24)).columns - 4
     floors = [None, 8, 8, None]
     floors = [None if f is None else max(f, len(h)) for f, h in zip(floors, headers)]
-    col_widths, kept = fit_widths(col_widths, floors, term_width, sep_width=len(sep),
-                                  indent_width=len(indent), droppable=2)
+    keywords_col = headers.index('Keywords')
+    hide_keywords = not any(row[keywords_col] for _, row in processed)
+    col_widths, kept = fit_widths(
+        col_widths, floors, term_width, sep_width=len(sep), indent_width=len(indent),
+        droppable=keywords_col, omit_droppable=hide_keywords,
+    )
 
     def fmt_row(row_data):
         return indent + sep.join(
