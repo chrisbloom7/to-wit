@@ -54,6 +54,10 @@ Subcommand modules map 1:1 to `bin/towit` cases (`towit_search.py`, `towit_show.
 - `towit_hook.py` — Hook entry point for the Stop, SessionEnd, and SessionStart events; dispatches on the payload's `hook_event_name`, validates the transcript path, and spawns a detached `towit_ingest.py`. Guarded by `TOWIT_INDEXING=1` env var to prevent recursion
 - `towit_backfill.py` (a subcommand) archives and indexes existing `~/.claude/projects/` sessions in batch; `towit_setup.py` creates the schema and runs migrations
 
+### Shell Completions
+
+`completions/towit.bash` and `completions/_towit` (Bash and Zsh, opt-in, static: they never read the archive) complete the subcommands, their flags and the fixed values of `--format`, `--role` and `--only`. Add a new or renamed flag to both files; `tests/helpers/towit_completion_test.py` compares them with the dispatcher and each module's argparse definitions and fails on drift
+
 ### Hook Flow
 
 `towit install-hook` registers `towit_hook.py` for `Stop`, `SessionEnd`, and `SessionStart` (matcher `startup`). The hook reads the payload, and for `Stop`/`SessionEnd` validates `transcript_path` (inside `~/.claude/projects/`, not a subagent) and spawns `towit_ingest.py <path>` with `start_new_session=True`; for `SessionStart` it spawns `towit_ingest.py --catch-up`. The detached process archives the transcript, then runs LLM indexing unless `[indexing] enabled = false` or the session is a subagent. The catch-up scan archives (never calls the LLM) every transcript modified since the `last_catch_up` timestamp in the `meta` table, minus a 60 s slack; the stamp is not advanced when any transcript errors, so those files are retried on the next scan. The hook always exits 0.
@@ -90,6 +94,7 @@ The archive is append-only: each ingest compares the stored tail hash to the tra
 - `tests/bin/towit.bats` — CLI integration tests
 - `tests/bin/uninstall.bats` — Install/uninstall tests
 - `tests/helpers/towit_*_test.py` — Python unit tests per module (`towit_ingest_test.py`, `towit_redact_test.py`, `towit_show_test.py`, `towit_forget_test.py`, `towit_config_test.py`, ... alongside the original per-subcommand files). A test that can reach `get_error_logger()` must not write to the real `~/.towit/errors.log`: `towit_ingest_test.py` redirects `towit_config.CONFIG_PATH` and resets the `towit.hook` logger in `setUpModule` (the logger caches its handler per process)
+- `tests/helpers/towit_completion_test.py` — Checks that the Bash and Zsh completion scripts list every subcommand, flag and fixed value in the CLI (read from the dispatcher and the argparse code). When it fails after you add or rename a flag, update `completions/towit.bash` and `completions/_towit`
 - `tests/helpers/docs_consistency_test.py` — Checks that README, AGENTS.md, SECURITY.md, the help text, and the config template agree with the code (subcommands, flags, config keys, hook events, tables, env vars, the subprocess allowlist). When it fails after you add a flag, config key, table, or env var, update the docs it names. Run with `TOWIT_RELEASE_CHECK=1` to also require `CHANGELOG.md` `[Unreleased]` content (a release gate)
 
 ## Security Constraints

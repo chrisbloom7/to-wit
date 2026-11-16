@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-11-16
+
+### Added
+
+- Bash and Zsh completion scripts in `completions/`, covering every subcommand, flag and fixed value (`--format`, `--role`, `--only`). Opt-in; see Shell completion in the README. A test fails when a flag is missing from them.
+
 ### Fixed
 
 - `towit search` and `towit list` tables no longer overflow the terminal width: Title, Keywords and Snippet shrink to fit, and Keywords is dropped on narrow terminals (the ID is never truncated). Column widths shift slightly where they were already shrunk.
