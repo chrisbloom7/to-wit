@@ -110,7 +110,7 @@ The archive is append-only: each ingest compares the stored tail hash to the tra
 
 ## Release Process
 
-Use the **`release-towit` skill** (`.claude/skills/release-towit/SKILL.md`) for all releases. Read and follow it with the Read tool when the user asks to cut a release, bump a version, tag a release, or publish a new version. It is a thin overlay (the release parameters: gates, version file, audits, tag style, tap bump) on the shared `chrisbloom7-development:release` skill from the `ai-tools` plugin marketplace, which holds the generic steps: version choice, CHANGELOG, release PR, tagging, and pushing. Install it first (`/plugin marketplace add chrisbloom7/ai-tools`).
+Use the **`release-towit` skill** (`.claude/skills/release-towit/SKILL.md`, loaded automatically in Claude Code) for all releases: when the user asks to cut a release, bump a version, tag a release, or publish a new version. It is a thin overlay (the release parameters: gates, version file, audits, tag style, tap bump) on the shared `chrisbloom7-development:release` skill from the `ai-tools` plugin marketplace, which holds the generic steps: version choice, CHANGELOG, release PR, tagging, and pushing. Install it first (`/plugin marketplace add chrisbloom7/ai-tools`).
 
 Never bypass the skill — it catches README drift and other issues that ad-hoc releases miss.
 
@@ -126,5 +126,5 @@ Agents without the Claude skills must still follow these two. Claude Code agents
 - `.claude/hooks/docs-drift.sh` (a `Stop` hook in `.claude/settings.json`) runs `tests/helpers/docs_consistency_test.py` when code or docs changed in the working tree.
 - `.claude/agents/security-reviewer.md` is a read-only reviewer; use it after touching db, ingest, index, forget, redact, config or subprocess code.
 - `feature-dev-towit` (`.claude/skills/`) is the skill for any code change; `release-towit` is the release overlay described above.
-- `.claude/settings.json` allows only `./run-tests` and `bin/towit help` without a prompt.
+- `.claude/settings.json` allows only `./run-tests` (with or without arguments) and `bin/towit help` without a prompt.
 - **Reviewing outside PRs:** changes to `.claude/`, `CLAUDE.md` and `AGENTS.md` run or steer Claude Code on a reviewer's machine, so `.github/CODEOWNERS` routes them to the maintainer. Read the diff first (`gh pr diff <number> -- .claude CLAUDE.md AGENTS.md`) before checking an outside PR out and starting Claude Code there.
