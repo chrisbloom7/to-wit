@@ -96,8 +96,8 @@
 
 ### Task 7: End-to-end check
 
-- [ ] In a clean temp `HOME`, run `towit setup --skill` against the real `claude` CLI, start a session, ask "find the conversation where we discussed X" and confirm the skill loads and uses `search` then `show --around`.
-- [ ] Run `towit doctor`; run `towit implode` and confirm the plugin is gone.
+- [x] Ran `towit setup --skill`, `doctor` and the failed-repin path against the real `claude` CLI with an isolated `CLAUDE_CONFIG_DIR`; this found two bugs (pretty-printed `list --json` output was not parsed; a failed repin left nothing installed), fixed with tests. Then ran a real `claude -p --plugin-dir` session: the skill loaded and Claude used `search` then `show --around`.
+- [x] `doctor` checked. `implode` was NOT run against the real CLI: it also removes hooks from the real `~/.claude/settings.json` (towit ignores a `TOWIT_SETTINGS_PATH` outside `~/.claude` and the system temp dir). Its plugin removal is covered by the stubbed tests in `towit_implode_test.py`.
 - [ ] Open the PR (needs-your-answer section first, per your PR conventions; no UI, so no screenshots).
 
 ## Review Focus

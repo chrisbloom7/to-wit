@@ -20,10 +20,11 @@ SOURCE = 'chrisbloom7/to-wit'
 class FakeClaude:
     """Stands in for `claude plugin ...`: tracks marketplaces and installed plugins."""
 
-    def __init__(self, marketplaces=None, plugins=None, fail_add=None):
+    def __init__(self, marketplaces=None, plugins=None, fail_add=None, fail_ref=None):
         self.marketplaces = list(marketplaces or [])
         self.plugins = list(plugins or [])
         self.fail_add = fail_add
+        self.fail_ref = fail_ref  # fail only adds of this ref; None fails every add
         self.calls = []
 
     def __call__(self, argv, **kwargs):
@@ -33,13 +34,13 @@ class FakeClaude:
         self.calls.append(args)
         head = args[:2]
         if head == ['marketplace', 'list']:
-            return self._ok(json.dumps(self.marketplaces))
+            return self._ok(json.dumps(self.marketplaces, indent=2))  # the real CLI pretty-prints lists
         if head == ['plugin', 'list'] or args[:1] == ['list']:
-            return self._ok(json.dumps([{'id': p, 'scope': 'user'} for p in self.plugins]))
+            return self._ok(json.dumps([{'id': p, 'scope': 'user'} for p in self.plugins], indent=2))
         if head == ['marketplace', 'add']:
-            if self.fail_add:
-                return self._fail({'outcome': 'failed', 'message': self.fail_add})
             source, _, ref = args[2].partition('#')
+            if self.fail_add and self.fail_ref in (None, ref):
+                return self._fail({'outcome': 'failed', 'message': self.fail_add})
             self.marketplaces = [m for m in self.marketplaces if m['name'] != 'to-wit']
             self.marketplaces.append({'name': 'to-wit', 'source': 'github', 'repo': source, 'ref': ref})
             return self._ok(json.dumps({'outcome': 'ok'}))
@@ -108,6 +109,28 @@ class TestInstall(SkillTestCase):
         self.assertEqual(fake.marketplaces[0]['ref'], 'v0.12.0')
         self.assertEqual(fake.plugins, ['towit@to-wit'])
 
+    def test_failed_repin_restores_the_previous_marketplace_and_plugin(self):
+        fake = FakeClaude(marketplaces=[pinned('v0.11.1')], plugins=['towit@to-wit'],
+                          fail_add='Marketplace file not found', fail_ref='v0.12.0')
+        with self.assertRaisesRegex(towit_skill.SkillError, 'not found.*restored'):
+            self.run_with(fake, towit_skill.install, '0.12.0')
+        self.assertEqual([m['ref'] for m in fake.marketplaces], ['v0.11.1'])
+        self.assertEqual(fake.plugins, ['towit@to-wit'])
+
+    def test_failed_repin_of_an_unpinned_marketplace_restores_it_unpinned(self):
+        fake = FakeClaude(marketplaces=[{'name': 'to-wit', 'source': 'github', 'repo': SOURCE}],
+                          plugins=['towit@to-wit'], fail_add='nope', fail_ref='v0.12.0')
+        with self.assertRaises(towit_skill.SkillError):
+            self.run_with(fake, towit_skill.install, '0.12.0')
+        self.assertEqual(fake.marketplaces[0].get('ref', ''), '')
+        self.assertEqual(fake.plugins, ['towit@to-wit'])
+
+    def test_failed_first_install_leaves_nothing_behind(self):
+        fake = FakeClaude(fail_add='nope')
+        with self.assertRaises(towit_skill.SkillError):
+            self.run_with(fake, towit_skill.install, '0.12.0')
+        self.assertEqual((fake.marketplaces, fake.plugins), ([], []))
+
     def test_unpinned_marketplace_is_repinned(self):
         fake = FakeClaude(marketplaces=[{'name': 'to-wit', 'source': 'github', 'repo': SOURCE}])
         self.run_with(fake, towit_skill.install, '0.12.0')
@@ -174,10 +197,34 @@ class TestStatus(SkillTestCase):
         self.assertEqual(state, 'stale')
         self.assertIn('v0.11.1', detail)
 
+    def test_stale_detail_names_a_non_github_source(self):
+        fake = FakeClaude(marketplaces=[{'name': 'to-wit', 'source': 'directory', 'path': '/x'}],
+                          plugins=['towit@to-wit'])
+        state, detail = self.run_with(fake, towit_skill.status, '0.12.0')
+        self.assertEqual(state, 'stale')
+        self.assertIn('not pinned', detail)
+        self.assertNotIn('pinned to unpinned', detail)
+
     def test_stale_when_unpinned(self):
         fake = FakeClaude(marketplaces=[{'name': 'to-wit', 'source': 'github', 'repo': SOURCE}],
                           plugins=['towit@to-wit'])
         self.assertEqual(self.run_with(fake, towit_skill.status, '0.12.0')[0], 'stale')
+
+
+class TestOutputParsing(SkillTestCase):
+    def test_result_line_after_progress_output_is_parsed(self):
+        out = 'Cloning...\nValidating...\n{"outcome": "ok"}\n'
+        result = subprocess.CompletedProcess([], 0, stdout=out, stderr='')
+        with patch('shutil.which', return_value='/usr/local/bin/claude'), \
+                patch('subprocess.run', return_value=result):
+            self.assertEqual(towit_skill._claude(['install', 'x'])[1], {'outcome': 'ok'})
+
+    def test_pretty_printed_list_is_parsed(self):
+        out = '[\n  {\n    "id": "towit@to-wit"\n  }\n]\n'
+        result = subprocess.CompletedProcess([], 0, stdout=out, stderr='')
+        with patch('shutil.which', return_value='/usr/local/bin/claude'), \
+                patch('subprocess.run', return_value=result):
+            self.assertEqual(towit_skill._claude(['list', '--json'])[1], [{'id': 'towit@to-wit'}])
 
 
 class TestPresent(SkillTestCase):

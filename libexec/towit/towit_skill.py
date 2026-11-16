@@ -51,14 +51,19 @@ def _claude(args):
                                 timeout=TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         raise SkillError(f"`claude plugin {args[0]}` timed out after {TIMEOUT_SECONDS}s") from None
-    payload = None
-    lines = result.stdout.strip().splitlines()
-    if lines:
+    return result.returncode, _parse_json(result.stdout), (result.stderr or result.stdout).strip()
+
+
+def _parse_json(stdout):
+    """The JSON in `--json` output: all of it (lists are pretty-printed over many lines),
+    else the last line (single results come after any progress text)."""
+    text = stdout.strip()
+    for candidate in (text, text.splitlines()[-1] if text else ''):
         try:
-            payload = json.loads(lines[-1])
+            return json.loads(candidate)
         except ValueError:
-            payload = None
-    return result.returncode, payload, (result.stderr or result.stdout).strip()
+            continue
+    return None
 
 
 def _message(payload, text):
@@ -101,18 +106,45 @@ def _is_pinned(entry, ref):
             and entry.get('repo') == SOURCE and entry.get('ref') == ref)
 
 
+def _source_of(entry):
+    """The `marketplace add` source string for a listed marketplace, or None if unknown."""
+    if entry.get('source') == 'github' and entry.get('repo'):
+        return f"{entry['repo']}#{entry['ref']}" if entry.get('ref') else entry['repo']
+    return entry.get('path') or entry.get('url')
+
+
+def _restore(source, had_plugin):
+    """Best effort: put back the marketplace (and plugin) a failed repin removed."""
+    try:
+        _run(['marketplace', 'add', source, '--scope', 'user', '--json'])
+        if had_plugin:
+            _run(['install', PLUGIN_ID, '--scope', 'user', '--json'])
+    except SkillError:
+        return f"could not restore the previous install; run: claude plugin marketplace add {source}"
+    return "previous marketplace and plugin restored"
+
+
 def install(version):
     """Install the plugin pinned to v<version>; repin if the marketplace is declared otherwise.
 
     Removing a marketplace also uninstalls its plugins, so a repin always ends by
-    installing the plugin again. Raises SkillError on any failure.
+    installing the plugin again. If the new pin cannot be added (for example the tag is not
+    pushed yet), the previous marketplace and plugin are restored. Raises SkillError.
     """
     ref = _ref_for(version)
     entry = _marketplace_entry()
     if not _is_pinned(entry, ref):
+        previous = had_plugin = None
         if entry is not None:
+            previous = _source_of(entry)
+            had_plugin = _plugin_installed()
             _run(['marketplace', 'remove', MARKETPLACE, '--scope', 'user', '--json'])
-        _run(['marketplace', 'add', f'{SOURCE}#{ref}', '--scope', 'user', '--json'])
+        try:
+            _run(['marketplace', 'add', f'{SOURCE}#{ref}', '--scope', 'user', '--json'])
+        except SkillError as exc:
+            if previous:
+                raise SkillError(f"{exc} ({_restore(previous, had_plugin)})") from None
+            raise
     _run(['install', PLUGIN_ID, '--scope', 'user', '--json'])
 
 
@@ -154,8 +186,10 @@ def status(version):
     ref = _ref_for(version)
     if _is_pinned(entry, ref):
         return 'ok', f'{PLUGIN_ID} installed, pinned to {ref}'
-    actual = (entry or {}).get('ref') or 'unpinned'
-    return 'stale', f'{PLUGIN_ID} is pinned to {actual}, expected {ref}'
+    entry = entry or {}
+    if entry.get('source') == 'github' and entry.get('ref'):
+        return 'stale', f"{PLUGIN_ID} is pinned to {entry['ref']}, expected {ref}"
+    return 'stale', f"{PLUGIN_ID} is not pinned (source: {_source_of(entry) or 'unknown'}), expected {ref}"
 
 
 def main(argv=None):
