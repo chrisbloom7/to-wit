@@ -790,6 +790,22 @@ class TestTowitSearchTableWidth(unittest.TestCase):
         out = self.run_at(160, ['jitter'])
         self.assertIn('Keywords', out)
         self.assertIn('jitter-', out)
+        self.assertIn(self.ID, out)
+        self.assertIn('conv-meta', out)
+
+    def test_no_matching_keywords_hide_column_in_both_table_modes(self):
+        cases = [
+            (['decorrelated'], ['ID', 'Title', 'Msg', 'Snippet', 'Date']),
+            (['decorrelated', '--only', 'metadata', '--title'], ['ID', 'Title', 'Date']),
+        ]
+        for args, expected_columns in cases:
+            with self.subTest(args=args):
+                out = self.run_at(100, args)
+                _, header, divider, row = out.splitlines()
+                self.assertEqual(header.split(), expected_columns)
+                self.assertEqual(len(divider.split()), len(expected_columns))
+                self.assertIn('conv-meta', row)
+                self.assertLessEqual(len(row), 96)
 
     def test_table_unchanged_when_it_fits(self):
         wide = self.run_at(400, ['jitter'])

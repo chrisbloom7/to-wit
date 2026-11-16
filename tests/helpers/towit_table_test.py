@@ -129,6 +129,15 @@ class TestFitWidthsBoundaries(unittest.TestCase):
         self.assertLessEqual(total(out, kept), target)
         self.assertEqual(total(out, kept), target)
 
+    def test_omitting_empty_keywords_leaves_full_width_for_other_columns(self):
+        widths = [36, 30, 8, 3, 40, 10]
+        kept_columns = [0, 1, 3, 4, 5]
+        target = total(widths, kept_columns, indent=2)
+        out, kept = fit_widths(widths, FLOORS, target, sep_width=SEP, indent_width=2,
+                               droppable=KEYWORDS, omit_droppable=True)
+        self.assertEqual(out, widths)
+        self.assertEqual(kept, kept_columns)
+
     def test_too_narrow_for_anything_returns_floors_without_raising(self):
         out, kept = fit(self.WIDTHS, 20)
         self.assertEqual(kept, [0, 1, 3, 4, 5])

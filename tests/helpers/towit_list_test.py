@@ -380,6 +380,7 @@ class TestTowitListClosedPipe(unittest.TestCase):
 class TestTowitListTableWidth(unittest.TestCase):
     """The text table must fit the terminal (COLUMNS) minus 4 whenever that is achievable."""
     ID = '0a1b2c3d-4e5f-6789-abcd-ef0123456789'
+    TITLE = 'Designing exponential backoff with decorrelated jitter for the payments webhook'
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -388,12 +389,16 @@ class TestTowitListTableWidth(unittest.TestCase):
         self.config_path = write_config(self.tmpdir, self.db_path)
         db = Database(self.db_path)
         db.create_schema()
-        db.upsert_conversation({
-            'id': self.ID, 'folder': '/f', 'cwd': '/w/acme-api', 'started_at': '2026-03-04T00:00:00Z',
+        self.add_conversation(self.ID, '/w/acme-api',
+                              ['jitter-strategy', 'exponential-backoff', 'webhook-retries'])
+
+    def add_conversation(self, conversation_id, cwd, keywords):
+        Database(self.db_path).upsert_conversation({
+            'id': conversation_id, 'folder': '/f', 'cwd': cwd, 'started_at': '2026-03-04T00:00:00Z',
             'last_active': '2026-03-04T00:00:00Z',
-            'title': 'Designing exponential backoff with decorrelated jitter for the payments webhook',
+            'title': self.TITLE,
             'summary': 's', 'topics': [],
-            'keywords': ['jitter-strategy', 'exponential-backoff', 'webhook-retries']})
+            'keywords': keywords})
 
     def run_at(self, columns, args=None):
         env = {**os.environ, 'TOWIT_CONFIG_PATH': self.config_path, 'COLUMNS': str(columns)}
@@ -418,6 +423,22 @@ class TestTowitListTableWidth(unittest.TestCase):
         self.assertIn(self.ID, narrow)
         self.assertIn('Title', narrow)
         self.assertIn('Keywords', self.run_at(100))
+
+    def test_empty_keywords_leave_room_for_the_full_title(self):
+        self.add_conversation('conv-unindexed', '/w/unindexed', [])
+        header, divider, row = self.run_at(115, ['--folder', '/w/unindexed']).splitlines()
+        self.assertEqual(header.split(), ['ID', 'Title', 'Date'])
+        self.assertEqual(len(divider.split()), 3)
+        self.assertIn(self.TITLE, row)
+        self.assertLessEqual(len(row), 111)
+
+    def test_keywords_remain_in_all_groups_when_one_row_has_keywords(self):
+        self.add_conversation('conv-unindexed', '/w/unindexed', [])
+        out = self.run_at(400)
+        headers = [line.split() for line in out.splitlines() if line.lstrip().startswith('ID ')]
+        self.assertEqual(headers, [['ID', 'Title', 'Keywords', 'Date']] * 2)
+        self.assertIn('jitter-strategy', out)
+        self.assertIn('conv-unindexed', out)
 
     def test_table_unchanged_when_it_fits(self):
         wide = self.run_at(400)
