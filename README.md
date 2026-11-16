@@ -6,24 +6,28 @@ Claude Code deletes old conversation transcripts. To Wit keeps a private, search
 
 **Terms.** A *session* is one Claude Code conversation. The *archive* is the stored message text of your sessions. *Metadata* is the LLM-generated title, summary, keywords, and topics.
 
+![A terminal recording: towit search finds a past session by one word, towit show reads the decision in context, and towit resume picks the conversation back up](docs/demo/demo.gif)
+
+The same steps as text (the recording and these examples use synthetic sessions; see [`docs/demo/`](docs/demo/)):
+
 ```shell
 # find a past session by a word you remember
-towit search hook
-/Users/chrisbloom7
-  ID                                    Title                        Keywords   Msg   Snippet                          Date
-  ------------------------------------  ---------------------------  ---------  ----  -------------------------------  ----------
-  350fa22f-10b7-48ff-ac9d-bd9f1081c23b  Debugging non-firing Stop …  stop-hook  14    …why the Stop [hook] never ran…  2026-03-31
+towit search jitter
+/tmp/towit-demo/work/acme-api
+  ID                                    Title            Keywords  Msg  Snippet                 Date
+  ------------------------------------  ---------------  --------  ---  ----------------------  ----------
+  7fac4752-ddf1-51e9-afe3-39a6a96d0b43  Choosing a ret…            6    …full [jitter] on exp…  2026-10-22
 
 # read the hit in context
-towit show 350fa22f-10b7-48ff-ac9d-bd9f1081c23b --around 14 --context 2
-# => message 14 and two messages either side, straight from the archive
+towit show 7fac4752-ddf1-51e9-afe3-39a6a96d0b43 --around 6 --context 2
+# => message 6 and two messages either side, straight from the archive
 
 # pick the session back up where it happened
-towit resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
-# => switch to `/Users/chrisbloom7` and call `claude --resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b`
+towit resume 7fac4752-ddf1-51e9-afe3-39a6a96d0b43
+# => switch to `/tmp/towit-demo/work/acme-api` and call `claude --resume 7fac4752-ddf1-51e9-afe3-39a6a96d0b43`
 ```
 
-The path above the table (`/Users/chrisbloom7`) is the working directory the sessions below it were run in; results are grouped by it. **Msg** is the message number to pass to `towit show --around`.
+The path above the table (`/tmp/towit-demo/work/acme-api`) is the working directory the sessions below it were run in; results are grouped by it. **Msg** is the message number to pass to `towit show --around`.
 
 **Contents:** [Why](#why) · [Privacy and cost](#privacy-and-cost) · [Requirements](#requirements) · [Get started](#get-started) · [Core commands](#core-commands) · [Searching and reading the archive](#searching-and-reading-the-archive) · [Usage](#usage) · [How it works](#how-it-works) · [Claude Code skill](#claude-code-skill) · [Retention and removing data](#retention-and-removing-data) · [Upgrading](#upgrading) · [Configuration](#configuration) · [Uninstalling](#uninstalling) · [Development](#development)
 
