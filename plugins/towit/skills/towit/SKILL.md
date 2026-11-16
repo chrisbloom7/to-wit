@@ -12,7 +12,7 @@ If `towit` is not on PATH, say so and point the user to the install steps in htt
 
 ## Finding a conversation
 
-1. Search. Plain terms must all appear somewhere in the conversation (AND, with an automatic retry on any term); text is matched on word stems.
+1. Search. Plain terms must all appear somewhere in the conversation, possibly in different messages (AND, with an automatic retry on any term); text is matched on word stems.
 
    ```bash
    towit search redis timeout --format json
@@ -27,7 +27,15 @@ If `towit` is not on PATH, say so and point the user to the install steps in htt
    towit show <session-id> --around <msg> --context 8
    ```
 
-3. If search misses a session you know exists, outline what the user asked and filter inside it:
+3. Check that terms appear together. A search hit only means every term occurs somewhere in the session, possibly in different messages. When the user asks where two things were discussed together ("pricing with Dana"), treat the results as candidates and check each one:
+
+   ```bash
+   towit show <session-id> --match pricing --match dana
+   ```
+
+   `--match` keeps only messages that contain every term in the same message. It is a literal substring, so a stem such as `priorit` covers "priority" and "priorities", whereas `search` matches whole stemmed words (a name like "Dana" does not match "Danaher"). Report the sessions that have such a message, with its message numbers. Check up to about five candidates yourself before asking the user to narrow things down. If none has a message with both terms, say so and name the closest candidates as unconfirmed.
+
+4. If search misses a session you know exists, outline what the user asked and filter inside it:
 
    ```bash
    towit show <session-id> --role user
@@ -36,9 +44,9 @@ If `towit` is not on PATH, say so and point the user to the install steps in htt
 
    `--match` is a literal substring (ignoring case and diacritics); repeat it to require every term in the same message.
 
-4. To browse instead of search: `towit list --topic <name>`, `towit list --keyword <name>` or `towit list --folder <path>`, each with `--format json`.
+5. To browse instead of search: `towit list --topic <name>`, `towit list --keyword <name>` or `towit list --folder <path>`, each with `--format json`.
 
-5. To continue an old session, give the user the command rather than running it: `towit resume <session-id>`.
+6. To continue an old session, give the user the command rather than running it: `towit resume <session-id>`.
 
 ## Reporting back
 
