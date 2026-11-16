@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import csv
 import io
+import json
 import os
 import sys
 
@@ -106,6 +107,29 @@ class TestTowitSearch(unittest.TestCase):
             if conv_id in output:
                 ids.add(conv_id)
         return ids
+
+    def test_limit_keeps_metadata_and_caps_text_hits(self):
+        db = Database(self.db_path)
+        for conv_id in ('conv-a', 'conv-c', 'conv-d'):
+            db.archive_session(
+                {'id': conv_id, 'folder': '/f', 'cwd': self.myapp_dir,
+                 'started_at': '2026-01-15T00:00:00Z',
+                 'last_active': '2026-01-15T00:00:00Z', 'source_path': None},
+                [{'role': 'user', 'ts': None, 'text': 'Rails'}],
+            )
+
+        result = run_search(self.config_path, ['Rails', '--limit', '1', '--format', 'json'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        ids = [row['id'] for row in json.loads(result.stdout)]
+        self.assertEqual(len(ids), 2)
+        self.assertEqual(ids[0], 'conv-b')
+
+    def test_limit_rejects_non_positive_or_non_numeric_values(self):
+        for value in ('0', '-2', 'many'):
+            with self.subTest(value=value):
+                result = run_search(self.config_path, ['Rails', '--limit', value])
+                self.assertEqual(result.returncode, 2)
+                self.assertIn('positive integer', result.stderr)
 
     def test_search_sqlite_returns_a_and_c(self):
         result = run_search(self.config_path, ['SQLite'])
