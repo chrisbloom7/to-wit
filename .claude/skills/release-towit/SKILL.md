@@ -19,6 +19,7 @@ git status --porcelain                     # must be empty
 git fetch origin && git status -sb         # main must not be behind (or ahead of) origin/main
 ./run-tests                                # full suite green
 TOWIT_RELEASE_CHECK=1 ./run-tests tests/helpers/docs_consistency_test.py   # docs consistency green
+claude plugin validate . && claude plugin validate plugins/towit           # plugin manifests and skill valid (skip if claude is not installed)
 gh api repos/chrisbloom7/to-wit -q '"stars=\(.stargazers_count) forks=\(.forks_count) watchers=\(.subscribers_count)"'   # informational
 ```
 
@@ -71,6 +72,7 @@ Check for:
 - Changed behavior (default scope, flag names, output format) that contradicts the README
 - Installation or requirements notes that are out of date
 - Usage section out of sync with `bin/towit help` output
+- `plugins/towit/skills/towit/SKILL.md`: new or renamed flags and subcommands users or Claude would want. `docs_consistency_test.py` only catches names the skill mentions that no longer exist, not new features it should teach
 
 Present a brief audit summary. If nothing is out of date, say so explicitly. If issues are found, propose edits and wait for approval before editing `README.md`.
 
@@ -141,6 +143,16 @@ git push origin vX.Y.Z
 ```
 
 Confirm each command succeeded. Report the tag name and the commit SHA it points to.
+
+Then verify the skill plugin can be pinned to the new tag (`towit setup --skill` pins to `v<VERSION>`, and that tag did not exist until this step). Use an isolated Claude config so the user's own plugins are untouched, with the scratchpad as the config dir:
+
+```bash
+export CLAUDE_CONFIG_DIR="$(mktemp -d)"
+claude plugin marketplace add "chrisbloom7/to-wit#vX.Y.Z" --json     # outcome must be "ok"
+claude plugin install towit@to-wit --json                           # outcome must be "ok"
+```
+
+Report any failure. Until the tag is pushed, `towit setup --skill` fails on a checkout of the release commit, because the ref does not exist yet.
 
 ## Step 7 — Update the Homebrew Tap
 

@@ -66,6 +66,8 @@ towit backfill       # archives the transcripts still on disk (Claude Code event
 towit doctor         # confirms hooks, FTS5, and the archive schema
 ```
 
+If you installed the Claude Code skill (`towit setup --skill`), run it again after upgrading to repin the plugin to the new version; `towit doctor` tells you when it is out of date.
+
 If you move your clone, re-run `towit install-hook`: it repairs hooks that point at the old location.
 
 New `[ingest]` and `[indexing]` settings use their defaults until you add them; see [Configuration](#configuration). **Switching from a source install to Homebrew:** your data and config are kept. Remove the old symlink (`rm ~/.local/bin/towit`; do not run `./uninstall`, which also deletes the archive), then run `towit install-hook` to point the hooks at the Homebrew install.
@@ -91,9 +93,11 @@ towit backfill        # Archive and index existing conversations (LLM indexing t
 towit <subcommand> [options]
 
 Subcommands:
-  setup [--full | --hook | --config]  Initialize database
-                                  --full    also generates config, installs hooks, and runs backfill
+  setup [--full | --hook | --skill | --config]  Initialize database
+                                  --full    also generates config, installs hooks, and runs backfill (not the skill: add --skill)
                                   --hook    also installs the Claude Code hooks
+                                  --skill   also installs the Claude Code skill plugin, pinned to
+                                            this version (rerun after an upgrade to repin; not in --full)
                                   --config  generate ~/.towit/config.toml (skips if already exists)
   search <terms...>             Search message text, keywords, titles, and summaries
     [--or]                        Match any term instead of all (default: AND, with an automatic OR retry)
@@ -140,10 +144,10 @@ Subcommands:
   install-hook                  Add the To Wit hooks (Stop, SessionEnd, SessionStart) to Claude Code settings
   uninstall-hook                Remove the To Wit hooks from Claude Code settings
   teardown [--yes]              Remove hooks and delete database (including the archive)
-  implode [--yes]               Full uninstall: remove hooks, database (including the archive), and binary symlink
+  implode [--yes]               Full uninstall: remove hooks, skill plugin, database (including the archive), and binary symlink
     [--install-dir <dir>]         Directory where towit was installed (default: ~/.local/bin)
   stats                         Show catalog statistics
-  doctor                        Verify setup: config, database (FTS5, archive schema), and hooks
+  doctor                        Verify setup: config, database (FTS5, archive schema), hooks, and the Claude Code skill
   version | --version | -v      Print the installed version
   help                          Show this message
 ```
@@ -208,6 +212,25 @@ Msg numbers are used throughout (never line numbers), and `towit show <id> --rol
 `towit stats` prints conversation counts, then a block with the number of archived and metadata-only conversations, archived messages, and the database size.
 
 `towit version` (also `--version` and `-v`) prints the installed version, for example `towit 0.10.0`; `towit doctor` reports it as its first line. The version comes from the `libexec/towit/VERSION` file that ships with the install, and reads `towit unknown` if that file is missing.
+
+## Claude Code skill
+
+The repo is also a Claude Code plugin marketplace with one plugin, `towit`, whose skill teaches Claude how to use the archive: search with `towit search`, read around a hit with `towit show --around`, fall back to `towit show --role user --match` when a search misses, and hand a session back to you with `towit resume`. Ask Claude something like "find the session where we fixed the Redis timeout" and it loads the skill on its own.
+
+```bash
+towit setup --skill     # installs towit@to-wit, pinned to this version of towit
+```
+
+or, without the pin (it then follows `main`, so it can describe flags newer than your towit):
+
+```bash
+claude plugin marketplace add chrisbloom7/to-wit
+claude plugin install towit@to-wit
+```
+
+`towit setup --skill` pins the plugin to the tag matching your installed version, so the skill never mentions a flag your towit lacks. After `brew upgrade towit` or `git pull`, run it again to repin; `towit doctor` warns when the pin and the CLI disagree. Replacing a pin removes and re-adds the `to-wit` marketplace (Claude Code uninstalls a marketplace's plugins when it is removed), and the command then reinstalls the plugin. `towit setup --full` does not install the plugin, and `towit implode` removes it.
+
+The skill is read-only guidance: it treats archived text as untrusted data and never runs `forget`, `prune` or `implode` unless you ask for that exact action. `towit setup --skill` runs `claude plugin ...` with the same scoped environment as indexing (see SECURITY.md) plus your ssh agent socket, proxy settings and CA bundle locations, which the marketplace's `git` clone may need. If the clone fails on your network, run the two `claude plugin` commands above by hand.
 
 ## Retention and removing data
 

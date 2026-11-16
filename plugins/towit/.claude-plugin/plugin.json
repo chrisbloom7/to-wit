@@ -1,0 +1,17 @@
+{
+  "name": "towit",
+  "description": "Teaches Claude to search, read and resume your archived Claude Code conversations with the towit CLI.",
+  "author": {
+    "name": "Chris Bloom",
+    "url": "https://github.com/chrisbloom7"
+  },
+  "homepage": "https://github.com/chrisbloom7/to-wit",
+  "repository": "https://github.com/chrisbloom7/to-wit",
+  "license": "GPL-3.0",
+  "keywords": [
+    "claude-code",
+    "conversations",
+    "search",
+    "archive"
+  ]
+}

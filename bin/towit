@@ -5,10 +5,12 @@
 #   towit <subcommand> [options]
 #
 # Subcommands:
-#   setup [--full | --hook | --config]
+#   setup [--full | --hook | --skill | --config]
 #                                 Initialize database
-#                                   --full    also generates config, installs hooks, and runs backfill
+#                                   --full    also generates config, installs hooks, and runs backfill (not the skill: add --skill)
 #                                   --hook    also installs the Claude Code hooks
+#                                   --skill   also installs the Claude Code skill plugin, pinned to
+#                                             this version (rerun after an upgrade to repin; not in --full)
 #                                   --config  generate ~/.towit/config.toml (skips if already exists)
 #   search <terms...> [--or] [--topic] [--all | --summary | --title] [--only text|metadata]
 #                 [--format json|csv] [--folder <path>] [--repo <path|name>] [--role user|assistant]
@@ -56,7 +58,7 @@
 #                                 Full uninstall: remove hooks, database (including the
 #                                   archive), and binary symlink
 #   stats                         Show catalog statistics
-#   doctor                        Verify setup: config, database (FTS5, archive schema), and hooks
+#   doctor                        Verify setup: config, database (FTS5, archive schema), hooks, and the Claude Code skill
 #   version | --version | -v      Print the installed version
 #   help                          Show this message
 
@@ -97,12 +99,14 @@ case "${subcommand}" in
     shift
     _full=false
     _hook=false
+    _skill=false
     _setup_args=()
     while [[ $# -gt 0 ]]; do
       case "$1" in
         # --full is consumed here, so forward --config for towit_setup.py to generate the config
         --full) _full=true; _setup_args+=(--config); shift ;;
         --hook) _hook=true; shift ;;
+        --skill) _skill=true; shift ;;
         *) _setup_args+=("$1"); shift ;;
       esac
     done
@@ -112,6 +116,9 @@ case "${subcommand}" in
     fi
     if [[ "${_full}" == true ]]; then
       "${PYTHON}" "${HELPERS_DIR}/towit_backfill.py" || exit $?
+    fi
+    if [[ "${_skill}" == true ]]; then
+      "${PYTHON}" "${HELPERS_DIR}/towit_skill.py" install || exit $?
     fi
     ;;
   search)

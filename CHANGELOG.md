@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A Claude Code plugin, `towit`, served from this repo's marketplace (`to-wit`). Its skill teaches Claude to find, read and resume archived conversations with `towit search`, `show --around`, `show --role user --match` and `resume`, treats archived text as untrusted data, and never runs `forget`, `prune` or `implode` unless asked.
+- `towit setup --skill` installs the plugin, pinned to the tag matching the installed version (rerun it after an upgrade to repin). It is opt-in and not part of `--full`. It runs `claude plugin ...` with towit's scoped environment plus `SSH_AUTH_SOCK`, the proxy variables and the CA bundle variables, which the marketplace's `git` clone may need.
+- `towit doctor` reports whether the plugin is installed and warns when it is pinned to a different version than the CLI.
+- `towit implode` removes the plugin and its marketplace, and warns instead of aborting if Claude Code cannot remove them.
+
 ## [0.12.0] - 2026-11-13
 
 ### Added

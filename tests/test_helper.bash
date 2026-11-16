@@ -18,6 +18,18 @@ exit 0
 EOF
   chmod +x "${TEST_TMPDIR}/mock_bin/sleep"
 
+  # Default claude stub: reports no plugins and accepts everything. Without it a test that
+  # reaches implode, setup --skill or doctor would ask the real `claude plugin` CLI about
+  # the developer's own plugins. Tests that care write their own stub over this one.
+  cat > "${TEST_TMPDIR}/mock_bin/claude" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  *"list --json"*) echo '[]' ;;
+  *) echo '{"outcome":"ok"}' ;;
+esac
+EOF
+  chmod +x "${TEST_TMPDIR}/mock_bin/claude"
+
   export PATH="${TEST_TMPDIR}/mock_bin:${PATH}"
 
   # Config file controls DB path for all subprocess invocations

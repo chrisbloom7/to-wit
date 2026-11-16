@@ -2,8 +2,10 @@
 """Mechanical checks that README, AGENTS.md, SECURITY.md, CHANGELOG and the help text
 agree with the code. Prose accuracy is audited by hand; these catch drift in names,
 flags, config keys, hook events, tables and environment variables."""
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import unittest
@@ -243,3 +245,83 @@ class TestMessageNumberTerminology(DocTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestPlugin(DocTestCase):
+    """The Claude Code plugin (marketplace, manifest, skill) agrees with the CLI."""
+
+    SKILL = 'plugins/towit/skills/towit/SKILL.md'
+
+    def _json(self, rel_path):
+        return json.loads(_read(rel_path))
+
+    def _skill_parts(self):
+        text = _read(self.SKILL)
+        m = re.match(r'---\n(.*?)\n---\n(.*)', text, re.S)
+        self.assertIsNotNone(m, "SKILL.md has no frontmatter")
+        meta = dict(line.split(': ', 1) for line in m.group(1).splitlines() if ': ' in line)
+        return meta, m.group(2)
+
+    def test_marketplace_lists_the_towit_plugin(self):
+        market = self._json('.claude-plugin/marketplace.json')
+        self.assertEqual(market['name'], 'to-wit')
+        plugins = {p['name']: p for p in market['plugins']}
+        self.assertIn('towit', plugins, "marketplace.json does not list the towit plugin")
+        self.assertEqual(plugins['towit']['source'], './plugins/towit')
+        self.assertTrue(os.path.isdir(os.path.join(ROOT, 'plugins', 'towit')))
+
+    def test_plugin_manifest_has_no_version(self):
+        manifest = self._json('plugins/towit/.claude-plugin/plugin.json')
+        self.assertEqual(manifest['name'], 'towit')
+        self.assertNotIn('version', manifest,
+                         "plugin.json must not carry a version: the install is pinned by tag")
+
+    def test_skill_frontmatter(self):
+        meta, _ = self._skill_parts()
+        self.assertEqual(meta.get('name'), 'towit')
+        self.assertTrue(meta.get('description', '').strip(), "SKILL.md has no description")
+
+    def test_skill_subcommands_exist(self):
+        _, body = self._skill_parts()
+        known = _dispatcher_subcommands() | {'version'}  # its label is `version|--version|-v`
+        mentioned = set(re.findall(r'`towit ([a-z][a-z-]*)', body))
+        self.assertTrue(mentioned, "SKILL.md mentions no towit subcommand")
+        self.assertFalse(mentioned - known,
+                         f"SKILL.md mentions unknown subcommands: {sorted(mentioned - known)}")
+
+    def test_skill_flags_exist_in_help(self):
+        _, body = self._skill_parts()
+        help_flags = set(FLAG_RE.findall(_help_output()))
+        mentioned = set(FLAG_RE.findall(body)) - {'--help'}
+        self.assertFalse(mentioned - help_flags,
+                         f"SKILL.md mentions flags missing from help: {sorted(mentioned - help_flags)}")
+
+    def test_skill_narrowing_list_has_only_filters(self):
+        # `search --topic` is a boolean ("also search topics") and `--or` widens a search;
+        # neither narrows. Topic filtering by name is `towit list --topic NAME`.
+        _, body = self._skill_parts()
+        narrowing = next((line for line in body.splitlines() if 'Narrow with' in line), None)
+        self.assertIsNotNone(narrowing, "SKILL.md lost its 'Narrow with' sentence")
+        sentence = re.split(r'(?<=`)\. ', narrowing)[0]  # the list itself, not what follows it
+        for flag in ('--topic', '--or'):
+            self.assertNotIn(flag, sentence, f"{flag} does not narrow a search")
+        for line in body.splitlines():
+            if 'towit search' in line:
+                self.assertNotRegex(line, r'--topic\s+[^\s-]', "`search --topic` takes no value")
+
+    def test_skill_guardrails(self):
+        _, body = self._skill_parts()
+        self.assertContains(body.lower(), 'untrusted', "SKILL.md lacks the untrusted-data warning")
+        for cmd in ('forget', 'prune', 'implode'):
+            self.assertContains(body, cmd, f"SKILL.md does not mention {cmd}")
+        for block in re.findall(r'```.*?```', body, re.S):
+            self.assertIsNone(re.search(r'towit (forget|prune|implode)', block),
+                              "SKILL.md must not show a destructive command in a code block")
+
+    @unittest.skipUnless(shutil.which('claude'), 'claude CLI not on PATH')
+    def test_claude_validates_the_marketplace_and_plugin(self):
+        for target in ('.', 'plugins/towit'):
+            result = subprocess.run(['claude', 'plugin', 'validate', target],
+                                    cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0,
+                             f"claude plugin validate {target}: {result.stdout}{result.stderr}")

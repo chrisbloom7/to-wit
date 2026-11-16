@@ -1,0 +1,16 @@
+{
+  "name": "to-wit",
+  "owner": {
+    "name": "Chris Bloom"
+  },
+  "metadata": {
+    "description": "Claude Code plugin for To Wit, a searchable archive of your Claude Code conversations"
+  },
+  "plugins": [
+    {
+      "name": "towit",
+      "description": "Teaches Claude to search, read and resume your archived Claude Code conversations with the towit CLI.",
+      "source": "./plugins/towit"
+    }
+  ]
+}

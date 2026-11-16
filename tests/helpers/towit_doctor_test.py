@@ -11,7 +11,7 @@ from collections import namedtuple
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit')))
 from towit_doctor import (CheckResult, format_result, summarise, check_python_version, check_claude_cli,
-                          check_towit_version)
+                          check_towit_version, check_skill_plugin)
 
 class TestCheckResult(unittest.TestCase):
     def test_pass_has_no_remediation_line(self):
@@ -113,6 +113,54 @@ class TestChecks(unittest.TestCase):
         self.assertEqual(result.status, 'FAIL')
         self.assertIn('not found', result.label)
         self.assertTrue(result.remediation)
+
+
+class TestSkillPluginCheck(unittest.TestCase):
+    def check(self, status, version='0.12.0'):
+        with patch('towit_skill.status', return_value=status):
+            return check_skill_plugin(version)
+
+    def test_nothing_to_report_when_claude_is_missing(self):
+        # check_claude_cli already fails; do not add a second line about the same thing
+        self.assertIsNone(self.check(('unavailable', 'claude CLI not found on PATH')))
+
+    def test_nothing_to_report_when_the_cli_version_is_unknown(self):
+        with patch('towit_skill.installed_version', return_value=None):
+            self.assertIsNone(self.check(('ok', ''), version=None))
+
+    def test_pass_when_pinned_to_this_version(self):
+        result = self.check(('ok', 'towit@to-wit installed, pinned to v0.12.0'))
+        self.assertEqual(result.status, 'PASS')
+        self.assertIn('v0.12.0', result.label)
+
+    def test_missing_is_a_pass_because_the_skill_is_optional(self):
+        result = self.check(('missing', 'towit@to-wit is not installed'))
+        self.assertEqual(result.status, 'PASS')
+        self.assertIn('towit setup --skill', result.label)
+
+    def test_unpinned_install_passes_with_a_hint(self):
+        result = self.check(('unpinned', 'towit@to-wit follows main; v0.12.0 is the version to pin'))
+        self.assertEqual(result.status, 'PASS')
+        self.assertIn('towit setup --skill', result.label)
+
+    def test_stale_pin_warns_with_the_repin_command(self):
+        result = self.check(('stale', 'towit@to-wit is pinned to v0.11.1, expected v0.12.0'))
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('v0.11.1', result.label)
+        self.assertIn('towit setup --skill', result.remediation)
+
+    def test_failure_to_ask_claude_warns(self):
+        import towit_skill
+        with patch('towit_skill.status', side_effect=towit_skill.SkillError('plugin list failed')):
+            result = check_skill_plugin('0.12.0')
+        self.assertEqual(result.status, 'WARN')
+        self.assertIn('plugin list failed', result.label)
+
+    def test_reads_the_version_file_by_default(self):
+        with patch('towit_skill.installed_version', return_value='0.12.0'), \
+                patch('towit_skill.status', return_value=('ok', 'pinned')) as status:
+            check_skill_plugin()
+        status.assert_called_once_with('0.12.0')
 
 
 class TestConfigChecks(unittest.TestCase):

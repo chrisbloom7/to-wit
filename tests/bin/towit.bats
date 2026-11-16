@@ -284,6 +284,71 @@ _setup_isolated_home() {
 }
 
 # ---------------------------------------------------------------------------
+# setup --skill
+# ---------------------------------------------------------------------------
+
+# A claude stub that records every call and reports an empty plugin state.
+_stub_claude_plugin() {
+  cat > "${TEST_TMPDIR}/mock_bin/claude" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >> "${TEST_TMPDIR}/claude_calls"
+case "\$*" in
+  *"list --json"*) echo '[]' ;;
+  *) echo '{"outcome":"ok"}' ;;
+esac
+EOF
+  chmod +x "${TEST_TMPDIR}/mock_bin/claude"
+}
+
+@test "towit: setup --skill installs the plugin pinned to the CLI version" {
+  _setup_isolated_home
+  _stub_claude_plugin
+  run "${TOWIT}" setup --skill
+  [ "${status}" -eq 0 ] || { echo "status=${status}: ${output}"; return 1; }
+  local version
+  version="$(tr -d '[:space:]' < "${HELPERS_DIR}/VERSION")"
+  grep -qF "plugin marketplace add chrisbloom7/to-wit#v${version} --scope user --json" "${TEST_TMPDIR}/claude_calls" || {
+    cat "${TEST_TMPDIR}/claude_calls"; return 1
+  }
+  grep -qF "plugin install towit@to-wit --scope user --json" "${TEST_TMPDIR}/claude_calls" || {
+    cat "${TEST_TMPDIR}/claude_calls"; return 1
+  }
+  [[ "${output}" == *"v${version}"* ]] || { echo "${output}"; return 1; }
+}
+
+@test "towit: setup --skill works on an existing database" {
+  _setup_isolated_home
+  _stub_claude_plugin
+  "${TOWIT}" setup
+  run "${TOWIT}" setup --skill
+  [ "${status}" -eq 0 ] || { echo "status=${status}: ${output}"; return 1; }
+  [ -s "${TEST_TMPDIR}/claude_calls" ] || { echo "claude was not called"; return 1; }
+}
+
+@test "towit: setup --full does not install the plugin" {
+  _setup_isolated_home
+  _stub_claude_plugin
+  run "${TOWIT}" setup --full
+  [ "${status}" -eq 0 ] || { echo "status=${status}: ${output}"; return 1; }
+  ! grep -q 'plugin' "${TEST_TMPDIR}/claude_calls" 2>/dev/null || {
+    cat "${TEST_TMPDIR}/claude_calls"; return 1
+  }
+}
+
+@test "towit: setup --skill fails when claude rejects the install" {
+  _setup_isolated_home
+  cat > "${TEST_TMPDIR}/mock_bin/claude" <<'EOF'
+#!/usr/bin/env bash
+echo '{"outcome":"failed","message":"boom"}'
+exit 1
+EOF
+  chmod +x "${TEST_TMPDIR}/mock_bin/claude"
+  run "${TOWIT}" setup --skill
+  [ "${status}" -ne 0 ] || { echo "expected failure: ${output}"; return 1; }
+  [[ "${output}" == *"boom"* ]] || { echo "${output}"; return 1; }
+}
+
+# ---------------------------------------------------------------------------
 # search subcommand
 # ---------------------------------------------------------------------------
 
@@ -563,6 +628,14 @@ EOF
   [[ "${output}" == *"Database"* ]] || {
     echo "Expected 'Database' in output, got: ${output}"; return 1
   }
+}
+
+@test "towit: doctor reports the Claude Code skill as optional when it is not installed" {
+  "${TOWIT}" setup
+  _stub_claude_plugin
+  run "${TOWIT}" doctor
+  [[ "${output}" == *"Claude Code skill not installed"* ]] || { echo "${output}"; return 1; }
+  [[ "${output}" == *"towit setup --skill"* ]] || { echo "${output}"; return 1; }
 }
 
 @test "towit: doctor output contains no JSON or CSV" {
