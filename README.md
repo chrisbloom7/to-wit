@@ -461,6 +461,8 @@ Then remove the binary manually (or `brew uninstall towit` when available).
 
 ## Development
 
+Contributions are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ```bash
 git clone https://github.com/chrisbloom7/to-wit.git
 cd to-wit
