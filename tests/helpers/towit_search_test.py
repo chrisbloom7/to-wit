@@ -732,5 +732,76 @@ class TestTowitSearchClosedPipe(unittest.TestCase):
         self.assertEqual(proc.returncode, 141)
 
 
+class TestTowitSearchTableWidth(unittest.TestCase):
+    """The text table must fit the terminal (COLUMNS) minus 4 whenever that is achievable."""
+    ID = '0a1b2c3d-4e5f-6789-abcd-ef0123456789'
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        db = Database(self.db_path)
+        db.create_schema()
+        db.archive_session(
+            {'id': self.ID, 'folder': '/f', 'cwd': '/w/acme-api', 'started_at': '2026-03-04T00:00:00Z',
+             'last_active': '2026-03-04T00:00:00Z', 'repo_key': None, 'source_path': None},
+            [{'role': 'user', 'ts': None,
+              'text': 'Why does the retry backoff jitter drift so far under heavy load in production?'},
+             {'role': 'assistant', 'ts': None,
+              'text': 'The jitter is added after the cap, so the backoff ceiling is exceeded by design. '
+                      'Apply the jitter first and then clamp to the maximum delay to fix the drift.'}])
+        db.upsert_conversation({
+            'id': 'conv-meta', 'folder': '/f', 'cwd': '/w/acme-api', 'started_at': '2026-03-05T00:00:00Z',
+            'last_active': '2026-03-05T00:00:00Z',
+            'title': 'Designing exponential backoff with decorrelated jitter for the payments webhook',
+            'summary': 's', 'topics': [],
+            'keywords': ['jitter-strategy', 'exponential-backoff', 'webhook-retries']})
+
+    def run_at(self, columns, args):
+        env = {**os.environ, 'TOWIT_CONFIG_PATH': self.config_path, 'COLUMNS': str(columns)}
+        r = subprocess.run(['python3', SEARCH_SCRIPT] + args, env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def test_no_line_exceeds_terminal_width_minus_4(self):
+        for columns in (80, 100, 120, 160):
+            out = self.run_at(columns, ['jitter'])
+            longest = max(len(line) for line in out.splitlines())
+            self.assertLessEqual(longest, columns - 4, f'{columns} columns:\n{out}')
+
+    def test_full_id_msg_and_date_survive_at_every_width(self):
+        for columns in (80, 100, 120, 160):
+            out = self.run_at(columns, ['jitter'])
+            row = next(line for line in out.splitlines() if self.ID in line)
+            self.assertIn('2026-03-04', row, columns)
+            self.assertRegex(row, r'\s1\s', columns)  # Msg column
+
+    def test_keywords_dropped_at_80_columns(self):
+        out = self.run_at(80, ['jitter'])
+        header = next(line for line in out.splitlines() if line.lstrip().startswith('ID'))
+        self.assertNotIn('Keywords', header)
+        for name in ('Title', 'Msg', 'Snippet', 'Date'):
+            self.assertIn(name, header)
+        self.assertIn(self.ID, out)
+        self.assertNotIn('Designing exponential backoff with decorrelated jitter', out)  # Title truncated
+
+    def test_keywords_kept_at_160_columns(self):
+        out = self.run_at(160, ['jitter'])
+        self.assertIn('Keywords', out)
+        self.assertIn('jitter-', out)
+
+    def test_table_unchanged_when_it_fits(self):
+        wide = self.run_at(400, ['jitter'])
+        self.assertIn('Keywords', wide)
+        self.assertIn('Designing exponential backoff with decorrelated jitter for the payments webhook', wide)
+
+    def test_metadata_only_table_fits_too(self):
+        for columns in (80, 100):
+            out = self.run_at(columns, ['jitter', '--only', 'metadata'])
+            self.assertLessEqual(max(len(line) for line in out.splitlines()), columns - 4, out)
+            self.assertIn('conv-meta', out)
+
+
 if __name__ == '__main__':
     unittest.main()
