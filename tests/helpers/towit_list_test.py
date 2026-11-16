@@ -450,5 +450,80 @@ class TestTowitListTableWidth(unittest.TestCase):
         self.assertLessEqual(max(len(line) for line in out.splitlines()), 76, out)
 
 
+class TestTowitListWideCharacters(unittest.TestCase):
+    """CJK and emoji titles take two cells each; columns must still line up and fit the terminal.
+
+    The expected output is hard-coded rather than measured, so the test does not share the width
+    calculation it checks. The header and the ASCII row are plain ASCII, so their string offsets
+    are their cell offsets. The wide-title row is compared as a whole: each CJK character and 🚀
+    takes two cells and `…` one, so every row below takes as many cells as the header above it.
+    """
+    WIDE_ID = '1a1b2c3d-4e5f-6789-abcd-ef0123456789'
+    ASCII_ID = '2a1b2c3d-4e5f-6789-abcd-ef0123456789'
+
+    # COLUMNS -> (offset of Date in the header, the wide-title row exactly as printed)
+    EXPECTED = {
+        60: (48, '1a1b2c3d-4e5f-6789-abcd-ef0123456789  支付回…   2026-03-04'),
+        80: (66, '1a1b2c3d-4e5f-6789-abcd-ef0123456789  支付回调的指数…   重试,退…  2026-03-04'),
+        100: (86, '1a1b2c3d-4e5f-6789-abcd-ef0123456789  支付回调的指数退避重试设计 🚀 与抖…  '
+                  '重试,退避  2026-03-04'),
+        120: (91, '1a1b2c3d-4e5f-6789-abcd-ef0123456789  支付回调的指数退避重试设计 🚀 与抖动策略  '
+                  '重试,退避  2026-03-04'),
+        400: (91, '1a1b2c3d-4e5f-6789-abcd-ef0123456789  支付回调的指数退避重试设计 🚀 与抖动策略  '
+                  '重试,退避  2026-03-04'),
+    }
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        db = Database(self.db_path)
+        db.create_schema()
+        for cid, title, keywords, day in (
+                (self.WIDE_ID, '支付回调的指数退避重试设计 🚀 与抖动策略', ['重试', '退避'], '04'),
+                (self.ASCII_ID, 'Plain ASCII title', ['retry'], '05')):
+            db.upsert_conversation({
+                'id': cid, 'folder': '/f', 'cwd': '/w/acme-api', 'started_at': f'2026-03-{day}T00:00:00Z',
+                'last_active': f'2026-03-{day}T00:00:00Z', 'title': title, 'summary': 's',
+                'topics': [], 'keywords': keywords})
+
+    def run_at(self, columns):
+        env = {**os.environ, 'TOWIT_CONFIG_PATH': self.config_path, 'COLUMNS': str(columns)}
+        r = subprocess.run(['python3', LIST_SCRIPT, '--folder', '/w/acme-api'], env=env,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.splitlines()
+
+    def split_rows(self, lines):
+        """Return (header, ASCII-title row, wide-title row)."""
+        header = next(line for line in lines if 'Date' in line)
+        ascii_row = next(line for line in lines if line.startswith(self.ASCII_ID))
+        wide_row = next(line for line in lines if line.startswith(self.WIDE_ID))
+        return header, ascii_row, wide_row
+
+    def test_date_column_lines_up_with_header(self):
+        for columns, (date_offset, wide_row) in self.EXPECTED.items():
+            lines = self.run_at(columns)
+            msg = f'{columns} columns:\n' + '\n'.join(lines)
+            header, ascii_row, actual_wide_row = self.split_rows(lines)
+            self.assertEqual(header.index('Date'), date_offset, msg)
+            self.assertEqual(ascii_row.index('2026-03-05'), date_offset, msg)
+            self.assertEqual(actual_wide_row, wide_row, msg)
+
+    def test_no_line_exceeds_terminal_width_minus_4(self):
+        for columns in (80, 100, 120):
+            lines = self.run_at(columns)
+            msg = f'{columns} columns:\n' + '\n'.join(lines)
+            # Every line but the wide-title row is ASCII, so len() is its width in cells
+            ascii_lines = [line for line in lines if not line.startswith(self.WIDE_ID)]
+            self.assertLessEqual(max(len(line) for line in ascii_lines), columns - 4, msg)
+            # The wide-title row takes as many cells as the header (see the class docstring)
+            self.assertEqual(self.split_rows(lines)[2], self.EXPECTED[columns][1], msg)
+
+    def test_wide_title_shown_whole_when_it_fits(self):
+        self.assertTrue(any('支付回调的指数退避重试设计 🚀 与抖动策略' in line for line in self.run_at(400)))
+
+
 if __name__ == '__main__':
     unittest.main()

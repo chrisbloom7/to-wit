@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `towit search` and `towit list` omit an empty Keywords column in text tables, leaving more room for titles and snippets.
 
+### Fixed
+
+- `towit search` and `towit list` tables stay aligned when a title, keyword or snippet contains CJK text or wide emoji: column sizing, truncation and padding now count terminal display cells instead of characters.
+
 ## [0.13.2] - 2026-11-16
 
 ### Added

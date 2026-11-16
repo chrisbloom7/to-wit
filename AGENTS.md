@@ -45,7 +45,7 @@ Subcommand modules map 1:1 to `bin/towit` cases (`towit_search.py`, `towit_show.
 - `towit_ingest.py` — Archive ingest: parses JSONL into messages plus tool stubs, redacts, stores append-only, resolves `repo_key` (git common dir, else the cwd) once at first ingest (the stored key is kept afterwards unless it is NULL), runs the `SessionStart` catch-up scan. Its `main()` is the detached process the hook spawns (archive, then LLM indexing)
 - `towit_pipe.py` — `run_cli(main)` and `quiet_broken_pipe()`: a closed stdout pipe (for example `| head`) ends the process quietly with status 141. Details in the module docstring
 - `towit_sanitize.py` — Strips terminal control sequences from archived text before it is printed (`show` text output, and the table output of `search` and `list`, which also collapse newlines)
-- `towit_table.py` — `fit_widths` and `truncate` for the text tables of `search` and `list`; never touches the ID column. Details in the module docstring
+- `towit_table.py` — `fit_widths`, `truncate`, `pad` and `display_width` for the text tables of `search` and `list`; widths are measured in terminal display cells (CJK and wide emoji take two), not characters; never touches the ID column. Details in the module docstring
 - `towit_redact.py` — Best-effort, pattern-based secret redaction (`[REDACTED:<kind>]`)
 - `towit_index.py` — LLM indexing: parses JSONL prose, calls `claude -p` to generate title/summary/keywords/topics, filters trivial sessions
 - `towit_install_hook.py` — Registers/repairs hooks; writes `TOWIT_PYTHON` (if valid) as the hook interpreter

@@ -3,15 +3,50 @@
 towit_table — Shared helpers for the text tables printed by `towit search` and `towit list`.
 
 Not a subcommand. `fit_widths` decides column widths so a table fits the terminal; `truncate`
-shortens one cell. Widths are measured in characters (len), not terminal display cells.
+shortens one cell and `pad` fills it out. Widths are measured in terminal display cells
+(`display_width`): CJK and wide emoji take two cells, combining marks none.
 """
+
+import unicodedata
+
+
+def _char_width(ch):
+    """Terminal cells taken by one code point: 0, 1 or 2."""
+    if unicodedata.category(ch) in ('Mn', 'Me', 'Cf'):
+        return 0
+    if unicodedata.east_asian_width(ch) in ('W', 'F'):
+        return 2
+    return 1
+
+
+def display_width(s):
+    """Number of terminal cells s takes when printed."""
+    return sum(_char_width(ch) for ch in s)
 
 
 def truncate(s, width):
-    """Shorten s to at most width characters, ending in an ellipsis when it was cut."""
-    if len(s) <= width:
+    """Shorten s to at most width display cells, ending in an ellipsis when it was cut.
+
+    A wide character that would straddle the edge is left out, so the result can be one cell
+    narrower than width; `pad` fills the gap.
+    """
+    if display_width(s) <= width:
         return s
-    return s[:width - 1] + '…'
+    budget = width - 1  # one cell for the ellipsis
+    used = 0
+    kept = []
+    for ch in s:
+        w = _char_width(ch)
+        if used + w > budget:
+            break
+        kept.append(ch)
+        used += w
+    return ''.join(kept) + '…'
+
+
+def pad(s, width):
+    """Left-justify s to width display cells, like str.ljust but counting wide characters as two."""
+    return s + ' ' * max(0, width - display_width(s))
 
 
 def _shrink(widths, floors, overflow):
