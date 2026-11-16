@@ -8,7 +8,35 @@ Claude Code deletes old conversation transcripts. To Wit keeps a private, search
 
 ![A terminal recording: towit search finds a past session by one word, towit show reads the decision in context, and towit resume picks the conversation back up](docs/demo/demo.gif)
 
-**Contents:** [Why](#why) · [Privacy and cost](#privacy-and-cost) · [Requirements](#requirements) · [Get started](#get-started) · [Core commands](#core-commands) · [Searching and reading the archive](#searching-and-reading-the-archive) · [Usage](#usage) · [How it works](#how-it-works) · [Claude Code skill](#claude-code-skill) · [Retention and removing data](#retention-and-removing-data) · [Upgrading](#upgrading) · [Configuration](#configuration) · [Uninstalling](#uninstalling) · [Development](#development)
+## Table of contents
+
+- [Why](#why)
+- [Privacy and cost](#privacy-and-cost)
+- [Requirements](#requirements)
+- [Get started](#get-started)
+  - [From source](#from-source)
+  - [Step by step](#step-by-step)
+- [Core commands](#core-commands)
+- [Searching and reading the archive](#searching-and-reading-the-archive)
+  - [Finding a prompt in a long session](#finding-a-prompt-in-a-long-session)
+  - [More examples](#more-examples)
+  - [Reference: search and show options](#reference-search-and-show-options)
+  - [Stats and version](#stats-and-version)
+- [Usage](#usage)
+- [How it works](#how-it-works)
+- [Claude Code skill](#claude-code-skill)
+  - [Example prompts](#example-prompts)
+- [Retention and removing data](#retention-and-removing-data)
+- [Upgrading](#upgrading)
+- [Configuration](#configuration)
+  - [`[database]` settings](#database-settings)
+  - [`[indexing]` settings](#indexing-settings)
+  - [`[ingest]` settings](#ingest-settings)
+  - [Cost estimates](#cost-estimates)
+  - [Disk usage](#disk-usage)
+- [Uninstalling](#uninstalling)
+- [Development](#development)
+- [License](#license)
 
 ## Why
 
