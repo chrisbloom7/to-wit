@@ -1,0 +1,117 @@
+#compdef towit
+
+local context state line
+typeset -A opt_args
+local -a subcommands=(
+    'setup:Initialize the catalog'
+    'search:Search the conversation archive'
+    'list:List conversations'
+    'resume:Resume a conversation'
+    'show:Show archived messages'
+    'prune:Remove entries with missing transcripts'
+    'forget:Permanently remove conversations'
+    'export:Export conversations'
+    'backfill:Archive existing transcripts'
+    'install-hook:Install the Claude Code hooks'
+    'uninstall-hook:Remove the Claude Code hooks'
+    'teardown:Remove hooks and delete the catalog'
+    'implode:Uninstall To Wit'
+    'stats:Show catalog statistics'
+    'doctor:Check the installation'
+    'version:Show the installed version'
+    'help:Show help'
+    '-h:Show help'
+    '--help:Show help'
+    '-v:Show the installed version'
+    '--version:Show the installed version'
+)
+local -a flags help_flags=('-h[Show help]' '--help[Show help]')
+
+_arguments -C '1:command:->command' '*::argument:->arguments'
+case "$state" in
+    command)
+        _describe -t commands 'towit command' subcommands
+        ;;
+    arguments)
+        case "$line[1]" in
+            setup)
+                flags=(
+                    '--full[Configure, install hooks, and backfill]'
+                    '--hook[Install hooks]' '--skill[Install the skill plugin]'
+                    '--config[Generate the config file]'
+                )
+                ;;
+            search)
+                flags=(
+                    '--or[Match any term]' '--topic[Include conversation topics]'
+                    '--all[Include topics or all metadata fields]' '--summary[Include conversation summaries]'
+                    '--title[Include conversation titles]' '--only[Search only one type of content]:scope:(text metadata)'
+                    '--format[Select the output format]:format:(json csv)'
+                    '--folder[Filter by working directory]:directory:_files -/'
+                    '--repo[Filter by repository]:repository:'
+                    '--role[Filter messages by role]:role:(user assistant)'
+                )
+                ;;
+            list)
+                flags=(
+                    '--format[Select the output format]:format:(json csv)'
+                    '--folder[Filter by working directory]:directory:_files -/'
+                    '--topic[Filter by topic]:topic:' '--keyword[Filter by keyword]:keyword:'
+                )
+                ;;
+            resume)
+                flags=('--force[Resume even if the original directory is unavailable]')
+                ;;
+            show)
+                flags=(
+                    '--around[Center on a message]:message number:'
+                    '--context[Set the number of surrounding messages]:count:'
+                    '--role[Filter messages by role]:role:(user assistant)'
+                    '*--match[Filter messages by text]:term:'
+                    '--format[Select the output format]:format:(text json)'
+                )
+                ;;
+            prune)
+                flags=(
+                    '--archive[Include archived conversations]'
+                    '--yes[Skip confirmation]' '--dry-run[Show what would be removed]'
+                )
+                ;;
+            forget)
+                flags=(
+                    '--repo[Select a repository]:repository:'
+                    '--folder[Select a working directory]:directory:_files -/'
+                    '-y[Skip confirmation]' '--yes[Skip confirmation]'
+                )
+                ;;
+            export)
+                flags=(
+                    '--topic[Export a topic]:topic:'
+                    '--format[Select the output format]:format:(md json)'
+                    '--summarize[Summarize the export]'
+                )
+                ;;
+            backfill)
+                flags=(
+                    '--dry-run[Show what would be archived]' '--force[Reindex existing conversations]'
+                    '--folder[Select a folder]:directory:_files -/'
+                )
+                ;;
+            teardown)
+                flags=('-y[Skip confirmation]' '--yes[Skip confirmation]')
+                ;;
+            implode)
+                flags=(
+                    '-y[Skip confirmation]' '--yes[Skip confirmation]'
+                    '--install-dir[Set the installation directory]:directory:_files -/'
+                )
+                ;;
+            install-hook|uninstall-hook|stats|doctor)
+                ;;
+            *)
+                return 0
+                ;;
+        esac
+        _arguments "${help_flags[@]}" "${flags[@]}"
+        ;;
+esac

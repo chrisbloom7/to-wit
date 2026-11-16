@@ -242,6 +242,28 @@ Subcommands:
   help                          Show this message
 ```
 
+### Shell completion
+
+Bash and Zsh can complete commands, options, and fixed values such as
+`--format`, `--role`, and `--only`. Point your shell startup file at the
+`completions/` directory in your To Wit source checkout.
+
+For Bash, add this to `~/.bashrc` and open a new shell.
+
+```bash
+source "/path/to/to-wit/completions/towit.bash"
+```
+
+For Zsh, add the directory to `fpath` in `~/.zshrc` before initializing
+completion. If your configuration already runs `compinit`, put the
+`fpath` line before that call.
+
+```zsh
+fpath=("/path/to/to-wit/completions" $fpath)
+autoload -Uz compinit
+compinit
+```
+
 ## How it works
 
 **Archiving.** Each session is parsed from Claude Code's JSONL transcript files (`~/.claude/projects/`). The text of every user and assistant message is stored in `~/.towit/catalog.db` (SQLite, WAL mode) and indexed with FTS5, so searching needs no API calls and takes milliseconds. Tool calls are kept as one-line stubs inside the assistant turn that made them (`[Bash] <description or command>`, `[Edit] <file path>`, each capped at 200 characters), and failed tool results as `[error] <first 300 characters>`. Tool results and file contents are not stored. A single message is capped at 50,000 characters, so a pasted log cannot bloat the archive. Sessions with fewer than two user messages are not archived, and subagent sessions are skipped unless you set `include_subagents`. Archiving is incremental and append-only: each run stores only the messages added since the last one.
