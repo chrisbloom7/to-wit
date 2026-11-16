@@ -1,14 +1,13 @@
-# README demo: search a past session, read the moment, resume it. Needs `vhs` and `towit` on PATH.
+# README demo: search a past session, read the moment, resume it. Needs `vhs`; it runs this checkout's bin/towit.
 #
 #   python3 docs/demo/seed.py        # builds the throwaway home at /tmp/towit-demo
 #   vhs docs/demo/demo.tape          # run from the repo root; writes docs/demo/demo.gif
 #
 # Everything runs against synthetic sessions under /tmp/towit-demo; your own ~/.towit and
 # ~/.claude are never read. The session id below is derived by seed.py and stays stable.
-# The hidden `towit` function does two things: it narrows COLUMNS (the search table prints a
-# few columns wider than the terminal width it detects, so it would otherwise wrap) and it
-# prints a blank line after each command's output (except `show`, which ends with one), so
-# each typed comment stays attached to its command with a gap between steps.
+# The hidden `towit` function prints a blank line after each command's output (except `show`,
+# which ends with one), so each typed comment stays attached to its command with a gap
+# between steps.
 
 Output docs/demo/demo.gif
 
@@ -21,8 +20,8 @@ Set TypingSpeed 55ms
 Set Theme "Catppuccin Mocha"
 
 Hide
-Type "export HOME=/tmp/towit-demo PATH=/tmp/towit-demo/bin:$PATH" Enter
-Type 'towit() { COLUMNS=124 command towit "$@"; local rc=$?; [ "$1" = show ] || echo; return $rc; }' Enter
+Type "export HOME=/tmp/towit-demo PATH=$PWD/bin:/tmp/towit-demo/bin:$PATH" Enter
+Type 'towit() { command towit "$@"; local rc=$?; [ "$1" = show ] || echo; return $rc; }' Enter
 Type "cd /tmp/towit-demo/work/acme-api && clear" Enter
 Type "PS1='$ '" Enter
 Type "clear" Enter
