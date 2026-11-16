@@ -17,12 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_db import Database
 from towit_pipe import run_cli
 from towit_sanitize import sanitize_cell
-
-
-def _truncate(s, width):
-    if len(s) <= width:
-        return s
-    return s[:width - 1] + '…'
+from towit_table import fit_widths, truncate
 
 
 def _filter_keywords(keywords_str, terms):
@@ -83,25 +78,20 @@ def _print_table(rows, terms=None, group_by_path=False, show_text=False):
         for i, val in enumerate(row_data):
             col_widths[i] = max(col_widths[i], len(val))
 
-    # Shrink Title and Keywords proportionally if table exceeds terminal width
+    # Shrink Title, Keywords and Snippet to fit the terminal; drop Keywords if that is not enough
     term_width = shutil.get_terminal_size((120, 24)).columns - 4
-    total = sum(col_widths) + len(sep) * (len(headers) - 1) + len(indent)
-    if total > term_width:
-        shrink_cols = [1, 2, 4] if show_text else [1, 2]  # Title, Keywords, Snippet
-        shrinkable = sum(col_widths[i] for i in shrink_cols)
-        overflow = total - term_width
-        for i in shrink_cols:
-            reduction = int(overflow * col_widths[i] / shrinkable)
-            col_widths[i] = max(8, col_widths[i] - reduction)
+    floors = [None, 8, 8, None, 8, None] if show_text else [None, 8, 8, None]
+    floors = [None if f is None else max(f, len(h)) for f, h in zip(floors, headers)]
+    col_widths, kept = fit_widths(col_widths, floors, term_width, sep_width=len(sep),
+                                  indent_width=len(indent), droppable=2)
 
     def fmt_row(row_data):
         return indent + sep.join(
-            _truncate(val, col_widths[i]).ljust(col_widths[i])
-            for i, val in enumerate(row_data)
+            truncate(row_data[i], col_widths[i]).ljust(col_widths[i]) for i in kept
         )
 
-    header_line = indent + sep.join(h.ljust(col_widths[i]) for i, h in enumerate(headers))
-    divider = indent + sep.join('-' * w for w in col_widths)
+    header_line = indent + sep.join(headers[i].ljust(col_widths[i]) for i in kept)
+    divider = indent + sep.join('-' * col_widths[i] for i in kept)
 
     if group_by_path:
         groups = {}
