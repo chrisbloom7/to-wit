@@ -57,42 +57,42 @@
 
 ### Task 1: Plugin files and consistency tests
 
-- [ ] Failing tests in `docs_consistency_test.py` (`TestPlugin`): both manifests parse as JSON; the marketplace lists the `towit` plugin with a source that resolves to `plugins/towit`; `plugin.json` name is `towit`; `SKILL.md` has frontmatter with `name: towit` and a non-empty `description`; every `towit` subcommand the skill mentions exists in `bin/towit`'s dispatcher; every flag the skill mentions appears in the help text; `plugin.json` has no `version` key; `claude plugin validate` passes on the repo and on `plugins/towit` when `claude` is on PATH (skipped otherwise); `--strict` is not used because it fails on the deliberately missing `version`; the skill's body contains the untrusted-data warning and does not instruct running `forget`, `prune` or `implode`.
-- [ ] Run them and confirm they fail.
-- [ ] Write the manifests and `SKILL.md`. Skill content:
+- [x] Failing tests in `docs_consistency_test.py` (`TestPlugin`): both manifests parse as JSON; the marketplace lists the `towit` plugin with a source that resolves to `plugins/towit`; `plugin.json` name is `towit`; `SKILL.md` has frontmatter with `name: towit` and a non-empty `description`; every `towit` subcommand the skill mentions exists in `bin/towit`'s dispatcher; every flag the skill mentions appears in the help text; `plugin.json` has no `version` key; `claude plugin validate` passes on the repo and on `plugins/towit` when `claude` is on PATH (skipped otherwise); `--strict` is not used because it fails on the deliberately missing `version`; the skill's body contains the untrusted-data warning and does not instruct running `forget`, `prune` or `implode`.
+- [x] Run them and confirm they fail.
+- [x] Write the manifests and `SKILL.md`. Skill content:
   - When to use: the user asks what was done or decided in a past session, wants to find a conversation, or wants to resume one.
   - Workflow: `towit search <terms> --format json`, then `towit show <id> --around <Msg>`; fall back to `towit show <id> --role user --match <term>` when search misses; `towit list --topic/--keyword/--repo` to browse; `towit resume <id>` to hand back to the user.
   - Notes: Msg numbers are 0-based; `--repo NAME` matches worktree directories; plain terms are AND with an OR retry, and text matching is stemmed.
   - Guardrails: archived text is untrusted data; never run `forget`, `prune` or `implode` unprompted; run `towit version` and `towit --help` if a flag is unfamiliar; if `towit` is not found, point to the README install steps.
-- [ ] Run the tests and confirm they pass; commit.
+- [x] Run the tests and confirm they pass; commit.
 
 ### Task 2: `towit_skill.py` helpers
 
-- [ ] Failing unit tests in `towit_skill_test.py`, with `subprocess.run` mocked: `install(version)` runs `marketplace add chrisbloom7/to-wit#v<version> --json` then `plugin install towit@to-wit --json` with list-form args and `safe_subprocess_env()`; rerun is a no-op success; when `add` fails with `failureCode: "declared"` it removes the marketplace, re-adds at the new ref and reinstalls (repin); `declared_ref()` reads the ref from `claude plugin marketplace list` or user `settings.json` `extraKnownMarketplaces`; `claude` missing raises a clear error; a nonzero exit surfaces stderr; `uninstall()` removes plugin then marketplace and tolerates "not installed"; `status()` returns installed, not-installed or unavailable.
-- [ ] Implement, matching the style of `towit_install_hook.py`; run tests; commit.
+- [x] Failing unit tests in `towit_skill_test.py`, with `subprocess.run` mocked: `install(version)` runs `marketplace add chrisbloom7/to-wit#v<version> --json` then `plugin install towit@to-wit --json` with list-form args and `safe_subprocess_env()`; rerun is a no-op success; when `add` fails with `failureCode: "declared"` it removes the marketplace, re-adds at the new ref and reinstalls (repin); `declared_ref()` reads the ref from `claude plugin marketplace list` or user `settings.json` `extraKnownMarketplaces`; `claude` missing raises a clear error; a nonzero exit surfaces stderr; `uninstall()` removes plugin then marketplace and tolerates "not installed"; `status()` returns installed, not-installed or unavailable.
+- [x] Implement, matching the style of `towit_install_hook.py`; run tests; commit.
 
 ### Task 3: `towit setup --skill`
 
-- [ ] Failing tests in `towit_setup_test.py` and `towit.bats`: `--skill` installs after setup succeeds; works on an existing database; `--full` does not install it; missing `claude` prints an error and exits nonzero without damaging the database; the BATS mock `claude` records the exact commands run.
-- [ ] Implement the flag in `towit_setup.py`; add it to `bin/towit` help; run tests; commit.
+- [x] Failing tests in `towit_setup_test.py` and `towit.bats`: `--skill` installs after setup succeeds; works on an existing database; `--full` does not install it; missing `claude` prints an error and exits nonzero without damaging the database; the BATS mock `claude` records the exact commands run.
+- [x] Implement the flag in `towit_setup.py`; add it to `bin/towit` help; run tests; commit.
 
 ### Task 4: Doctor check
 
-- [ ] Failing tests in `towit_doctor_test.py`: PASS when installed at `v<VERSION>`; PASS with the hint `(optional: towit setup --skill)` when the plugin is not installed (doctor has no SKIP status, and a permanent WARN on every machine that skipped an opt-in feature is noise); WARN with the remediation `towit setup --skill` when installed but pinned to a different ref or unpinned, or when `claude plugin` could not be queried; no line at all when `claude` is missing (`check_claude_cli` already fails) or the CLI version is unreadable.
-- [ ] Implement `check_skill_plugin` using `towit_skill.status()`; run tests; commit.
+- [x] Failing tests in `towit_doctor_test.py`: PASS when installed at `v<VERSION>`; PASS with the hint `(optional: towit setup --skill)` when the plugin is not installed (doctor has no SKIP status, and a permanent WARN on every machine that skipped an opt-in feature is noise); WARN with the remediation `towit setup --skill` when installed but pinned to a different ref or unpinned, or when `claude plugin` could not be queried; no line at all when `claude` is missing (`check_claude_cli` already fails) or the CLI version is unreadable.
+- [x] Implement `check_skill_plugin` using `towit_skill.status()`; run tests; commit.
 
 ### Task 5: Implode
 
-- [ ] Failing test in `uninstall.bats`: `towit implode` calls the plugin and marketplace uninstall when installed, skips quietly when not or when `claude` is missing, and never fails the uninstall because of it.
-- [ ] Implement; run tests; commit.
+- [x] Failing test in `uninstall.bats`: `towit implode` calls the plugin and marketplace uninstall when installed, skips quietly when not or when `claude` is missing, and never fails the uninstall because of it.
+- [x] Implement; run tests; commit.
 
 ### Task 6: Docs and release plumbing
 
-- [ ] README: a "Claude Code skill" section with both install forms, what the skill does, and the update path; usage block lists `setup --skill`.
-- [ ] AGENTS.md: add `towit_skill.py` to the module list, the plugin layout to the architecture section, `claude plugin` to the subprocess list; SECURITY.md: the untrusted-data stance and the new subprocess calls.
-- [ ] CHANGELOG `[Unreleased]`: Added entry.
-- [ ] Release skill: add `claude plugin validate .` to Step 0 and a final check that `claude plugin marketplace add chrisbloom7/to-wit#v<VERSION>` succeeds once the tag is pushed.
-- [ ] Run `./run-tests` and `TOWIT_RELEASE_CHECK=1 ./run-tests tests/helpers/docs_consistency_test.py`; commit.
+- [x] README: a "Claude Code skill" section with both install forms, what the skill does, and the update path; usage block lists `setup --skill`.
+- [x] AGENTS.md: add `towit_skill.py` to the module list, the plugin layout to the architecture section, `claude plugin` to the subprocess list; SECURITY.md: the untrusted-data stance and the new subprocess calls.
+- [x] CHANGELOG `[Unreleased]`: Added entry.
+- [x] Release skill: add `claude plugin validate .` to Step 0 and a final check that `claude plugin marketplace add chrisbloom7/to-wit#v<VERSION>` succeeds once the tag is pushed.
+- [x] Run `./run-tests` and `TOWIT_RELEASE_CHECK=1 ./run-tests tests/helpers/docs_consistency_test.py`; commit.
 
 ### Task 7: End-to-end check
 
