@@ -23,7 +23,7 @@
 
 ## Task 0 Findings (spiked 2026-11-15 against the real `claude` CLI, in an isolated `CLAUDE_CONFIG_DIR`)
 
-1. **Manifests.** `marketplace.json`: `name`, `owner.name`, `metadata.description`, `plugins[]` with `name`, `description`, `source: "./plugins/towit"`. `plugin.json`: `name`, `description`, `author`, `homepage`, `repository`, `license`, `keywords`. Worktrunk omits `version` (installs are keyed by commit SHA); we omit it too, so there is no version file to keep in sync. `claude plugin validate <path> [--strict]` checks both manifests and the skill; the tests use it when `claude` is on PATH.
+1. **Manifests.** `marketplace.json`: `name`, `owner.name`, `metadata.description`, `plugins[]` with `name`, `description`, `source: "./plugins/towit"`. `plugin.json`: `name`, `description`, `author`, `homepage`, `repository`, `license`, `keywords`. Worktrunk omits `version` (installs are keyed by commit SHA); we omit it too, so there is no version file to keep in sync. `claude plugin validate <path>` checks both manifests and the skill; the tests use it when `claude` is on PATH.
 2. **Pinning works.** `claude plugin marketplace add owner/repo#vX.Y.Z` is accepted and recorded as `ref` in `extraKnownMarketplaces`. Decision: pin to `v<VERSION>` so the skill always matches the installed CLI. Constraints found:
    - Adding the same marketplace name from a different source (including a different ref) fails with `failureCode: "declared"`.
    - `marketplace remove` also uninstalls that marketplace's plugins.
@@ -44,7 +44,7 @@
 - Modify: `libexec/towit/towit_implode.py` (remove plugin)
 - Modify: `bin/towit` (help text for `setup --skill`)
 - Modify: `README.md`, `AGENTS.md`, `SECURITY.md`, `CHANGELOG.md`
-- Modify: `.claude/skills/release-towit/SKILL.md` (verify `claude plugin validate --strict .` and the tag-before-install ordering)
+- Modify: `.claude/skills/release-towit/SKILL.md` (verify `claude plugin validate .` and the tag-before-install ordering)
 - Create: `tests/helpers/towit_skill_test.py`; modify `tests/helpers/docs_consistency_test.py`, `tests/helpers/towit_setup_test.py`, `tests/helpers/towit_doctor_test.py`, `tests/bin/uninstall.bats`, `tests/bin/towit.bats`
 
 ## Tasks
@@ -57,7 +57,7 @@
 
 ### Task 1: Plugin files and consistency tests
 
-- [ ] Failing tests in `docs_consistency_test.py` (`TestPlugin`): both manifests parse as JSON; the marketplace lists the `towit` plugin with a source that resolves to `plugins/towit`; `plugin.json` name is `towit`; `SKILL.md` has frontmatter with `name: towit` and a non-empty `description`; every `towit` subcommand the skill mentions exists in `bin/towit`'s dispatcher; every flag the skill mentions appears in the help text; `plugin.json` has no `version` key; `claude plugin validate --strict` passes on the repo when `claude` is on PATH (skipped otherwise); the skill's body contains the untrusted-data warning and does not instruct running `forget`, `prune` or `implode`.
+- [ ] Failing tests in `docs_consistency_test.py` (`TestPlugin`): both manifests parse as JSON; the marketplace lists the `towit` plugin with a source that resolves to `plugins/towit`; `plugin.json` name is `towit`; `SKILL.md` has frontmatter with `name: towit` and a non-empty `description`; every `towit` subcommand the skill mentions exists in `bin/towit`'s dispatcher; every flag the skill mentions appears in the help text; `plugin.json` has no `version` key; `claude plugin validate` passes on the repo and on `plugins/towit` when `claude` is on PATH (skipped otherwise); `--strict` is not used because it fails on the deliberately missing `version`; the skill's body contains the untrusted-data warning and does not instruct running `forget`, `prune` or `implode`.
 - [ ] Run them and confirm they fail.
 - [ ] Write the manifests and `SKILL.md`. Skill content:
   - When to use: the user asks what was done or decided in a past session, wants to find a conversation, or wants to resume one.
@@ -91,7 +91,7 @@
 - [ ] README: a "Claude Code skill" section with both install forms, what the skill does, and the update path; usage block lists `setup --skill`.
 - [ ] AGENTS.md: add `towit_skill.py` to the module list, the plugin layout to the architecture section, `claude plugin` to the subprocess list; SECURITY.md: the untrusted-data stance and the new subprocess calls.
 - [ ] CHANGELOG `[Unreleased]`: Added entry.
-- [ ] Release skill: add `claude plugin validate --strict .` to Step 0 and a final check that `claude plugin marketplace add chrisbloom7/to-wit#v<VERSION>` succeeds once the tag is pushed.
+- [ ] Release skill: add `claude plugin validate .` to Step 0 and a final check that `claude plugin marketplace add chrisbloom7/to-wit#v<VERSION>` succeeds once the tag is pushed.
 - [ ] Run `./run-tests` and `TOWIT_RELEASE_CHECK=1 ./run-tests tests/helpers/docs_consistency_test.py`; commit.
 
 ### Task 7: End-to-end check
