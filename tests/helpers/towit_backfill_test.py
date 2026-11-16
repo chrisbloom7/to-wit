@@ -7,6 +7,7 @@ import io
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -238,6 +239,51 @@ class TestBackfillIngest(unittest.TestCase):
         with patch('towit_ingest.ingest_transcript', side_effect=RuntimeError('boom')):
             output = self._run()
         self.assertIn('Errors: 1', output)
+
+
+class TestBackfillMissingRoot(unittest.TestCase):
+    """A fresh Claude Code install has no ~/.claude/projects yet (issue 88)."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.home = os.path.join(self.tmpdir, 'home')
+        os.makedirs(self.home)
+        db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, db_path)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _run(self, *args):
+        env = dict(os.environ, HOME=self.home, TOWIT_CONFIG_PATH=self.config_path)
+        return subprocess.run(
+            [sys.executable, os.path.join(HELPERS_DIR, 'towit_backfill.py'), *args],
+            capture_output=True, text=True, env=env,
+        )
+
+    def test_missing_default_root_is_not_an_error(self):
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('No Claude Code sessions found yet', result.stdout)
+        self.assertIn(os.path.join(self.home, '.claude', 'projects'), result.stdout)
+        self.assertEqual(result.stderr, '')
+
+    def test_missing_default_root_dry_run_is_not_an_error(self):
+        result = self._run('--dry-run')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('No Claude Code sessions found yet', result.stdout)
+
+    def test_missing_folder_argument_is_still_an_error(self):
+        missing = os.path.join(self.tmpdir, 'nope')
+        result = self._run('--folder', missing)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f'Error: directory not found: {missing}', result.stderr)
+
+    def test_empty_default_root_reports_no_files(self):
+        os.makedirs(os.path.join(self.home, '.claude', 'projects'))
+        result = self._run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('No JSONL files found.', result.stdout)
 
 
 if __name__ == '__main__':
