@@ -264,6 +264,7 @@ Ask in plain language; Claude picks the commands. What you ask, and roughly what
 | "Find the session where we fixed the Redis timeout" | `towit search redis timeout --format json`, then `towit show <id> --around <msg>` to read the hit in context |
 | "What did I originally ask for when we built the export command?" | `towit search --role user export`, then `towit show <id> --role user --match export` for your own prompts |
 | "Where did we talk about pricing with Dana?" | `towit search pricing dana --format json`, then `towit show <id> --match pricing --match dana` on each candidate, because a search hit may have the two words in different messages |
+| "Does session `<id>` include a decision about switching databases?" | `towit show <id> --match database --match switch` for the messages with both words, then `towit show <id> --around <msg>` to read the surrounding turns. Claude says which messages it read and which it did not |
 | "Which of my sessions in this repo touched the release process?" | `towit search release --repo <repo> --format json` |
 | "Show me everything filed under the hooks topic" | `towit list --topic hooks --format json` |
 | "Resume the session where we debugged the Stop hook" | finds the id with `towit search`, then gives you `towit resume <id>` to run; it does not resume a session for you |
