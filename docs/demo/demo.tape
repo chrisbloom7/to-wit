@@ -9,6 +9,8 @@
 # The hidden `towit` function prints a blank line after each command's output (except `show`,
 # which ends with one), so each typed comment stays attached to its command with a gap
 # between steps.
+#
+# The GIF opens and ends on the same title card (docs/demo/banner.py), so it loops without a jump.
 
 Output docs/demo/demo.gif
 
@@ -21,11 +23,17 @@ Set TypingSpeed 55ms
 Set Theme "Catppuccin Mocha"
 
 Hide
-Type "export HOME=/tmp/towit-demo PATH=$PWD/bin:/tmp/towit-demo/bin:$PATH" Enter
+Type "export REPO=$PWD HOME=/tmp/towit-demo PATH=$PWD/bin:/tmp/towit-demo/bin:$PATH" Enter
 Type 'towit() { command towit "$@"; local rc=$?; [ "$1" = show ] || echo; return $rc; }' Enter
 Type "cd /tmp/towit-demo/work/acme-api && clear" Enter
-Type "PS1='$ '" Enter
-Type "clear" Enter
+Type `banner() { clear; python3 $REPO/docs/demo/banner.py "to wit" "Search and resume your Claude Code past"; }` Enter
+Type "PS1= && banner" Enter
+Show
+
+Sleep 2500ms
+
+Hide
+Type "tput cnorm && PS1='$ ' && clear" Enter
 Show
 
 Sleep 600ms
@@ -43,3 +51,8 @@ Type@25ms "# Pick that conversation back up in Claude Code." Enter
 Sleep 400ms
 Type "towit resume 7fac4752-ddf1-51e9-afe3-39a6a96d0b43" Enter
 Sleep 3500ms
+
+Hide
+Type "PS1= && banner" Enter
+Show
+Sleep 2500ms
