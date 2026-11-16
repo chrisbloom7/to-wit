@@ -82,11 +82,37 @@ jobs:
           fi
           towit stats >/dev/null
 
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Uses the shellcheck preinstalled on the runner image. Every tracked file with a
+      # shell shebang or a .sh/.bash extension is checked (files without a shebang are
+      # checked as bash).
+      - name: Run ShellCheck
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          files=()
+          while IFS= read -r -d '' f; do
+            if [[ "${f}" == *.sh || "${f}" == *.bash ]] || head -n 1 "${f}" | grep -Eq '^#!.*(ba|da|k|z)?sh( |$)'; then
+              files+=("${f}")
+            fi
+          done < <(git ls-files -z)
+          printf 'Checking %s\n' "${files[@]}"
+          shellcheck --shell=bash --severity=warning "${files[@]}"
+
   # Single aggregate check for branch protection: it reports even when a matrix job
   # fails or is skipped, and it does not depend on the matrix job names.
   ci-gate:
     if: always()
-    needs: [test, install-smoke]
+    needs: [test, install-smoke, shellcheck]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
