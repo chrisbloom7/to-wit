@@ -42,8 +42,9 @@ To Wit keeps what was said and makes it searchable:
 
 ## Requirements
 
-- [Claude Code](https://www.anthropic.com/claude-code) (`brew install claude-code`)
-- Python 3.11+ (`brew install python`), built with SQLite FTS5 (Homebrew's Python is; `towit doctor` checks)
+- **macOS or Linux.** To Wit is developed on macOS. CI runs the test suite and an install smoke test (`install`, `setup --hook`, `doctor`, `stats`) on both macOS and Ubuntu, but that CI does not cover the Homebrew formula, and other platforms (including Windows) are untested.
+- **Python 3.11+** built with FTS5, which is SQLite's full-text search (`brew install python`; Homebrew's Python has it, and `towit doctor` checks).
+- **[Claude Code](https://www.anthropic.com/claude-code)** (`brew install claude-code`), which is where the conversations come from: its hooks trigger archiving and its transcripts are what gets archived. The `claude` CLI is also what LLM indexing and `export --summarize` call (`claude -p`), and what `towit resume` and the skill use. Without it you can still search, show and list what is already archived, and archive in text-only mode with `[indexing] enabled = false`, but you get no titles, summaries, keywords, or topics.
 
 ## Get started
 
@@ -57,7 +58,7 @@ towit search <a word you remember>
 
 `towit setup --full` generates `~/.towit/config.toml`, creates the database, installs the Claude Code hooks, and archives and indexes your existing conversations. **It processes all of your past sessions, and unless `[indexing] enabled = false` is set it calls `claude -p` for every session that is not yet indexed, which costs API tokens** (see [Cost estimates](#cost-estimates)). To archive with no API calls, run `towit setup --config` first, set `enabled = false` under `[indexing]` in the file it generates, then run `towit setup --full`. Archiving itself is free and fast.
 
-Installing by the full formula name trusts only this formula. Homebrew requires explicit trust for third-party taps, so if you run `brew tap chrisbloom7/tap` first, trust the formula with `brew trust --formula chrisbloom7/tap/towit` before installing. The formula brings a Homebrew Python (3.11+ with SQLite FTS5). Claude Code is optional (see [Requirements](#requirements)).
+Installing by the full formula name trusts only this formula. Homebrew requires explicit trust for third-party taps, so if you run `brew tap chrisbloom7/tap` first, trust the formula with `brew trust --formula chrisbloom7/tap/towit` before installing. The formula brings a Homebrew Python (3.11+ with SQLite FTS5). Claude Code is optional for searching what is already archived (see [Requirements](#requirements) for what needs it).
 
 ### From source
 
