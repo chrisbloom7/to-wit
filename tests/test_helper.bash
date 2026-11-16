@@ -4,6 +4,7 @@
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${TESTS_DIR}/.." && pwd)"
 BIN_DIR="${PROJECT_ROOT}/bin"
+# shellcheck disable=SC2034  # sourced by the BATS files; kept available to them
 HELPERS_DIR="${PROJECT_ROOT}/libexec/towit"
 
 _setup_common() {

@@ -9,6 +9,7 @@ _towit_completions() {
     if (( COMP_CWORD == 1 )); then
         choices='setup search list resume show prune forget export backfill install-hook
                  uninstall-hook teardown implode stats doctor version help -h --help -v --version'
+        # shellcheck disable=SC2207  # mapfile needs bash 4; macOS ships 3.2, and compgen output has no spaces
         COMPREPLY=( $(compgen -W "$choices" -- "$word") )
         return 0
     fi
@@ -53,6 +54,7 @@ _towit_completions() {
             COMPREPLY+=("$prefix$match")
         done
     elif [[ -z $prefix ]]; then
+        # shellcheck disable=SC2207  # mapfile needs bash 4; macOS ships 3.2, and compgen output has no spaces
         COMPREPLY=( $(compgen -W "-h --help $flags" -- "$word") )
     fi
     return 0
