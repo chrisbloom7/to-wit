@@ -2,26 +2,30 @@
 
 > _to wit: to make clearer or more particular something that you have already said_
 
-To Wit is a searchable catalog of your [Claude Code](https://claude.ai/code) conversations, organized by topic. It keeps a local, full-text archive of your Claude Code conversations. The text of every substantive session is stored in a SQLite database with FTS5 search, so you can find what was said or decided long after Claude Code has deleted the transcript. Stored conversations are enriched with title, summary, keywords, and topics, which are searchable too. A CLI lets you search, show, list, and export conversations. Claude Code hooks keep the archive up to date automatically.
+Claude Code deletes old conversation transcripts. To Wit keeps a private, searchable copy on your machine, so you can still answer "where did I decide that three weeks ago?" You get full-text search of every substantive conversation, plus an LLM-generated title, summary, keywords, and topics for each, kept current by [Claude Code](https://www.anthropic.com/claude-code) hooks.
 
 ```shell
+# find a past session by a word you remember
 towit search hook
 /Users/chrisbloom7
   ID                                    Title                        Keywords   Msg   Snippet                          Date
   ------------------------------------  ---------------------------  ---------  ----  -------------------------------  ----------
   350fa22f-10b7-48ff-ac9d-bd9f1081c23b  Debugging non-firing Stop …  stop-hook  14    …why the Stop [hook] never ran…  2026-03-31
 
+# read the hit in context
 towit show 350fa22f-10b7-48ff-ac9d-bd9f1081c23b --around 14 --context 2
 # => message 14 and two messages either side, straight from the archive
 
+# pick the session back up where it happened
 towit resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
 # => switch to `/Users/chrisbloom7` and call `claude --resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b`
 ```
 
+The path above the table (`/Users/chrisbloom7`) is the working directory the sessions below it were run in; results are grouped by it. **Msg** is the message number to pass to `towit show --around`.
 
 ## Why
 
-Claude Code eventually deletes old transcripts, and its own history has no way to answer "where did I decide that three weeks ago?" To Wit keeps what was said and makes it searchable:
+To Wit keeps what was said and makes it searchable:
 
 - **It outlives Claude Code's retention.** The archive is yours; `claude purge` and the retention sweep do not touch it (see [Retention and removing data](#retention-and-removing-data)).
 - **It stays local.** One SQLite file under `~/.towit`, no service and no account. The only calls out are to `claude -p` for indexing and `export --summarize` (indexing can be turned off with `[indexing] enabled = false`), plus the GitHub fetch if you install the skill.
