@@ -28,10 +28,17 @@ The path above the table (`/Users/chrisbloom7`) is the working directory the ses
 To Wit keeps what was said and makes it searchable:
 
 - **It outlives Claude Code's retention.** The archive is yours; `claude purge` and the retention sweep do not touch it (see [Retention and removing data](#retention-and-removing-data)).
-- **It stays local.** One SQLite file under `~/.towit`, no service and no account. The only calls out are to `claude -p` for indexing and `export --summarize` (indexing can be turned off with `[indexing] enabled = false`), plus the GitHub fetch if you install the skill.
-- **Secrets are redacted before storage.** Best effort and pattern based, not a guarantee; see [How it works](#how-it-works).
+- **It stays local and private.** No service and no account; see [Privacy and cost](#privacy-and-cost).
 - **It keeps itself current.** Hooks archive each session as it ends, so there is nothing to remember to run.
 - **Claude can search it too.** The optional [Claude Code skill](#claude-code-skill) lets Claude look up earlier sessions for you.
+
+## Privacy and cost
+
+- **Where it lives.** By default everything is in one SQLite file, `~/.towit/catalog.db`; the `~/.towit` directory is created owner-only (`0700`) and the file `0600`, and `towit doctor` checks both. The original transcripts are never touched. The archive holds the full text of your conversations, so treat it as sensitive.
+- **What leaves your machine.** Searching, showing, listing and archiving make no network calls. Calls out go only through the `claude` CLI (`claude -p`): LLM indexing and `towit export --summarize` send (redacted) conversation text to Claude through the `claude` CLI, with an allowlisted environment. Installing the optional skill also fetches the plugin from GitHub.
+- **Redaction is best effort.** On by default, secret-shaped strings are replaced with `[REDACTED:<kind>]` before storage and before anything is sent to Claude. It is pattern based, not a guarantee (see [How it works](#how-it-works)).
+- **Zero API cost is one setting away.** `[indexing] enabled = false` archives and searches message text with no Claude calls at all (you lose titles, summaries, keywords, and topics for new sessions).
+- **What indexing costs.** About $1.48 per 100 ten-exchange conversations with the default model and settings (Haiku, `reindex_delta = 2`); see [Cost estimates](#cost-estimates) for other models. [SECURITY.md](SECURITY.md) has the full threat model.
 
 ## Requirements
 
