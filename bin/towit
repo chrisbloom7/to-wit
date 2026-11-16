@@ -22,7 +22,7 @@
 #                                   --only metadata restores the keywords-only scope
 #                                 If all terms find nothing, retries matching any term
 #                                   (not with --or or --only metadata); notice on stderr
-#   list [--format json|csv] [--folder <path>] [--topic <name>] [--keyword <name>]
+#   list [--format json|csv] [--folder <path>] [--topic <name>] [--keyword <name>] [--since YYYY-MM-DD]
 #   resume <session-id> [--force] Resume a session in its original working directory
 #   show <session-id> [--around <msg>] [--context <n>] [--role user|assistant] [--match <term>]...
 #                 [--format text|json]

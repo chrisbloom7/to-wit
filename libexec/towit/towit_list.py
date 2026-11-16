@@ -3,11 +3,12 @@
 towit_list — List cataloged Claude conversations.
 
 Usage:
-    python3 towit_list.py [--format json|csv] [--folder <path>] [--topic <name>] [--keyword <name>]
+    python3 towit_list.py [--format json|csv] [--folder <path>] [--topic <name>] [--keyword <name>] [--since YYYY-MM-DD]
 """
 
 import argparse
 import csv
+from datetime import date
 import json
 import os
 import shutil
@@ -117,6 +118,16 @@ def _print_json(rows):
     print(json.dumps(out, indent=2))
 
 
+def _iso_date(value):
+    try:
+        parsed = date.fromisoformat(value)
+        if parsed.isoformat() == value:
+            return value
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError('expected a valid date in YYYY-MM-DD format')
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='List cataloged Claude conversations.'
@@ -129,12 +140,16 @@ def main():
                         help='Filter by topic name')
     parser.add_argument('--keyword', metavar='NAME',
                         help='Filter by keyword')
+    parser.add_argument('--since', type=_iso_date, metavar='YYYY-MM-DD',
+                        help='Include conversations that started on or after this date')
     args = parser.parse_args()
 
     db = Database()
     db.validate()
 
-    results = db.list_conversations(folder=args.folder, topic=args.topic, keyword=args.keyword)
+    results = db.list_conversations(
+        folder=args.folder, topic=args.topic, keyword=args.keyword, since=args.since,
+    )
 
     if args.format == 'json':
         _print_json(results)

@@ -873,8 +873,9 @@ class Database:
             if not r['title'] and r['id'] in first:
                 r['title'] = first[r['id']][:80]
 
-    def list_conversations(self, folder: str = None, topic: str = None, keyword: str = None) -> list:
-        """Return all conversations, optionally filtered by folder, topic, and/or keyword."""
+    def list_conversations(self, folder: str = None, topic: str = None,
+                           keyword: str = None, *, since: str = None) -> list:
+        """Return conversations optionally filtered by folder, topic, keyword, or start date."""
         self.validate()
 
         conditions = []
@@ -903,6 +904,10 @@ class Database:
                 ")"
             )
             params.append(f'%{keyword}%')
+
+        if since is not None:
+            conditions.append("substr(c.started_at, 1, 10) >= ?")
+            params.append(since)
 
         where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 

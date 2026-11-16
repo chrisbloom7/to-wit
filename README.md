@@ -212,6 +212,7 @@ Subcommands:
     [--folder <path>]             Scope to a working directory
     [--topic <name>]              Filter by topic
     [--keyword <name>]            Filter by keyword
+    [--since YYYY-MM-DD]          Include conversations started on or after this date
   resume <session-id>           Resume a session in its original working directory
     [--force]                     Recreate the working directory if it no longer exists
   prune                         Remove entries whose transcripts no longer exist

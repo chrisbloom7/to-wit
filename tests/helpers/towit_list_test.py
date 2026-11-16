@@ -93,6 +93,24 @@ class TestTowitList(unittest.TestCase):
                 ids.add(conv_id)
         return ids
 
+    def test_since_composes_with_filters_in_json_and_csv(self):
+        for output_format in ('json', 'csv'):
+            with self.subTest(output_format=output_format):
+                result = run_list(self.config_path, [
+                    '--since', '2026-01-17', '--topic', 'SQLite',
+                    '--keyword', 'sqlite', '--folder', self.myapp_dir,
+                    '--format', output_format,
+                ])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self._ids_in_output(result.stdout), {'conv-c'})
+
+    def test_since_rejects_invalid_dates(self):
+        for value in ('yesterday', '2026-02-30', '20260117'):
+            with self.subTest(value=value):
+                result = run_list(self.config_path, ['--since', value])
+                self.assertEqual(result.returncode, 2)
+                self.assertIn('YYYY-MM-DD', result.stderr)
+
     def test_list_returns_all_conversations(self):
         result = run_list(self.config_path)
         self.assertEqual(result.returncode, 0)

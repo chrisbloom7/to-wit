@@ -335,6 +335,11 @@ class TestDatabaseList(unittest.TestCase):
     def _ids(self, results):
         return {r['id'] for r in results}
 
+    def test_list_since_includes_the_given_day_and_omits_missing_dates(self):
+        self.db.upsert_conversation(dict(SAMPLE_CONV, id='undated', started_at=None))
+        results = self.db.list_conversations(since='2026-01-16')
+        self.assertEqual(self._ids(results), {SAMPLE_CONV_B['id']})
+
     def test_list_conversations_returns_all(self):
         results = self.db.list_conversations()
         ids = self._ids(results)
