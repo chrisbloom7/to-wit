@@ -10,5 +10,12 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(./run-tests)",
+      "Bash(./run-tests *)",
+      "Bash(bin/towit help)"
+    ]
   }
 }

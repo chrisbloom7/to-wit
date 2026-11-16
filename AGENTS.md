@@ -29,7 +29,7 @@ This file provides guidance to AI coding agents when working with code in this r
 brew install bats-core
 ```
 
-No build step required — it's a bash/Python CLI tool.
+Requires python3 (3.11+, standard library only, built with SQLite FTS5), bats-core and jq (jq and `rg` are used by `.claude/hooks/docs-drift.sh`, not by the CLI or `./run-tests`). No build step required — it's a bash/Python CLI tool.
 
 ## Architecture
 
@@ -41,11 +41,11 @@ No build step required — it's a bash/Python CLI tool.
 Subcommand modules map 1:1 to `bin/towit` cases (`towit_search.py`, `towit_show.py`, `towit_forget.py`, `towit_prune.py`, `towit_stats.py`, `towit_doctor.py`, ...). The modules below are not subcommands:
 
 - `towit_config.py` — Loads `~/.towit/config.toml` (typed accessors, warnings for unknown keys), `safe_subprocess_env()`, session-id and transcript-path validation, the rotating error logger
-- `towit_db.py` — Database abstraction layer; all SQL lives here (schema, migrations, search, forget, archive writes). `_repo_filter` implements `--repo NAME` for search and forget: exact key, final path component equal to `NAME`, or final component starting with `NAME.` (worktree dirs); it uses `substr()`, never `LIKE`, so wildcards stay literal. `search_archive` ranks at conversation level (ordering: metadata match, terms covered, relevance, recency, id); cross-message AND matching via per-term queries runs only for 2 to `MAX_RANK_TERMS` (8) distinct terms, and `group_conversation_hits` computes coverage, relevance and the representative message. An optional `role` ('user' or 'assistant'; anything else raises `ValueError`) restricts the message-level and per-term queries and is only ever bound as a parameter; metadata matches and tier order are unaffected. `get_messages` selects the `--around` window by seq first, then filters by role in SQL and by `match` (literal substrings, via `_fold`) in Python. Message text is matched as stemmed tokens (Porter), while the metadata match stays a case-insensitive substring `LIKE`. `towit_forget` prints `repo_keys_for_scope` before the prompt (also with `--yes`)
+- `towit_db.py` — Database abstraction layer; all SQL lives here (schema, migrations, search, forget, archive writes). Search ranking, `_repo_filter` (`--repo`), the optional `role` filter and `get_messages` are documented in the module and function docstrings; read them before changing a query (`_repo_filter` deliberately avoids `LIKE`, so wildcards in `--repo` stay literal). `towit_forget` prints `repo_keys_for_scope` before the prompt (also with `--yes`)
 - `towit_ingest.py` — Archive ingest: parses JSONL into messages plus tool stubs, redacts, stores append-only, resolves `repo_key` (git common dir, else the cwd) once at first ingest (the stored key is kept afterwards unless it is NULL), runs the `SessionStart` catch-up scan. Its `main()` is the detached process the hook spawns (archive, then LLM indexing)
-- `towit_pipe.py` — `run_cli(main)` and the `quiet_broken_pipe()` context manager: a closed stdout pipe (for example `towit show <id> | head -n 1`) ends the process quietly with status 141 instead of a `BrokenPipeError` traceback. Only `BrokenPipeError` is handled; `SystemExit` and other errors pass through. `towit_export.py` wraps only its print sites, so a broken pipe from the `claude` subprocess stays an error
+- `towit_pipe.py` — `run_cli(main)` and `quiet_broken_pipe()`: a closed stdout pipe (for example `| head`) ends the process quietly with status 141. Details in the module docstring
 - `towit_sanitize.py` — Strips terminal control sequences from archived text before it is printed (`show` text output, and the table output of `search` and `list`, which also collapse newlines)
-- `towit_table.py` — `fit_widths` and `truncate` for the text tables of `search` and `list`: shrinks Title, Keywords and Snippet in proportion to their slack (largest-remainder rounding, never below 8 characters or the header), drops Keywords when that is not enough, and never touches the ID. Widths count characters, not display cells
+- `towit_table.py` — `fit_widths` and `truncate` for the text tables of `search` and `list`; never touches the ID column. Details in the module docstring
 - `towit_redact.py` — Best-effort, pattern-based secret redaction (`[REDACTED:<kind>]`)
 - `towit_index.py` — LLM indexing: parses JSONL prose, calls `claude -p` to generate title/summary/keywords/topics, filters trivial sessions
 - `towit_install_hook.py` — Registers/repairs hooks; writes `TOWIT_PYTHON` (if valid) as the hook interpreter
@@ -111,5 +111,15 @@ Never bypass the skill — it catches README drift and other issues that ad-hoc 
 
 ## Directives
 
+Agents without the Claude skills must still follow these two. Claude Code agents: the `feature-dev-towit` skill has the detailed workflow.
+
 - **Plan first:** Before implementing any non-trivial change, write out your plan and pause for acceptance before touching code.
-- **Test-driven development:** Write failing tests before writing implementation code. Run tests to confirm they fail, implement, then confirm they pass. You do not need to ask permission before moving from failing tests to implementation.
+- **Test-driven development:** Write failing tests before implementation code, confirm they fail, implement, then confirm they pass. No need to ask permission to move on.
+
+## Claude tooling
+
+- `.claude/hooks/docs-drift.sh` (a `Stop` hook in `.claude/settings.json`) runs `tests/helpers/docs_consistency_test.py` when code or docs changed in the working tree.
+- `.claude/agents/security-reviewer.md` is a read-only reviewer; use it after touching db, ingest, index, forget, redact, config or subprocess code.
+- `feature-dev-towit` (`.claude/skills/`) is the skill for any code change; `release-towit` is the release overlay described above.
+- `.claude/settings.json` allows only `./run-tests` and `bin/towit help` without a prompt.
+- **Reviewing outside PRs:** changes to `.claude/`, `CLAUDE.md` and `AGENTS.md` run or steer Claude Code on a reviewer's machine, so `.github/CODEOWNERS` routes them to the maintainer. Read the diff first (`gh pr diff <number> -- .claude CLAUDE.md AGENTS.md`) before checking an outside PR out and starting Claude Code there.

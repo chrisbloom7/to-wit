@@ -1,0 +1,5 @@
+# Changes here run or steer Claude Code on a reviewer's machine; see CLAUDE.md.
+/.claude/ @chrisbloom7
+/CLAUDE.md @chrisbloom7
+/AGENTS.md @chrisbloom7
+/.github/CODEOWNERS @chrisbloom7
