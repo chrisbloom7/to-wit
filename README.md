@@ -2,54 +2,74 @@
 
 > _to wit: to make clearer or more particular something that you have already said_
 
-To Wit is a searchable catalog of your [Claude Code](https://claude.ai/code) conversations, organized by topic. It keeps a local, full-text archive of your Claude Code conversations. The text of every substantive session is stored in a SQLite database with FTS5 search, so you can find what was said or decided long after Claude Code has deleted the transcript. Stored conversations are enriched with title, summary, keywords, and topics, which are searchable too. A CLI lets you search, show, list, and export conversations. Claude Code hooks keep the archive up to date automatically.
+Claude Code deletes old conversation transcripts. To Wit keeps a private, searchable copy on your machine, so you can still answer "where did I decide that three weeks ago?" You get full-text search of every substantive session, plus LLM-generated metadata (title, summary, keywords, and topics) for each, kept current by [Claude Code](https://www.anthropic.com/claude-code) hooks.
+
+**Terms.** A *session* is one Claude Code conversation. The *archive* is the stored message text of your sessions. *Metadata* is the LLM-generated title, summary, keywords, and topics.
 
 ```shell
+# find a past session by a word you remember
 towit search hook
 /Users/chrisbloom7
   ID                                    Title                        Keywords   Msg   Snippet                          Date
   ------------------------------------  ---------------------------  ---------  ----  -------------------------------  ----------
   350fa22f-10b7-48ff-ac9d-bd9f1081c23b  Debugging non-firing Stop …  stop-hook  14    …why the Stop [hook] never ran…  2026-03-31
 
+# read the hit in context
 towit show 350fa22f-10b7-48ff-ac9d-bd9f1081c23b --around 14 --context 2
 # => message 14 and two messages either side, straight from the archive
 
+# pick the session back up where it happened
 towit resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
 # => switch to `/Users/chrisbloom7` and call `claude --resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b`
 ```
 
+The path above the table (`/Users/chrisbloom7`) is the working directory the sessions below it were run in; results are grouped by it. **Msg** is the message number to pass to `towit show --around`.
+
+**Contents:** [Why](#why) · [Privacy and cost](#privacy-and-cost) · [Requirements](#requirements) · [Get started](#get-started) · [Core commands](#core-commands) · [Searching and reading the archive](#searching-and-reading-the-archive) · [Usage](#usage) · [How it works](#how-it-works) · [Claude Code skill](#claude-code-skill) · [Retention and removing data](#retention-and-removing-data) · [Upgrading](#upgrading) · [Configuration](#configuration) · [Uninstalling](#uninstalling) · [Development](#development)
 
 ## Why
 
-Claude Code eventually deletes old transcripts, and its own history has no way to answer "where did I decide that three weeks ago?" To Wit keeps what was said and makes it searchable:
+To Wit keeps what was said and makes it searchable:
 
 - **It outlives Claude Code's retention.** The archive is yours; `claude purge` and the retention sweep do not touch it (see [Retention and removing data](#retention-and-removing-data)).
-- **It stays local.** One SQLite file under `~/.towit`, no service and no account. The only calls out are to `claude -p` for indexing and `export --summarize` (indexing can be turned off with `[indexing] enabled = false`), plus the GitHub fetch if you install the skill.
-- **Secrets are redacted before storage.** Best effort and pattern based, not a guarantee; see [How it works](#how-it-works).
+- **It stays local and private.** No service and no account; see [Privacy and cost](#privacy-and-cost).
 - **It keeps itself current.** Hooks archive each session as it ends, so there is nothing to remember to run.
 - **Claude can search it too.** The optional [Claude Code skill](#claude-code-skill) lets Claude look up earlier sessions for you.
 
+## Privacy and cost
+
+- **Where it lives.** By default everything is in one SQLite file, `~/.towit/catalog.db`; the `~/.towit` directory is created owner-only (`0700`) and the file `0600`, and `towit doctor` checks both. The original transcripts are never touched. The archive holds the full text of your sessions, so treat it as sensitive.
+- **What leaves your machine.** Searching, showing, listing and archiving make no network calls. Calls out go only through the `claude` CLI (`claude -p`): LLM indexing and `towit export --summarize` send (redacted) session text to Claude through the `claude` CLI, with an allowlisted environment. Installing the optional skill also fetches the plugin from GitHub.
+- **Redaction is best effort.** On by default, secret-shaped strings are replaced with `[REDACTED:<kind>]` before storage and before anything is sent to Claude. It is pattern based, not a guarantee (see [How it works](#how-it-works)).
+- **Zero API cost is one setting away.** `[indexing] enabled = false` archives and searches message text with no Claude calls at all (you lose metadata for new sessions).
+- **What indexing costs.** About $1.48 per 100 ten-exchange sessions with the default model and settings (Haiku, `reindex_delta = 2`); see [Cost estimates](#cost-estimates) for other models. [SECURITY.md](SECURITY.md) has the full threat model.
+
 ## Requirements
 
-- [Claude Code](https://www.anthropic.com/claude-code) (`brew install claude-code`)
-- Python 3.11+ (`brew install python`), built with SQLite FTS5 (Homebrew's Python is; `towit doctor` checks)
+- **macOS or Linux.** To Wit is developed on macOS. CI runs the test suite and an install smoke test (`install`, `setup --hook`, `doctor`, `stats`) on both macOS and Ubuntu, but that CI does not cover the Homebrew formula, and other platforms (including Windows) are untested.
+- **Python 3.11+** built with FTS5, which is SQLite's full-text search (`brew install python`; Homebrew's Python has it, and `towit doctor` checks).
+- **[Claude Code](https://www.anthropic.com/claude-code)** (`brew install claude-code`), which is where the conversations come from: its hooks trigger archiving and its transcripts are what gets archived. The `claude` CLI is also what LLM indexing and `export --summarize` call (`claude -p`), and what `towit resume` and the skill use. Without it you can still search, show and list what is already archived, and archive in text-only mode with `[indexing] enabled = false`, but you get no metadata.
 
-## Installation
+## Get started
 
-### Homebrew
+The shortest path is three commands, ending in your first search:
 
 ```bash
 brew install chrisbloom7/tap/towit
-towit setup --hook
+towit setup --full
+towit search <a word you remember>
 ```
 
-This installs To Wit and a Homebrew Python (Python 3.11+ with SQLite FTS5). Installing by the full name trusts only this formula. Homebrew requires explicit trust for third-party taps, so if you run `brew tap chrisbloom7/tap` first, trust the formula with `brew trust --formula chrisbloom7/tap/towit` before installing. Claude Code is optional (see Requirements).
+`towit setup --full` generates `~/.towit/config.toml`, creates the database, installs the Claude Code hooks, and archives and indexes your existing sessions. **It processes all of your past sessions, and unless `[indexing] enabled = false` is set it calls `claude -p` for every session that is not yet indexed, which costs API tokens** (see [Cost estimates](#cost-estimates)). To archive with no API calls, run `towit setup --config` first, set `enabled = false` under `[indexing]` in the file it generates, then run `towit setup --full`. Archiving itself is free and fast.
+
+Installing by the full formula name trusts only this formula. Homebrew requires explicit trust for third-party taps, so if you run `brew tap chrisbloom7/tap` first, trust the formula with `brew trust --formula chrisbloom7/tap/towit` before installing. The formula brings a Homebrew Python (3.11+ with SQLite FTS5). Claude Code is optional for searching what is already archived (see [Requirements](#requirements) for what needs it).
 
 ### From source
 
 ```bash
 git clone https://github.com/chrisbloom7/to-wit.git ~/path/to/to-wit
 ~/path/to/to-wit/install
+towit setup --full
 ```
 
 By default, `install` links into `~/.local/bin` (creating it if needed) and tells you if that directory is not on your `PATH`. Pass a different directory as the first argument if needed (for example `/usr/local/bin`, which is root-owned on Apple Silicon Macs, so it needs `sudo`):
@@ -58,46 +78,107 @@ By default, `install` links into `~/.local/bin` (creating it if needed) and tell
 ~/path/to/to-wit/install /some/other/dir
 ```
 
-## Upgrading
+### Step by step
 
-**Homebrew:** `brew upgrade towit`. The hooks point at Homebrew's version-independent path, so they keep working across upgrades. Your database upgrades itself the first time any `towit` command runs.
-
-**From source:** `install` symlinks into your clone, so updating the code is a `git pull`; there is nothing to reinstall:
+Instead of `--full`, run the pieces yourself:
 
 ```bash
-git -C ~/path/to/to-wit pull
-```
-
-Your database upgrades itself the first time any `towit` command runs, and your config and existing data are kept. Coming from 0.8.x or earlier (either way), also run:
-
-```bash
-towit install-hook   # adds the SessionEnd and SessionStart hooks; keeps your Stop hook
-towit backfill       # archives the transcripts still on disk (Claude Code eventually purges them)
-towit doctor         # confirms hooks, FTS5, and the archive schema
-```
-
-If you installed the Claude Code skill (`towit setup --skill`), run it again after upgrading to repin the plugin to the new version; `towit doctor` tells you when it is out of date.
-
-If you move your clone, re-run `towit install-hook`: it repairs hooks that point at the old location.
-
-New `[ingest]` and `[indexing]` settings use their defaults until you add them; see [Configuration](#configuration). **Switching from a source install to Homebrew:** your data and config are kept. Remove the old symlink (`rm ~/.local/bin/towit`; do not run `./uninstall`, which also deletes the archive), then run `towit install-hook` to point the hooks at the Homebrew install.
-
-If you originally installed into `/usr/local/bin`, the symlink keeps working, but `towit implode --install-dir /usr/local/bin` (or `./uninstall /usr/local/bin`) needs the directory spelled out now that the default is `~/.local/bin`.
-
-## Quick start
-
-```bash
-# Full setup: generate config, initialize database, install hooks, and archive and index existing conversations
-towit setup --full
-
-# Or step by step:
 towit setup --config  # Generate ~/.towit/config.toml (optional but recommended)
 towit setup           # Initialize the database
 towit install-hook    # Add the hooks to Claude Code (archives future sessions automatically)
-towit backfill        # Archive and index existing conversations (LLM indexing takes ~4 sec/session on Apple M4 Pro; archiving alone is far faster)
+towit backfill        # Archive and index existing sessions (LLM indexing takes ~4 sec/session on Apple M4 Pro; archiving alone is far faster)
 ```
 
+Skip `backfill` if you only want sessions from now on.
+
+## Core commands
+
+| Command | What it does |
+|---|---|
+| `towit search <terms...>` | Find sessions by words in their messages, keywords, titles, and summaries |
+| `towit show <session-id>` | Print a session's archived messages, or just those around a search hit |
+| `towit list` | Browse sessions, filtered by folder, topic, or keyword |
+| `towit resume <session-id>` | Resume a session in its original working directory |
+| `towit export <session-id>` | Export a session as Markdown or JSON, or as an AI summary (needs the original transcript) |
+| `towit doctor` | Check the config, database, hooks, and skill |
+
+New here? Run `towit setup --full` (see [Get started](#get-started)). Use `towit setup --hook` instead to install only the hooks, without backfilling (and so without paying to index) your old sessions. `--skill` is separate and opt-in (see [Claude Code skill](#claude-code-skill)). Every subcommand and flag is listed under [Usage](#usage).
+
+## Searching and reading the archive
+
+`towit search` finds sessions by the words in their messages (and by their keywords, titles, and summaries). Each result shows its best-matching message: the **Msg** (the 0-based message number, which is what `towit show --around` takes) and a snippet with the matching words in `[brackets]`:
+
+```shell
+towit search recursion
+/tmp/demo
+  ID                                    Title                      Keywords  Msg   Snippet                     Date
+  ------------------------------------  -------------------------  --------  ----  --------------------------  ----------
+  aaaaaaaa-1111-2222-3333-444444444444  How does the stop hook r…            0     How does the stop hook [r…  2026-03-31
+
+towit show aaaaaaaa-1111-2222-3333-444444444444 --around 1 --context 1
+```
+
+### Finding a prompt in a long session
+
+`towit search` ranks whole conversations and shows one representative message, which is often an assistant reply or a `[Bash]` stub rather than the prompt you remember. Restrict the match to your own messages, then narrow the session down:
+
+```shell
+towit search --role user "migration plan"      # finds the session: ID and Msg of your own prompt
+towit show <id> --role user --match migration  # every prompt of yours in that session that mentions it
+towit show <id> --around 812 --context 3       # read it in context
+```
+
+Msg numbers are used throughout (never line numbers), and `towit show <id> --role user` on its own is an outline of the session's prompts.
+
+### More examples
+
+```shell
+# Search one repo (its worktrees too) and print a compact list: date, id, title
+towit search "stop hook" --repo to-wit --format json | jq -r '.[] | "\(.date)  \(.id)  \(.title)"'
+
+# Match any of several terms instead of all of them
+towit search redis timeout connection --or
+
+# An exact phrase, in your own prompts only (skips assistant replies and tool stubs)
+towit search "retry budget" --role user
+
+# Browse by topic or keyword instead of searching
+towit list --topic hooks
+towit list --keyword stop-hook --format json | jq -r '.[].id'
+
+# Every prompt you wrote in one session, with the Msg number to pass to `show --around`
+towit show <id> --role user --format json | jq -r '.[] | "\(.seq)\t\(.text | split("\n")[0])"'
+
+# Titles, summaries and keywords only: quick, and ignores message text
+towit search --only metadata --title stemming
+```
+
+### Reference: search and show options
+
+`towit search` looks in message text, keywords, titles, and summaries by default, and ranks conversations with a metadata match first, then those covering more of your terms, then by relevance and how many messages match, then the newest..
+
+- Every argument is a term and terms are combined with AND (`--or` for OR). A conversation matches when every term appears somewhere in its messages, even in different messages. With more than 8 distinct terms (ignoring case duplicates and terms with no letter or digit), all terms must appear in one message. If an AND search finds nothing and there are two or more terms, it is retried with OR and `No results for all terms; showing results matching any term.` is printed to stderr (so `--format json` and `csv` output on stdout stays parseable). The retry does not apply with `--or` or `--only metadata`. An argument that contains a space is an exact phrase: `towit search "stop hook"`. Punctuation and FTS5 operators in your input are treated literally.
+- Terms match message text as English-stemmed words, so `test` also finds "tests" and "tested", and `remove` finds "removed" and "removing". A `_`, `-` or `.` inside a word keeps it one token (`towit_db.py` and `my-var` match as written, not as their parts), and quoting a phrase still applies the stemmer to each word. Stemming can over-match (`university` and `universal` both reduce to `univers`) and it is English only. Keyword, topic, title, and summary matching is a case-insensitive substring match and is not stemmed. `towit show --match` is likewise a literal substring filter.
+- `--only text` searches message text alone. `--only metadata` restores the pre-archive scope: keywords only, plus titles, summaries, and topics when you add `--title`, `--summary`, `--all`, or `--topic`. `--topic` adds topics to any scope.
+- Tool calls are stored only as short stubs (at most 200 characters) and tool results are not stored, except failures as `[error]` lines of at most 300 characters, so the output of commands is not searchable. Within a message, relevance favors short messages, so a brief mention can outrank a long message about the term; conversations with many matching messages are boosted; scan past the top few results.
+- `--role user` (or `assistant`) matches text only in messages of that role. Ranking, coverage, relevance, the Msg and the snippet then come only from those messages, so `--role user` skips assistant replies and the `[Bash]`-style tool stubs inside them, and a hit's Msg is your own prompt. Keyword, title, summary, and topic matches are not affected and still rank first (a conversation that matches only by metadata shows an empty Msg and snippet). AND means every term appears in that role's messages, and the OR retry keeps the role. `--role` with `--only metadata` is an error, because it would do nothing.
+- Text matches are capped at 50 conversations. Metadata matches are never capped.
+- `--folder` matches a conversation's working directory exactly. `--repo` matches a repo by its key (the exact path) or by its final path component, e.g. `--repo to-wit`. The name also matches keys whose final component starts with `name.`, so `--repo studio-app` finds `studio-app.phase-2a-payments` (the worktree of a repo whose directory had already been deleted). It does not match `studio-app2`, `other-studio-app.x`, or a `studio-app.x` that is only a parent directory. `towit forget --repo` lists the matched repo keys (up to 10, then `+N more`) before it asks you to confirm (and before deleting, even with `--yes`), so check them when a name matches more than you expect.
+- `--format json` and `--format csv` add `seq` (the message number), `snippet`, and `score` to each result (the conversation's id stays in `id`).
+
+**Repo grouping.** A conversation's repo key is the git common directory of its working directory, so all the worktrees of a repo group under the main checkout. The key is resolved once, when the session is first archived, and kept on later ingests (a resumed session, a `towit backfill`), so deleting a worktree afterwards does not change it. If the working directory no longer exists (or is not a git checkout) at that first archive, the working directory itself becomes the key; for example `studio-app.phase-2a-payments` is its own stored key. Only the `--repo` match widens: `--repo studio-app` matches that key by its `studio-app.` prefix, so such sessions are found without having to name the worktree.
+
+`towit show <session-id>` prints the stored messages (`--around <msg> --context <n>` narrows it to the messages near a search hit, where `<msg>` is the Msg column of `towit search`; `--format json` prints an array of `seq`, `role`, `ts`, and `text`). `--role user|assistant` keeps only messages of that role (on its own, `towit show <id> --role user` is an outline of your prompts with their Msg numbers), and `--match TERM` keeps only messages containing the term as a literal substring, ignoring case and diacritics (so `--match migrat` finds "migration"; unlike `search`, which matches whole words). Repeat it (`--match a --match b`) to require every term in the same message; `%` and `_` are literal. With `--around`, the window is chosen first by message number and `--role`/`--match` then filter it, and the `>> ` marker appears only if that message itself passes. Msg numbers stay the original ones, in text and `--format json` alike. When nothing matches, `show` prints `No messages match the given filters.` to stderr and exits 1. Two quirks: under `--role user`, `[error]` rows (failed tool results are stored as user messages) can still appear, and under `--role assistant`, tool stubs stay because they sit inside assistant messages. It works after Claude Code has deleted the transcript. The text is archive content (including tool output and web content), so `show` strips terminal control sequences before printing it. The table output of `search` and `list` (titles, keywords, snippets, working directories) is sanitized the same way and kept on one line per row; `--format json` escapes non-ASCII characters and `--format csv` is printed as stored, so a cell can start with `=`, `+`, `-` or `@` (a spreadsheet runs it as a formula) or carry terminal escapes; review a CSV before opening it in a spreadsheet or printing it to a terminal. With no results `--format csv` prints nothing on stdout (no header row), while `--format json` prints `[]`.
+
+### Stats and version
+
+`towit stats` prints conversation counts, then a block with the number of archived and metadata-only conversations, archived messages, and the database size.
+
+`towit version` (also `--version` and `-v`) prints the installed version, for example `towit 0.10.0`; `towit doctor` reports it as its first line. The version comes from the `libexec/towit/VERSION` file that ships with the install, and reads `towit unknown` if that file is missing.
+
 ## Usage
+
+The full command reference, as printed by `towit help`:
 
 ```
 towit <subcommand> [options]
@@ -164,11 +245,11 @@ Subcommands:
 
 ## How it works
 
-**Archiving.** Each conversation is parsed from Claude Code's JSONL transcript files (`~/.claude/projects/`). The text of every user and assistant message is stored in `~/.towit/catalog.db` (SQLite, WAL mode) and indexed with FTS5, so searching needs no API calls and takes milliseconds. Tool calls are kept as one-line stubs inside the assistant turn that made them (`[Bash] <description or command>`, `[Edit] <file path>`, each capped at 200 characters), and failed tool results as `[error] <first 300 characters>`. Tool results and file contents are not stored. A single message is capped at 50,000 characters, so a pasted log cannot bloat the archive. Sessions with fewer than two user messages are not archived, and subagent sessions are skipped unless you set `include_subagents`. Archiving is incremental and append-only: each run stores only the messages added since the last one.
+**Archiving.** Each session is parsed from Claude Code's JSONL transcript files (`~/.claude/projects/`). The text of every user and assistant message is stored in `~/.towit/catalog.db` (SQLite, WAL mode) and indexed with FTS5, so searching needs no API calls and takes milliseconds. Tool calls are kept as one-line stubs inside the assistant turn that made them (`[Bash] <description or command>`, `[Edit] <file path>`, each capped at 200 characters), and failed tool results as `[error] <first 300 characters>`. Tool results and file contents are not stored. A single message is capped at 50,000 characters, so a pasted log cannot bloat the archive. Sessions with fewer than two user messages are not archived, and subagent sessions are skipped unless you set `include_subagents`. Archiving is incremental and append-only: each run stores only the messages added since the last one.
 
-**Redaction.** Before text is stored, secret-shaped strings (AWS keys, GitHub, Anthropic, OpenAI, Stripe, and Slack tokens, JWTs, private-key blocks, `Bearer` tokens, credentials in URLs, and long values assigned to `*_KEY`, `*_SECRET`, `*_TOKEN`, or `*_PASSWORD` names) are replaced with `[REDACTED:<kind>]`. The same redaction is applied to the transcript sent to Claude for analysis, and to what `towit export --summarize` and `export --topic --summarize` send (at send time, so stored summaries from older versions are covered too). It is best effort and pattern based, **not a guarantee**: treat the archive as sensitive. Stored rows are redacted once, at ingest, and never rewritten; export prompts are redacted at send time. Turning `ingest.redact` off or on later does not rewrite rows that are already archived (use `towit forget` to remove them), and a redacted value cannot be searched by its original text. Add your own patterns with `ingest.extra_patterns`.
+**Redaction.** Before text is stored, secret-shaped strings (AWS keys, GitHub, Anthropic, OpenAI, Stripe, and Slack tokens, JWTs, private-key blocks, `Bearer` tokens, credentials in URLs, and long values assigned to `*_KEY`, `*_SECRET`, `*_TOKEN`, or `*_PASSWORD` names) are replaced with `[REDACTED:<kind>]`. The same redaction is applied to the transcript sent to Claude for analysis, and, at send time, to what `towit export --summarize` and `export --topic --summarize` send (so stored summaries from older versions are covered too). It is best effort and pattern based, **not a guarantee**: treat the archive as sensitive. Stored rows are redacted once, at ingest, and never rewritten, so turning `ingest.redact` off or on later does not change rows that are already archived (use `towit forget` to remove them), and a redacted value cannot be searched by its original text. Add your own patterns with `ingest.extra_patterns`.
 
-**LLM metadata (optional).** After archiving, Claude analyzes substantive conversations and extracts a title, summary, 15-30 specific keywords (identifiers, method names, error messages, domain terms, filenames, etc.), and broad topic tags. Claude may decide a session is trivial (a quick one-shot or a command-execution session); the session is still archived and searchable by its text, it just has no title, summary, or keywords, and search results fall back to its first user message as the title. Set `[indexing] enabled = false` to archive only, with no API calls at all.
+**LLM metadata (optional).** After archiving, Claude analyzes substantive sessions and extracts a title, summary, 15-30 specific keywords (identifiers, method names, error messages, domain terms, filenames, etc.), and broad topic tags. Claude may decide a session is trivial (a quick one-shot or a command-execution session); the session is still archived and searchable by its text, it just has no title, summary, or keywords, and search results fall back to its first user message as the title. Set `[indexing] enabled = false` to archive only, with no API calls at all.
 
 **Hooks.** `towit install-hook` registers one script, `towit_hook.py`, for three Claude Code hook events, and it does the real work in a detached background process so it never slows Claude Code down:
 
@@ -179,72 +260,6 @@ Subcommands:
 | `SessionStart` (matcher `startup`) | Runs a catch-up scan: archives, with no LLM calls, every transcript modified since the last scan. This recovers sessions that ended without a hook (a crash, a closed terminal). |
 
 Hooks are skipped when Claude Code runs with `--bare` and when `disableAllHooks` is true; `towit doctor` warns about the latter. `Stop` and `SessionEnd` run as separate background processes, so if both fire before the first finishes, both may call Claude for the same session. That costs a little extra API spend and nothing else. Run `towit backfill` to archive transcripts that existed before you installed the hooks.
-
-## Searching and reading the archive
-
-`towit search` looks in message text, keywords, titles, and summaries by default, and ranks conversations with a metadata match first, then those covering more of your terms, then by relevance and how many messages match, then the newest. Each result shows its best-matching message: the **Msg** (the 0-based message number, which is what `towit show --around` takes) and a snippet with the matching words in `[brackets]`:
-
-```shell
-towit search recursion
-/tmp/demo
-  ID                                    Title                      Keywords  Msg   Snippet                     Date
-  ------------------------------------  -------------------------  --------  ----  --------------------------  ----------
-  aaaaaaaa-1111-2222-3333-444444444444  How does the stop hook r…            0     How does the stop hook [r…  2026-03-31
-
-towit show aaaaaaaa-1111-2222-3333-444444444444 --around 1 --context 1
-```
-
-- Every argument is a term and terms are combined with AND (`--or` for OR). A conversation matches when every term appears somewhere in its messages, even in different messages. With more than 8 distinct terms (ignoring case duplicates and terms with no letter or digit), all terms must appear in one message. If an AND search finds nothing and there are two or more terms, it is retried with OR and `No results for all terms; showing results matching any term.` is printed to stderr (so `--format json` and `csv` output on stdout stays parseable). The retry does not apply with `--or` or `--only metadata`. An argument that contains a space is an exact phrase: `towit search "stop hook"`. Punctuation and FTS5 operators in your input are treated literally.
-- Terms match message text as English-stemmed words, so `test` also finds "tests" and "tested", and `remove` finds "removed" and "removing". A `_`, `-` or `.` inside a word keeps it one token (`towit_db.py` and `my-var` match as written, not as their parts), and quoting a phrase still applies the stemmer to each word. Stemming can over-match (`university` and `universal` both reduce to `univers`) and it is English only. Keyword, topic, title, and summary matching is a case-insensitive substring match and is not stemmed. `towit show --match` is likewise a literal substring filter.
-- `--only text` searches message text alone. `--only metadata` restores the pre-archive scope: keywords only, plus titles, summaries, and topics when you add `--title`, `--summary`, `--all`, or `--topic`. `--topic` adds topics to any scope.
-- Tool calls are stored only as short stubs (at most 200 characters) and tool results are not stored, except failures as `[error]` lines of at most 300 characters, so the output of commands is not searchable. Within a message, relevance favors short messages, so a brief mention can outrank a long message about the term; conversations with many matching messages are boosted; scan past the top few results.
-- `--role user` (or `assistant`) matches text only in messages of that role. Ranking, coverage, relevance, the Msg and the snippet then come only from those messages, so `--role user` skips assistant replies and the `[Bash]`-style tool stubs inside them, and a hit's Msg is your own prompt. Keyword, title, summary, and topic matches are not affected and still rank first (a conversation that matches only by metadata shows an empty Msg and snippet). AND means every term appears in that role's messages, and the OR retry keeps the role. `--role` with `--only metadata` is an error, because it would do nothing.
-- Text matches are capped at 50 conversations. Metadata matches are never capped.
-- `--folder` matches a conversation's working directory exactly. `--repo` matches a repo by its key (the exact path) or by its final path component, e.g. `--repo to-wit`. The name also matches keys whose final component starts with `name.`, so `--repo studio-app` finds `studio-app.phase-2a-payments` (the worktree of a repo whose directory had already been deleted). It does not match `studio-app2`, `other-studio-app.x`, or a `studio-app.x` that is only a parent directory. `towit forget --repo` lists the matched repo keys (up to 10, then `+N more`) before it asks you to confirm (and before deleting, even with `--yes`), so check them when a name matches more than you expect.
-- `--format json` and `--format csv` add `seq` (the message number), `snippet`, and `score` to each result (the conversation's id stays in `id`).
-
-**Repo grouping.** A conversation's repo key is the git common directory of its working directory, so all the worktrees of a repo group under the main checkout. The key is resolved once, when the session is first archived, and kept on later ingests (a resumed session, a `towit backfill`), so deleting a worktree afterwards does not change it. If the working directory no longer exists (or is not a git checkout) at that first archive, the working directory itself becomes the key; for example `studio-app.phase-2a-payments` is its own stored key. Only the `--repo` match widens: `--repo studio-app` matches that key by its `studio-app.` prefix, so such sessions are found without having to name the worktree.
-
-`towit show <session-id>` prints the stored messages (`--around <msg> --context <n>` narrows it to the messages near a search hit, where `<msg>` is the Msg column of `towit search`; `--format json` prints an array of `seq`, `role`, `ts`, and `text`). `--role user|assistant` keeps only messages of that role (on its own, `towit show <id> --role user` is an outline of your prompts with their Msg numbers), and `--match TERM` keeps only messages containing the term as a literal substring, ignoring case and diacritics (so `--match migrat` finds "migration"; unlike `search`, which matches whole words). Repeat it (`--match a --match b`) to require every term in the same message; `%` and `_` are literal. With `--around`, the window is chosen first by message number and `--role`/`--match` then filter it, and the `>> ` marker appears only if that message itself passes. Msg numbers stay the original ones, in text and `--format json` alike. When nothing matches, `show` prints `No messages match the given filters.` to stderr and exits 1. Two quirks: under `--role user`, `[error]` rows (failed tool results are stored as user messages) can still appear, and under `--role assistant`, tool stubs stay because they sit inside assistant messages. It works after Claude Code has deleted the transcript. The text is archive content (including tool output and web content), so `show` strips terminal control sequences before printing it. The table output of `search` and `list` (titles, keywords, snippets, working directories) is sanitized the same way and kept on one line per row; `--format json` escapes non-ASCII characters and `--format csv` is printed as stored, so a cell can start with `=`, `+`, `-` or `@` (a spreadsheet runs it as a formula) or carry terminal escapes; review a CSV before opening it in a spreadsheet or printing it to a terminal. With no results `--format csv` prints nothing on stdout (no header row), while `--format json` prints `[]`.
-
-### More examples
-
-```shell
-# Search one repo (its worktrees too) and print a compact list: date, id, title
-towit search "stop hook" --repo to-wit --format json | jq -r '.[] | "\(.date)  \(.id)  \(.title)"'
-
-# Match any of several terms instead of all of them
-towit search redis timeout connection --or
-
-# An exact phrase, in your own prompts only (skips assistant replies and tool stubs)
-towit search "retry budget" --role user
-
-# Browse by topic or keyword instead of searching
-towit list --topic hooks
-towit list --keyword stop-hook --format json | jq -r '.[].id'
-
-# Every prompt you wrote in one session, with the Msg number to pass to `show --around`
-towit show <id> --role user --format json | jq -r '.[] | "\(.seq)\t\(.text | split("\n")[0])"'
-
-# Titles, summaries and keywords only: quick, and ignores message text
-towit search --only metadata --title stemming
-```
-
-### Finding a prompt in a long session
-
-`towit search` ranks whole conversations and shows one representative message, which is often an assistant reply or a `[Bash]` stub rather than the prompt you remember. Restrict the match to your own messages, then narrow the session down:
-
-```shell
-towit search --role user "migration plan"      # finds the session: ID and Msg of your own prompt
-towit show <id> --role user --match migration  # every prompt of yours in that session that mentions it
-towit show <id> --around 812 --context 3       # read it in context
-```
-
-Msg numbers are used throughout (never line numbers), and `towit show <id> --role user` on its own is an outline of the session's prompts.
-
-`towit stats` prints conversation counts, then a block with the number of archived and metadata-only conversations, archived messages, and the database size.
-
-`towit version` (also `--version` and `-v`) prints the installed version, for example `towit 0.10.0`; `towit doctor` reports it as its first line. The version comes from the `libexec/towit/VERSION` file that ships with the install, and reads `towit unknown` if that file is missing.
 
 ## Claude Code skill
 
@@ -294,6 +309,35 @@ towit forget --folder /path/to/dir   # every conversation whose working director
 `forget` shows how many conversations it will delete and asks for confirmation unless you pass `--yes`. It removes the messages, search-index entries, topics, and keywords, and keeps only the session id in a tombstone so `backfill`, the hooks, and the catch-up scan never re-archive it from a transcript that is still on disk. `forget <session-id>` also forgets that session's subagent conversations (archived under their own ids), and says how many. The transcript under `~/.claude/projects/` is not touched. To really remove the text from disk, `forget` also zeroes freed pages (`secure_delete`), merges the FTS index, and runs `VACUUM` and a write-ahead-log truncate. `VACUUM` rewrites the whole database file, so a `forget` takes time proportional to the database size. If the physical cleanup could not finish (for example another towit process was busy), `forget` prints a warning on stderr but still exits 0; running `towit forget <session-id>` again on that already-forgotten id re-runs the cleanup. Exit codes: `0` success, `1` unknown id / nothing matched / you declined the prompt, `2` usage error (no selector, or more than one).
 
 `towit prune` removes catalog entries whose transcripts are gone, but by default only those that were never archived (`archived = 0`); archived conversations are kept because their messages are the point. `towit prune --archive` also removes archived conversations with missing transcripts, including those in the purge report below (after a confirmation, or with `--yes`), and `--dry-run` previews. Archived rows are removed physically, the same way `forget` does it (FTS merge, `VACUUM`, WAL truncate), but without a tombstone, so a session whose transcript reappears can be archived again (metadata-only rows hold no message text and are deleted plainly, so a default `prune` stays fast). `prune` also prints a **Likely removed by claude purge** section that lists archived conversations whose whole project folder no longer exists. It is only a report, because a manually deleted folder looks identical; for subagent sessions the "project folder" is the session's `subagents` directory, so a purged session directory shows up there too.
+
+## Upgrading
+
+**Homebrew:** `brew upgrade towit`. The hooks point at Homebrew's version-independent path, so they keep working across upgrades. Your database upgrades itself the first time any `towit` command runs.
+
+**From source:** `install` symlinks into your clone, so updating the code is a `git pull`; there is nothing to reinstall:
+
+```bash
+git -C ~/path/to/to-wit pull
+```
+
+Your database upgrades itself the first time any `towit` command runs, and your config and existing data are kept. If you installed the Claude Code skill (`towit setup --skill`), run it again after upgrading to repin the plugin to the new version; `towit doctor` tells you when it is out of date. If you move your clone, re-run `towit install-hook`: it repairs hooks that point at the old location. New `[ingest]` and `[indexing]` settings use their defaults until you add them; see [Configuration](#configuration).
+
+<details>
+<summary>Coming from an older version or a source install</summary>
+
+**From 0.8.x or earlier (Homebrew or source):** also run:
+
+```bash
+towit install-hook   # adds the SessionEnd and SessionStart hooks; keeps your Stop hook
+towit backfill       # archives the transcripts still on disk (Claude Code eventually purges them)
+towit doctor         # confirms hooks, FTS5, and the archive schema
+```
+
+**Switching from a source install to Homebrew:** your data and config are kept. Remove the old symlink (`rm ~/.local/bin/towit`; do not run `./uninstall`, which also deletes the archive), then run `towit install-hook` to point the hooks at the Homebrew install.
+
+If you originally installed into `/usr/local/bin`, the symlink keeps working, but `towit implode --install-dir /usr/local/bin` (or `./uninstall /usr/local/bin`) needs the directory spelled out now that the default is `~/.local/bin`.
+
+</details>
 
 ## Configuration
 
