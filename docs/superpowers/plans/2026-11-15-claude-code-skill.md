@@ -78,7 +78,7 @@
 
 ### Task 4: Doctor check
 
-- [ ] Failing tests in `towit_doctor_test.py`: PASS when installed at `v<VERSION>`, WARN with the remediation `towit setup --skill` when `claude` exists but the plugin is not installed or is pinned to a different ref (or unpinned), SKIP-equivalent when `claude` is missing (no duplicate failure beyond `check_claude_cli`).
+- [ ] Failing tests in `towit_doctor_test.py`: PASS when installed at `v<VERSION>`; PASS with the hint `(optional: towit setup --skill)` when the plugin is not installed (doctor has no SKIP status, and a permanent WARN on every machine that skipped an opt-in feature is noise); WARN with the remediation `towit setup --skill` when installed but pinned to a different ref or unpinned, or when `claude plugin` could not be queried; no line at all when `claude` is missing (`check_claude_cli` already fails) or the CLI version is unreadable.
 - [ ] Implement `check_skill_plugin` using `towit_skill.status()`; run tests; commit.
 
 ### Task 5: Implode

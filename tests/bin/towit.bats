@@ -630,6 +630,14 @@ EOF
   }
 }
 
+@test "towit: doctor reports the Claude Code skill as optional when it is not installed" {
+  "${TOWIT}" setup
+  _stub_claude_plugin
+  run "${TOWIT}" doctor
+  [[ "${output}" == *"Claude Code skill not installed"* ]] || { echo "${output}"; return 1; }
+  [[ "${output}" == *"towit setup --skill"* ]] || { echo "${output}"; return 1; }
+}
+
 @test "towit: doctor output contains no JSON or CSV" {
   local settings_file="${TEST_TMPDIR}/settings.json"
   echo '{}' > "${settings_file}"

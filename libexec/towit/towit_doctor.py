@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_config import _KNOWN_KEYS
 from towit_db import SCHEMA_VERSION
 from towit_install_hook import HOOK_EVENTS
+import towit_skill
 from towit_pipe import run_cli
 
 
@@ -109,6 +110,29 @@ def check_claude_cli() -> CheckResult:
             remediation="Install Claude Code and ensure it is available as 'claude' on your PATH.",
         )
     return CheckResult('PASS', f'claude CLI found at {path}')
+
+
+def check_skill_plugin(version=None) -> 'CheckResult | None':
+    """The optional Claude Code skill plugin. None when there is nothing useful to say.
+
+    Not installed is a PASS (it is opt-in); WARN only when it is installed but pinned to a
+    different version than this CLI, or when claude could not be asked.
+    """
+    version = version or towit_skill.installed_version()
+    if version is None:
+        return None  # check_towit_version already reports the unreadable version
+    try:
+        state, detail = towit_skill.status(version)
+    except towit_skill.SkillError as exc:
+        return CheckResult('WARN', f'Could not check the Claude Code skill: {exc}')
+    if state == 'unavailable':
+        return None  # check_claude_cli already reports the missing CLI
+    if state == 'missing':
+        return CheckResult('PASS', 'Claude Code skill not installed (optional: towit setup --skill)')
+    if state == 'stale':
+        return CheckResult('WARN', f'Claude Code skill is out of date: {detail}',
+                           remediation='Run: towit setup --skill')
+    return CheckResult('PASS', f'Claude Code skill: {detail}')
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +575,9 @@ def main():
     results.append(check_towit_version())
     results.append(check_python_version())
     results.append(check_claude_cli())
+    skill_result = check_skill_plugin()
+    if skill_result is not None:
+        results.append(skill_result)
 
     # --- Configuration ---
     config_result = check_config_file(config_path)
