@@ -105,7 +105,7 @@ The archive is append-only: each ingest compares the stored tail hash to the tra
 
 ## Release Process
 
-Use the **`release-towit` skill** (`.claude/skills/release-towit/SKILL.md`) for all releases. Read and follow it with the Read tool when the user asks to cut a release, bump a version, tag a release, or publish a new version. It covers: determining the version, auditing help text and README, updating CHANGELOG, committing, tagging, and pushing.
+Use the **`release-towit` skill** (`.claude/skills/release-towit/SKILL.md`) for all releases. Read and follow it with the Read tool when the user asks to cut a release, bump a version, tag a release, or publish a new version. It is a thin overlay (the release parameters: gates, version file, audits, tag style, tap bump) on the shared `chrisbloom7-development:release` skill from the `ai-tools` plugin marketplace, which holds the generic steps: version choice, CHANGELOG, release PR, tagging, and pushing. Install it first (`/plugin marketplace add chrisbloom7/ai-tools`).
 
 Never bypass the skill — it catches README drift and other issues that ad-hoc releases miss.
 
