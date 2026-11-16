@@ -203,6 +203,7 @@ Subcommands:
     [--folder <path>]             Scope to a working directory
     [--repo <path|name>]          Scope to a repo (its key, directory name, or `name.<branch>` worktrees)
     [--role user|assistant]       Match message text only in messages of this role (metadata matches are unaffected)
+    [--limit N]                   Cap text-only results at a positive integer (default: 50)
   show <session-id>             Print the archived messages of a conversation
     [--around <msg>]              Only messages near this message number (0-based; the Msg column in `towit search` results)
     [--context <n>]               Messages either side of --around (default: 5); the window is counted by message number before --role applies

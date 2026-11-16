@@ -13,9 +13,10 @@
 #                                             this version (rerun after an upgrade to repin; not in --full)
 #                                   --config  generate ~/.towit/config.toml (skips if already exists)
 #   search <terms...> [--or] [--topic] [--all | --summary | --title] [--only text|metadata]
-#                 [--format json|csv] [--folder <path>] [--repo <path|name>] [--role user|assistant]
+#                 [--format json|csv] [--folder <path>] [--repo <path|name>] [--role user|assistant] [--limit N]
 #                                 --repo NAME also matches worktree directories named NAME.<branch>
 #                                 --role matches message text only in messages of that role
+#                                 --limit caps text-only results (default: 50)
 #                                   (keyword, title, summary and topic matches are unaffected)
 #                                 The Msg column is the message number to pass to `towit show --around`
 #                                 Default: message text plus keywords, titles, summaries;

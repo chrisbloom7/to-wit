@@ -3,7 +3,7 @@
 towit_search — Search cataloged Claude conversations.
 
 Usage:
-    python3 towit_search.py [--or] [--topic] [--all | --summary | --title] [--only text|metadata] [--format json|csv] [--folder <path>] [--repo <path|name>] [--role user|assistant] <terms...>
+    python3 towit_search.py [--or] [--topic] [--all | --summary | --title] [--only text|metadata] [--format json|csv] [--folder <path>] [--repo <path|name>] [--role user|assistant] [--limit N] <terms...>
 """
 
 import argparse
@@ -163,6 +163,16 @@ def _print_json(rows, show_text=False):
     print(json.dumps(out, indent=2))
 
 
+def _positive_integer(value):
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0
+    if number < 1:
+        raise argparse.ArgumentTypeError('expected a positive integer')
+    return number
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Search cataloged Claude conversations.',
@@ -191,8 +201,7 @@ def main():
     parser.add_argument('--only', choices=['text', 'metadata'], metavar='text|metadata',
                         help='Search only message text, or only metadata (keywords, plus '
                              'topics/summaries/titles with their flags). Default: message text '
-                             'plus keywords, titles and summaries. Text-only results are '
-                             'capped at 50; metadata results are never capped')
+                             'plus keywords, titles and summaries')
     parser.add_argument('--repo', metavar='PATH|NAME',
                         help='Restrict search to a repo: its key, its directory name, or a worktree of it '
                              '(a directory named NAME.<branch>)')
@@ -201,6 +210,9 @@ def main():
                              'column and the snippet then come from those messages); `--role user` '
                              'skips assistant replies and the [Bash]-style tool stubs inside them. '
                              'Keyword, title, summary and topic matches are not affected')
+    parser.add_argument('--limit', type=_positive_integer, default=50, metavar='N',
+                        help='Maximum text-only results, as a positive integer (default: 50). '
+                             'Metadata results are never capped')
     args = parser.parse_args()
 
     if args.role and args.only == 'metadata':
@@ -225,7 +237,7 @@ def main():
         return db.search_archive(args.terms, mode=search_mode, folder=args.folder, repo=args.repo,
                                  scope=scope, include_topics=include_topics,
                                  include_summary=include_summary, include_title=include_title,
-                                 limit=50 if show_text else None, role=args.role)
+                                 limit=args.limit if show_text else None, role=args.role)
 
     results = run(mode)
     if not results and mode == 'and' and show_text and len(args.terms) >= 2:
