@@ -55,8 +55,8 @@
 #   uninstall-hook                Remove the To Wit hooks from ~/.claude/settings.json
 #   teardown [--yes]              Remove hooks and delete database (including the archive)
 #   implode [--yes] [--install-dir <dir>]
-#                                 Full uninstall: remove hooks, database (including the
-#                                   archive), and binary symlink
+#                                 Full uninstall: remove hooks, the Claude Code skill plugin, database
+#                                   (including the archive), and binary symlink
 #   stats                         Show catalog statistics
 #   doctor                        Verify setup: config, database (FTS5, archive schema), hooks, and the Claude Code skill
 #   version | --version | -v      Print the installed version
