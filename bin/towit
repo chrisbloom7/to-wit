@@ -7,7 +7,7 @@
 # Subcommands:
 #   setup [--full | --hook | --skill | --config]
 #                                 Initialize database
-#                                   --full    also generates config, installs hooks, and runs backfill
+#                                   --full    also generates config, installs hooks, and runs backfill (not the skill: add --skill)
 #                                   --hook    also installs the Claude Code hooks
 #                                   --skill   also installs the Claude Code skill plugin, pinned to
 #                                             this version (rerun after an upgrade to repin; not in --full)
