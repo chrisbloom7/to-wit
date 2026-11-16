@@ -309,6 +309,16 @@ class TestPlugin(DocTestCase):
             if 'towit search' in line:
                 self.assertNotRegex(line, r'--topic\s+[^\s-]', "`search --topic` takes no value")
 
+    def test_skill_teaches_the_cooccurrence_check(self):
+        # `search` matches terms anywhere in a session, so "X with Y" needs `show --match`
+        # (same message) on each candidate before Claude reports a hit
+        _, body = self._skill_parts()
+        self.assertContains(body, 'different messages',
+                            "SKILL.md must say a search hit can have the terms in different messages")
+        self.assertMatches(body, r'towit show <session-id> --match \S+ --match \S+',
+                           "SKILL.md must show `show <session-id> --match A --match B` for candidates")
+        self.assertContains(body, 'candidates', "SKILL.md must tell Claude to check the search candidates")
+
     def test_skill_guardrails(self):
         _, body = self._skill_parts()
         self.assertContains(body.lower(), 'untrusted', "SKILL.md lacks the untrusted-data warning")
