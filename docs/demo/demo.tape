@@ -5,34 +5,41 @@
 #
 # Everything runs against synthetic sessions under /tmp/towit-demo; your own ~/.towit and
 # ~/.claude are never read. The session id below is derived by seed.py and stays stable.
-# The hidden `towit` function narrows COLUMNS: the search table prints a few columns wider
-# than the terminal width it detects, so it would otherwise wrap.
+# The hidden `towit` function does two things: it narrows COLUMNS (the search table prints a
+# few columns wider than the terminal width it detects, so it would otherwise wrap) and it
+# prints a blank line after each command's output (except `show`, which ends with one), so
+# each typed comment stays attached to its command with a gap between steps.
 
 Output docs/demo/demo.gif
 
 Set Shell "bash"
 Set FontSize 15
 Set Width 1400
-Set Height 560
+Set Height 580
 Set Padding 24
 Set TypingSpeed 55ms
 Set Theme "Catppuccin Mocha"
 
 Hide
-Type "export HOME=/tmp/towit-demo PATH=/tmp/towit-demo/bin:$PATH PS1='$ '" Enter
-Type 'towit() { COLUMNS=124 command towit "$@"; }' Enter
+Type "export HOME=/tmp/towit-demo PATH=/tmp/towit-demo/bin:$PATH" Enter
+Type 'towit() { COLUMNS=124 command towit "$@"; local rc=$?; [ "$1" = show ] || echo; return $rc; }' Enter
 Type "cd /tmp/towit-demo/work/acme-api && clear" Enter
+Type "PS1='$ '" Enter
+Type "clear" Enter
 Show
 
 Sleep 600ms
-Type "# Claude Code deleted that transcript. To Wit kept it." Enter
-Sleep 1500ms
-
+Type@25ms "# Where did we settle webhook retries? I remember one word: jitter." Enter
+Sleep 400ms
 Type "towit search jitter" Enter
 Sleep 3500ms
 
+Type@25ms "# Read the decision in context: message 6, plus two messages either side." Enter
+Sleep 400ms
 Type "towit show 7fac4752-ddf1-51e9-afe3-39a6a96d0b43 --around 6 --context 2" Enter
 Sleep 4500ms
 
+Type@25ms "# Pick that conversation back up in Claude Code." Enter
+Sleep 400ms
 Type "towit resume 7fac4752-ddf1-51e9-afe3-39a6a96d0b43" Enter
 Sleep 3500ms
