@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from towit_db import Database
 from towit_pipe import run_cli
 from towit_sanitize import sanitize_cell
-from towit_table import fit_widths, truncate
+from towit_table import display_width, fit_widths, pad, truncate
 
 
 def _filter_keywords(keywords_str, terms):
@@ -73,15 +73,15 @@ def _print_table(rows, terms=None, group_by_path=False, show_text=False):
         processed.append((sanitize_cell(r['cwd']), [sanitize_cell(c) for c in cells]))
 
     # Compute natural column widths across all rows
-    col_widths = [len(h) for h in headers]
+    col_widths = [display_width(h) for h in headers]
     for _, row_data in processed:
         for i, val in enumerate(row_data):
-            col_widths[i] = max(col_widths[i], len(val))
+            col_widths[i] = max(col_widths[i], display_width(val))
 
     # Fit the table after omitting any entirely empty Keywords column.
     term_width = shutil.get_terminal_size((120, 24)).columns - 4
     floors = [None, 8, 8, None, 8, None] if show_text else [None, 8, 8, None]
-    floors = [None if f is None else max(f, len(h)) for f, h in zip(floors, headers)]
+    floors = [None if f is None else max(f, display_width(h)) for f, h in zip(floors, headers)]
     keywords_col = headers.index('Keywords')
     hide_keywords = not any(row[keywords_col] for _, row in processed)
     col_widths, kept = fit_widths(
@@ -91,10 +91,10 @@ def _print_table(rows, terms=None, group_by_path=False, show_text=False):
 
     def fmt_row(row_data):
         return indent + sep.join(
-            truncate(row_data[i], col_widths[i]).ljust(col_widths[i]) for i in kept
+            pad(truncate(row_data[i], col_widths[i]), col_widths[i]) for i in kept
         )
 
-    header_line = indent + sep.join(headers[i].ljust(col_widths[i]) for i in kept)
+    header_line = indent + sep.join(pad(headers[i], col_widths[i]) for i in kept)
     divider = indent + sep.join('-' * col_widths[i] for i in kept)
 
     if group_by_path:

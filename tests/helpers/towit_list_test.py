@@ -450,5 +450,64 @@ class TestTowitListTableWidth(unittest.TestCase):
         self.assertLessEqual(max(len(line) for line in out.splitlines()), 76, out)
 
 
+def _display_width(s):
+    """Terminal cells, counted independently of towit_table so the test checks the real output."""
+    import unicodedata
+    return sum(0 if unicodedata.category(c) in ('Mn', 'Me', 'Cf')
+               else 2 if unicodedata.east_asian_width(c) in ('W', 'F') else 1 for c in s)
+
+
+def _column_offsets(line, marker):
+    """Display offset at which `marker` starts in `line`."""
+    return _display_width(line[:line.index(marker)])
+
+
+class TestTowitListWideCharacters(unittest.TestCase):
+    """CJK and emoji titles take two cells each; columns must still line up and fit the terminal."""
+    WIDE_ID = '1a1b2c3d-4e5f-6789-abcd-ef0123456789'
+    ASCII_ID = '2a1b2c3d-4e5f-6789-abcd-ef0123456789'
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        db = Database(self.db_path)
+        db.create_schema()
+        for cid, title, keywords, day in (
+                (self.WIDE_ID, '支付回调的指数退避重试设计 🚀 与抖动策略', ['重试', '退避'], '04'),
+                (self.ASCII_ID, 'Plain ASCII title', ['retry'], '05')):
+            db.upsert_conversation({
+                'id': cid, 'folder': '/f', 'cwd': '/w/acme-api', 'started_at': f'2026-03-{day}T00:00:00Z',
+                'last_active': f'2026-03-{day}T00:00:00Z', 'title': title, 'summary': 's',
+                'topics': [], 'keywords': keywords})
+
+    def run_at(self, columns):
+        env = {**os.environ, 'TOWIT_CONFIG_PATH': self.config_path, 'COLUMNS': str(columns)}
+        r = subprocess.run(['python3', LIST_SCRIPT, '--folder', '/w/acme-api'], env=env,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.splitlines()
+
+    def test_date_column_lines_up_with_header(self):
+        for columns in (60, 80, 400):
+            lines = self.run_at(columns)
+            header = next(line for line in lines if 'Date' in line)
+            rows = [line for line in lines if '2026-03-' in line]
+            self.assertEqual(len(rows), 2, lines)
+            for row in rows:
+                self.assertEqual(_column_offsets(row, '2026-03-'), _column_offsets(header, 'Date'),
+                                 f'{columns} columns:\n' + '\n'.join(lines))
+
+    def test_no_line_exceeds_terminal_width_minus_4(self):
+        for columns in (80, 100, 120):
+            lines = self.run_at(columns)
+            self.assertLessEqual(max(_display_width(line) for line in lines), columns - 4,
+                                 f'{columns} columns:\n' + '\n'.join(lines))
+
+    def test_wide_title_shown_whole_when_it_fits(self):
+        self.assertTrue(any('支付回调的指数退避重试设计 🚀 与抖动策略' in line for line in self.run_at(400)))
+
+
 if __name__ == '__main__':
     unittest.main()

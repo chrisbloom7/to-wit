@@ -5,7 +5,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'libexec', 'towit')))
-from towit_table import fit_widths, truncate
+from towit_table import display_width, fit_widths, pad, truncate
 
 # Search-like layout: ID, Title, Keywords, Msg, Snippet, Date. Only Title, Keywords and Snippet shrink.
 FLOORS = [None, 8, 8, None, 8, None]
@@ -30,6 +30,58 @@ class TestTruncate(unittest.TestCase):
 
     def test_empty_string(self):
         self.assertEqual(truncate('', 5), '')
+
+
+class TestDisplayWidth(unittest.TestCase):
+    def test_ascii_is_one_cell_per_character(self):
+        self.assertEqual(display_width('abc'), 3)
+
+    def test_cjk_is_two_cells_per_character(self):
+        self.assertEqual(display_width('中文'), 4)
+
+    def test_wide_emoji_is_two_cells(self):
+        self.assertEqual(display_width('🚀'), 2)
+
+    def test_mixed_text(self):
+        self.assertEqual(display_width('API 接口 🚀'), 11)
+
+    def test_combining_mark_takes_no_cell(self):
+        self.assertEqual(display_width('e\u0301'), 1)
+
+    def test_empty_string(self):
+        self.assertEqual(display_width(''), 0)
+
+
+class TestTruncateWide(unittest.TestCase):
+    def test_cjk_that_fits_is_unchanged(self):
+        self.assertEqual(truncate('中文', 4), '中文')
+
+    def test_cjk_is_cut_by_display_width(self):
+        self.assertEqual(truncate('中文标题', 5), '中文…')
+
+    def test_wide_character_that_would_straddle_the_edge_is_dropped(self):
+        out = truncate('中文标题', 6)
+        self.assertEqual(out, '中文…')
+        self.assertLessEqual(display_width(out), 6)
+
+    def test_mixed_text_never_exceeds_width(self):
+        for width in range(1, 12):
+            self.assertLessEqual(display_width(truncate('ab中文🚀cd标题', width)), width, width)
+
+    def test_emoji_is_cut_by_display_width(self):
+        self.assertEqual(truncate('🚀🚀🚀', 4), '🚀…')
+
+
+class TestPad(unittest.TestCase):
+    def test_ascii_padded_like_ljust(self):
+        self.assertEqual(pad('ab', 5), 'ab   ')
+
+    def test_cjk_padded_to_display_width(self):
+        self.assertEqual(pad('中文', 6), '中文  ')
+        self.assertEqual(display_width(pad('中文', 6)), 6)
+
+    def test_never_shortens(self):
+        self.assertEqual(pad('中文', 3), '中文')
 
 
 class TestFitWidthsZero(unittest.TestCase):
