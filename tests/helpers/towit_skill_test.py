@@ -1,5 +1,7 @@
 # tests/helpers/towit_skill_test.py
 """Unit tests for towit_skill: installing, removing and checking the Claude Code plugin."""
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -176,6 +178,55 @@ class TestStatus(SkillTestCase):
         fake = FakeClaude(marketplaces=[{'name': 'to-wit', 'source': 'github', 'repo': SOURCE}],
                           plugins=['towit@to-wit'])
         self.assertEqual(self.run_with(fake, towit_skill.status, '0.12.0')[0], 'stale')
+
+
+class TestMain(SkillTestCase):
+    """The `install` / `uninstall` entry points that bin/towit and implode call."""
+
+    def run_main(self, fake, argv, version='0.12.0', which='/usr/local/bin/claude'):
+        out, err = io.StringIO(), io.StringIO()
+        with patch.object(towit_skill, 'installed_version', return_value=version), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = self.run_with(fake, towit_skill.main, argv, which=which)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_install_reports_the_pinned_version(self):
+        fake = FakeClaude()
+        code, out, _ = self.run_main(fake, ['install'])
+        self.assertEqual(code, 0)
+        self.assertIn('v0.12.0', out)
+        self.assertEqual(fake.plugins, ['towit@to-wit'])
+
+    def test_install_failure_prints_the_error_and_returns_1(self):
+        code, out, err = self.run_main(FakeClaude(fail_add='Clone failed'), ['install'])
+        self.assertEqual(code, 1)
+        self.assertIn('Clone failed', err)
+
+    def test_install_without_claude_returns_1(self):
+        code, _, err = self.run_main(FakeClaude(), ['install'], which=None)
+        self.assertEqual(code, 1)
+        self.assertIn('claude CLI not found', err)
+
+    def test_install_with_unreadable_version_returns_1(self):
+        code, _, err = self.run_main(FakeClaude(), ['install'], version=None)
+        self.assertEqual(code, 1)
+        self.assertIn('version', err)
+
+    def test_uninstall_reports_what_it_did(self):
+        fake = FakeClaude(marketplaces=[pinned('v0.12.0')], plugins=['towit@to-wit'])
+        code, out, _ = self.run_main(fake, ['uninstall'])
+        self.assertEqual(code, 0)
+        self.assertIn('removed', out.lower())
+
+    def test_uninstall_when_absent_is_quiet_success(self):
+        code, out, err = self.run_main(FakeClaude(), ['uninstall'])
+        self.assertEqual((code, err), (0, ''))
+        self.assertIn('not installed', out.lower())
+
+    def test_unknown_command_returns_2(self):
+        code, _, err = self.run_main(FakeClaude(), ['frobnicate'])
+        self.assertEqual(code, 2)
+        self.assertIn('usage', err.lower())
 
 
 if __name__ == '__main__':

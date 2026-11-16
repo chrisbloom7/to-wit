@@ -91,9 +91,11 @@ towit backfill        # Archive and index existing conversations (LLM indexing t
 towit <subcommand> [options]
 
 Subcommands:
-  setup [--full | --hook | --config]  Initialize database
+  setup [--full | --hook | --skill | --config]  Initialize database
                                   --full    also generates config, installs hooks, and runs backfill
                                   --hook    also installs the Claude Code hooks
+                                  --skill   also installs the Claude Code skill plugin, pinned to
+                                            this version (rerun after an upgrade to repin; not in --full)
                                   --config  generate ~/.towit/config.toml (skips if already exists)
   search <terms...>             Search message text, keywords, titles, and summaries
     [--or]                        Match any term instead of all (default: AND, with an automatic OR retry)

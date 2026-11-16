@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 
 SOURCE = 'chrisbloom7/to-wit'
 MARKETPLACE = 'to-wit'
@@ -148,3 +149,31 @@ def status(version):
         return 'ok', f'{PLUGIN_ID} installed, pinned to {ref}'
     actual = (entry or {}).get('ref') or 'unpinned'
     return 'stale', f'{PLUGIN_ID} is pinned to {actual}, expected {ref}'
+
+
+def main(argv=None):
+    """CLI: `towit_skill.py install|uninstall`. Returns the process exit status."""
+    argv = sys.argv[1:] if argv is None else argv
+    if len(argv) != 1 or argv[0] not in ('install', 'uninstall'):
+        print("usage: towit_skill.py install|uninstall", file=sys.stderr)
+        return 2
+    try:
+        if argv[0] == 'install':
+            version = installed_version()
+            if version is None:
+                raise SkillError("cannot read the towit version, so the skill cannot be pinned")
+            install(version)
+            print(f"Claude Code skill installed ({PLUGIN_ID}, pinned to v{version}). "
+                  "Start a new session or run /reload-plugins to load it.")
+        elif uninstall():
+            print(f"Claude Code skill removed ({PLUGIN_ID}).")
+        else:
+            print("Claude Code skill not installed.")
+    except SkillError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
