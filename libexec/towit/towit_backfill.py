@@ -37,8 +37,13 @@ def main():
         search_root = os.path.expanduser('~/.claude/projects')
 
     if not os.path.isdir(search_root):
-        print(f"Error: directory not found: {search_root}", file=sys.stderr)
-        sys.exit(1)
+        if args.folder:
+            print(f"Error: directory not found: {search_root}", file=sys.stderr)
+            sys.exit(1)
+        # A fresh Claude Code install has no projects directory until its first session
+        print(f"No Claude Code sessions found yet ({search_root} does not exist); "
+              "nothing to archive. New sessions are archived by the hooks.")
+        return
 
     # Find all JSONL files, sorted by mtime (oldest first). Symlinks, subagent
     # sessions and folder-filtered files are dropped via ingest's own rules.

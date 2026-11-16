@@ -258,6 +258,15 @@ _setup_isolated_home() {
   }
 }
 
+@test "towit: setup --full succeeds on a fresh machine with no Claude Code projects directory" {
+  _setup_isolated_home
+  rmdir "${HOME}/.claude/projects"
+  run "${TOWIT}" setup --full
+  [ "${status}" -eq 0 ] || { echo "status=${status}: ${output}"; return 1; }
+  [[ "${output}" == *"hooks installed"* ]] || { echo "${output}"; return 1; }
+  [[ "${output}" == *"No Claude Code sessions found yet"* ]] || { echo "${output}"; return 1; }
+}
+
 @test "towit: setup --full leaves an existing config untouched" {
   _setup_isolated_home
   printf '# sentinel config\n' > "${TOWIT_CONFIG_PATH}"
