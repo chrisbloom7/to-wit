@@ -138,6 +138,11 @@ class TestSkillPluginCheck(unittest.TestCase):
         self.assertEqual(result.status, 'PASS')
         self.assertIn('towit setup --skill', result.label)
 
+    def test_unpinned_install_passes_with_a_hint(self):
+        result = self.check(('unpinned', 'towit@to-wit follows main; v0.12.0 is the version to pin'))
+        self.assertEqual(result.status, 'PASS')
+        self.assertIn('towit setup --skill', result.label)
+
     def test_stale_pin_warns_with_the_repin_command(self):
         result = self.check(('stale', 'towit@to-wit is pinned to v0.11.1, expected v0.12.0'))
         self.assertEqual(result.status, 'WARN')

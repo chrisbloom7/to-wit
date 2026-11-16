@@ -205,8 +205,16 @@ class TestStatus(SkillTestCase):
         self.assertIn('not pinned', detail)
         self.assertNotIn('pinned to unpinned', detail)
 
-    def test_stale_when_unpinned(self):
+    def test_unpinned_github_source_is_its_own_state(self):
+        # the documented manual install follows main; that is allowed, just not pinned
         fake = FakeClaude(marketplaces=[{'name': 'to-wit', 'source': 'github', 'repo': SOURCE}],
+                          plugins=['towit@to-wit'])
+        state, detail = self.run_with(fake, towit_skill.status, '0.12.0')
+        self.assertEqual(state, 'unpinned')
+        self.assertIn('v0.12.0', detail)
+
+    def test_another_repo_with_our_name_is_stale(self):
+        fake = FakeClaude(marketplaces=[{'name': 'to-wit', 'source': 'github', 'repo': 'someone/else'}],
                           plugins=['towit@to-wit'])
         self.assertEqual(self.run_with(fake, towit_skill.status, '0.12.0')[0], 'stale')
 
@@ -225,6 +233,23 @@ class TestOutputParsing(SkillTestCase):
         with patch('shutil.which', return_value='/usr/local/bin/claude'), \
                 patch('subprocess.run', return_value=result):
             self.assertEqual(towit_skill._claude(['list', '--json'])[1], [{'id': 'towit@to-wit'}])
+
+
+class TestTimeouts(SkillTestCase):
+    def test_queries_use_a_short_timeout_and_changes_a_long_one(self):
+        fake = FakeClaude()
+        seen = {}
+
+        def spy(argv, **kwargs):
+            seen[' '.join(argv[2:4])] = kwargs.get('timeout')
+            return fake(argv, **kwargs)
+
+        with patch('shutil.which', return_value='/usr/local/bin/claude'), \
+                patch('subprocess.run', side_effect=spy):
+            towit_skill.install('0.12.0')
+        self.assertEqual(seen['marketplace list'], towit_skill.QUERY_TIMEOUT_SECONDS)
+        self.assertEqual(seen['marketplace add'], towit_skill.TIMEOUT_SECONDS)
+        self.assertLess(towit_skill.QUERY_TIMEOUT_SECONDS, towit_skill.TIMEOUT_SECONDS)
 
 
 class TestPresent(SkillTestCase):

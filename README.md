@@ -147,7 +147,7 @@ Subcommands:
   implode [--yes]               Full uninstall: remove hooks, skill plugin, database (including the archive), and binary symlink
     [--install-dir <dir>]         Directory where towit was installed (default: ~/.local/bin)
   stats                         Show catalog statistics
-  doctor                        Verify setup: config, database (FTS5, archive schema), and hooks
+  doctor                        Verify setup: config, database (FTS5, archive schema), hooks, and the Claude Code skill
   version | --version | -v      Print the installed version
   help                          Show this message
 ```

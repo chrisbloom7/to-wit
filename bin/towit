@@ -58,7 +58,7 @@
 #                                 Full uninstall: remove hooks, database (including the
 #                                   archive), and binary symlink
 #   stats                         Show catalog statistics
-#   doctor                        Verify setup: config, database (FTS5, archive schema), and hooks
+#   doctor                        Verify setup: config, database (FTS5, archive schema), hooks, and the Claude Code skill
 #   version | --version | -v      Print the installed version
 #   help                          Show this message
 

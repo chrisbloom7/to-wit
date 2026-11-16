@@ -22,7 +22,8 @@ SOURCE = 'chrisbloom7/to-wit'
 MARKETPLACE = 'to-wit'
 PLUGIN = 'towit'
 PLUGIN_ID = f'{PLUGIN}@{MARKETPLACE}'
-TIMEOUT_SECONDS = 180
+TIMEOUT_SECONDS = 180        # installing and removing: a git clone can be slow
+QUERY_TIMEOUT_SECONDS = 30   # listing: a hung claude must not stall `towit doctor`
 
 VERSION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'VERSION')
 _VERSION_RE = re.compile(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z')
@@ -41,16 +42,16 @@ def installed_version(path=VERSION_PATH):
         return None
 
 
-def _claude(args):
-    """Run `claude plugin <args>`; return (returncode, parsed last JSON line or None, text)."""
+def _claude(args, timeout=TIMEOUT_SECONDS):
+    """Run `claude plugin <args>`; return (returncode, parsed JSON or None, text)."""
     exe = shutil.which('claude')
     if exe is None:
         raise SkillError("claude CLI not found on PATH; install Claude Code first")
     try:
         result = subprocess.run([exe, 'plugin', *args], capture_output=True, text=True,
-                                timeout=TIMEOUT_SECONDS)
+                                timeout=timeout)
     except subprocess.TimeoutExpired:
-        raise SkillError(f"`claude plugin {args[0]}` timed out after {TIMEOUT_SECONDS}s") from None
+        raise SkillError(f"`claude plugin {args[0]}` timed out after {timeout}s") from None
     return result.returncode, _parse_json(result.stdout), (result.stderr or result.stdout).strip()
 
 
@@ -72,9 +73,9 @@ def _message(payload, text):
     return text or 'no output'
 
 
-def _run(args):
+def _run(args, timeout=TIMEOUT_SECONDS):
     """Like `_claude`, but a nonzero exit raises SkillError."""
-    code, payload, text = _claude(args)
+    code, payload, text = _claude(args, timeout)
     if code != 0:
         raise SkillError(f"`claude plugin {' '.join(args[:2])}` failed: {_message(payload, text)}")
     return payload
@@ -82,7 +83,7 @@ def _run(args):
 
 def _marketplace_entry():
     """Our marketplace as `claude plugin marketplace list --json` reports it, or None."""
-    entries = _run(['marketplace', 'list', '--json'])
+    entries = _run(['marketplace', 'list', '--json'], QUERY_TIMEOUT_SECONDS)
     for entry in entries if isinstance(entries, list) else []:
         if isinstance(entry, dict) and entry.get('name') == MARKETPLACE:
             return entry
@@ -90,7 +91,7 @@ def _marketplace_entry():
 
 
 def _plugin_installed():
-    plugins = _run(['list', '--json'])
+    plugins = _run(['list', '--json'], QUERY_TIMEOUT_SECONDS)
     return isinstance(plugins, list) and any(
         isinstance(p, dict) and p.get('id') == PLUGIN_ID for p in plugins)
 
@@ -174,9 +175,10 @@ def present():
 
 
 def status(version):
-    """(state, detail): 'unavailable', 'missing', 'stale' or 'ok'.
+    """(state, detail): 'unavailable', 'missing', 'unpinned', 'stale' or 'ok'.
 
-    'stale' means installed but pinned to some other ref (or unpinned) than v<version>.
+    'unpinned' is the documented manual install of this repo, which follows main; 'stale' is
+    anything else not pinned to v<version> (another ref, another repo, a local path).
     """
     if shutil.which('claude') is None:
         return 'unavailable', 'claude CLI not found on PATH'
@@ -187,6 +189,8 @@ def status(version):
     if _is_pinned(entry, ref):
         return 'ok', f'{PLUGIN_ID} installed, pinned to {ref}'
     entry = entry or {}
+    if entry.get('source') == 'github' and entry.get('repo') == SOURCE and not entry.get('ref'):
+        return 'unpinned', f"{PLUGIN_ID} follows main, which can run ahead of this CLI; v{version} is the matching version"
     if entry.get('source') == 'github' and entry.get('ref'):
         return 'stale', f"{PLUGIN_ID} is pinned to {entry['ref']}, expected {ref}"
     return 'stale', f"{PLUGIN_ID} is not pinned (source: {_source_of(entry) or 'unknown'}), expected {ref}"

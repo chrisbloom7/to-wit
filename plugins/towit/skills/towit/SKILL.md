@@ -19,7 +19,7 @@ If `towit` is not on PATH, say so and point the user to the install steps in htt
    towit search "connection pool" --repo myapp --format json
    ```
 
-   Narrow with `--repo NAME` (also matches worktree directories named `NAME.<branch>`), `--folder <path>`, `--role user|assistant`, `--topic`, or `--or` to match any term. The `Msg` column (`seq` in JSON) is the message number to read next.
+   Narrow with `--repo NAME` (also matches worktree directories named `NAME.<branch>`), `--folder <path>` or `--role user|assistant`. `--or` widens a search to match any term, and `--topic` (no value) also searches topic names; to list the conversations under one topic, use `towit list --topic <name>` instead. The `Msg` column (`seq` in JSON) is the message number to read next.
 
 2. Read around the hit. Message numbers are 0-based.
 

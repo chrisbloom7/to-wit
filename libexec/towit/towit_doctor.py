@@ -115,8 +115,9 @@ def check_claude_cli() -> CheckResult:
 def check_skill_plugin(version=None) -> 'CheckResult | None':
     """The optional Claude Code skill plugin. None when there is nothing useful to say.
 
-    Not installed is a PASS (it is opt-in); WARN only when it is installed but pinned to a
-    different version than this CLI, or when claude could not be asked.
+    Not installed is a PASS (it is opt-in), and so is the unpinned manual install; WARN only
+    when it is pinned to a different version than this CLI (or comes from elsewhere), or when
+    claude could not be asked.
     """
     version = version or towit_skill.installed_version()
     if version is None:
@@ -129,6 +130,9 @@ def check_skill_plugin(version=None) -> 'CheckResult | None':
         return None  # check_claude_cli already reports the missing CLI
     if state == 'missing':
         return CheckResult('PASS', 'Claude Code skill not installed (optional: towit setup --skill)')
+    if state == 'unpinned':
+        return CheckResult('PASS', f'Claude Code skill installed, unpinned (towit setup --skill pins it '
+                                   f'to v{version})')
     if state == 'stale':
         return CheckResult('WARN', f'Claude Code skill is out of date: {detail}',
                            remediation='Run: towit setup --skill')

@@ -85,7 +85,7 @@ The archive is append-only: each ingest compares the stored tail hash to the tra
 
 ## Test Structure
 
-- `tests/test_helper.bash` — Shared BATS setup/teardown (temp dirs, mocks, fixtures). `setup` points `TOWIT_SETTINGS_PATH` at a temp file so no test can edit the real `~/.claude/settings.json`; pass your own value only when a test needs a specific settings file
+- `tests/test_helper.bash` — Shared BATS setup/teardown (temp dirs, mocks, fixtures). `_setup_common` puts a stub `claude` on PATH that reports no plugins and accepts everything, so no test can query or remove the developer's real plugins; a test that needs another behavior writes its own `mock_bin/claude`, and one that needs `claude` absent must delete it. `setup` points `TOWIT_SETTINGS_PATH` at a temp file so no test can edit the real `~/.claude/settings.json`; pass your own value only when a test needs a specific settings file
 - `tests/bin/towit.bats` — CLI integration tests
 - `tests/bin/uninstall.bats` — Install/uninstall tests
 - `tests/helpers/towit_*_test.py` — Python unit tests per module (`towit_ingest_test.py`, `towit_redact_test.py`, `towit_show_test.py`, `towit_forget_test.py`, `towit_config_test.py`, ... alongside the original per-subcommand files). A test that can reach `get_error_logger()` must not write to the real `~/.towit/errors.log`: `towit_ingest_test.py` redirects `towit_config.CONFIG_PATH` and resets the `towit.hook` logger in `setUpModule` (the logger caches its handler per process)

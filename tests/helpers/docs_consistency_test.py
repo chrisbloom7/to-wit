@@ -296,6 +296,19 @@ class TestPlugin(DocTestCase):
         self.assertFalse(mentioned - help_flags,
                          f"SKILL.md mentions flags missing from help: {sorted(mentioned - help_flags)}")
 
+    def test_skill_narrowing_list_has_only_filters(self):
+        # `search --topic` is a boolean ("also search topics") and `--or` widens a search;
+        # neither narrows. Topic filtering by name is `towit list --topic NAME`.
+        _, body = self._skill_parts()
+        narrowing = next((line for line in body.splitlines() if 'Narrow with' in line), None)
+        self.assertIsNotNone(narrowing, "SKILL.md lost its 'Narrow with' sentence")
+        sentence = re.split(r'(?<=`)\. ', narrowing)[0]  # the list itself, not what follows it
+        for flag in ('--topic', '--or'):
+            self.assertNotIn(flag, sentence, f"{flag} does not narrow a search")
+        for line in body.splitlines():
+            if 'towit search' in line:
+                self.assertNotRegex(line, r'--topic\s+[^\s-]', "`search --topic` takes no value")
+
     def test_skill_guardrails(self):
         _, body = self._skill_parts()
         self.assertContains(body.lower(), 'untrusted', "SKILL.md lacks the untrusted-data warning")
