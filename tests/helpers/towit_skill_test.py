@@ -252,6 +252,52 @@ class TestTimeouts(SkillTestCase):
         self.assertLess(towit_skill.QUERY_TIMEOUT_SECONDS, towit_skill.TIMEOUT_SECONDS)
 
 
+class TestEnvironment(SkillTestCase):
+    """`claude plugin` gets towit's scoped environment plus the few variables git needs."""
+
+    def env_seen(self, environ):
+        fake, seen = FakeClaude(), []
+
+        def spy(argv, **kwargs):
+            seen.append(kwargs.get('env'))
+            return fake(argv, **kwargs)
+
+        with patch.dict(os.environ, environ, clear=True), \
+                patch('shutil.which', return_value='/usr/local/bin/claude'), \
+                patch('subprocess.run', side_effect=spy):
+            towit_skill.install('0.12.0')
+        return seen
+
+    def test_unrelated_secrets_are_not_passed(self):
+        envs = self.env_seen({'PATH': '/bin', 'HOME': '/h', 'AWS_SECRET_ACCESS_KEY': 'x',
+                              'GITHUB_TOKEN': 'y', 'OPENAI_API_KEY': 'z'})
+        for env in envs:
+            self.assertIsNotNone(env, "env must be passed explicitly, not inherited")
+            for name in ('AWS_SECRET_ACCESS_KEY', 'GITHUB_TOKEN', 'OPENAI_API_KEY'):
+                self.assertNotIn(name, env)
+
+    def test_the_scoped_allowlist_still_applies(self):
+        envs = self.env_seen({'PATH': '/bin', 'HOME': '/h', 'CLAUDE_CONFIG_DIR': '/c', 'LANG': 'C'})
+        for env in envs:
+            self.assertEqual({k: env[k] for k in ('PATH', 'HOME', 'CLAUDE_CONFIG_DIR', 'LANG')},
+                             {'PATH': '/bin', 'HOME': '/h', 'CLAUDE_CONFIG_DIR': '/c', 'LANG': 'C'})
+
+    def test_git_network_variables_are_passed(self):
+        wanted = {'SSH_AUTH_SOCK': '/tmp/agent', 'HTTPS_PROXY': 'http://p:1', 'https_proxy': 'http://p:1',
+                  'HTTP_PROXY': 'http://p:1', 'ALL_PROXY': 'socks5://p:2', 'NO_PROXY': 'localhost',
+                  'no_proxy': 'localhost', 'SSL_CERT_FILE': '/ca.pem', 'SSL_CERT_DIR': '/cas'}
+        for env in self.env_seen({'PATH': '/bin', **wanted}):
+            for name, value in wanted.items():
+                self.assertEqual(env.get(name), value, name)
+
+    def test_names_that_merely_look_similar_are_not_passed(self):
+        envs = self.env_seen({'PATH': '/bin', 'SSH_PRIVATE_KEY': 'k', 'GIT_ASKPASS_TOKEN': 't',
+                              'PROXY_PASSWORD': 'p'})
+        for env in envs:
+            for name in ('SSH_PRIVATE_KEY', 'GIT_ASKPASS_TOKEN', 'PROXY_PASSWORD'):
+                self.assertNotIn(name, env)
+
+
 class TestPresent(SkillTestCase):
     def test_false_without_claude(self):
         self.assertFalse(self.run_with(FakeClaude(), towit_skill.present, which=None))

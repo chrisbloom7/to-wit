@@ -230,7 +230,7 @@ claude plugin install towit@to-wit
 
 `towit setup --skill` pins the plugin to the tag matching your installed version, so the skill never mentions a flag your towit lacks. After `brew upgrade towit` or `git pull`, run it again to repin; `towit doctor` warns when the pin and the CLI disagree. Replacing a pin removes and re-adds the `to-wit` marketplace (Claude Code uninstalls a marketplace's plugins when it is removed), and the command then reinstalls the plugin. `towit setup --full` does not install the plugin, and `towit implode` removes it.
 
-The skill is read-only guidance: it treats archived text as untrusted data and never runs `forget`, `prune` or `implode` unless you ask for that exact action. `towit setup --skill` runs `claude plugin ...` with your full environment, because the marketplace is fetched with `git` and needs your git and ssh credentials; towit's indexing calls stay on the scoped environment described in SECURITY.md.
+The skill is read-only guidance: it treats archived text as untrusted data and never runs `forget`, `prune` or `implode` unless you ask for that exact action. `towit setup --skill` runs `claude plugin ...` with the same scoped environment as indexing (see SECURITY.md) plus your ssh agent socket, proxy settings and CA bundle locations, which the marketplace's `git` clone may need. If the clone fails on your network, run the two `claude plugin` commands above by hand.
 
 ## Retention and removing data
 

@@ -29,7 +29,9 @@ def write_config(tmpdir, db_path):
 
 
 CLAUDE_STUB = """#!/usr/bin/env bash
-# Stand-in for `claude plugin ...`; state lives in $STUB_DIR so tests never reach the real CLI.
+# Stand-in for `claude plugin ...`; state lives next to bin/ (found from this script's own path,
+# since towit passes `claude` a filtered environment) so tests never reach the real CLI.
+STUB_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 echo "$*" >> "$STUB_DIR/claude_calls"
 case "$*" in
   "plugin marketplace list --json")
@@ -57,7 +59,7 @@ def claude_stub_env(home):
         with open(stub, 'w') as fh:
             fh.write(CLAUDE_STUB)
         os.chmod(stub, 0o755)
-    return {'PATH': f"{stub_dir}{os.pathsep}{os.environ['PATH']}", 'STUB_DIR': home}
+    return {'PATH': f"{stub_dir}{os.pathsep}{os.environ['PATH']}"}
 
 
 def run_setup(db_path, config_path, home):

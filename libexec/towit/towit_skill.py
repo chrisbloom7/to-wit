@@ -6,9 +6,9 @@ The plugin is served from this repo's marketplace (`.claude-plugin/marketplace.j
 pinned to the tag matching the installed CLI (`<repo>#v<VERSION>`), so the skill never
 describes flags the CLI lacks. Re-running `install` after an upgrade repins it.
 
-Everything goes through the `claude plugin` CLI, in list form and user scope. The
-subprocess inherits the full environment (unlike the indexing calls): the marketplace
-clone is a git checkout run on the user's behalf and needs their git and ssh credentials.
+Everything goes through the `claude plugin` CLI, in list form and user scope, with towit's
+scoped environment (`safe_subprocess_env`) plus the few variables a `git` clone over ssh or
+https needs on some setups: the ssh agent socket, proxy settings and CA bundle locations.
 """
 
 import json
@@ -18,6 +18,8 @@ import shutil
 import subprocess
 import sys
 
+from towit_config import safe_subprocess_env
+
 SOURCE = 'chrisbloom7/to-wit'
 MARKETPLACE = 'to-wit'
 PLUGIN = 'towit'
@@ -25,12 +27,25 @@ PLUGIN_ID = f'{PLUGIN}@{MARKETPLACE}'
 TIMEOUT_SECONDS = 180        # installing and removing: a git clone can be slow
 QUERY_TIMEOUT_SECONDS = 30   # listing: a hung claude must not stall `towit doctor`
 
+# Beyond the scoped allowlist: only what the marketplace's `git clone` may need to reach GitHub.
+# Names are matched exactly, never by prefix, so tokens and keys are not swept in.
+GIT_NETWORK_ENV = (
+    'SSH_AUTH_SOCK',
+    'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+    'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
+    'SSL_CERT_FILE', 'SSL_CERT_DIR',
+)
+
 VERSION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'VERSION')
 _VERSION_RE = re.compile(r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z')
 
 
 class SkillError(Exception):
     """A `claude plugin` call failed, or `claude` is not installed."""
+
+
+def _plugin_env():
+    return safe_subprocess_env({k: os.environ[k] for k in GIT_NETWORK_ENV if k in os.environ})
 
 
 def installed_version(path=VERSION_PATH):
@@ -49,7 +64,7 @@ def _claude(args, timeout=TIMEOUT_SECONDS):
         raise SkillError("claude CLI not found on PATH; install Claude Code first")
     try:
         result = subprocess.run([exe, 'plugin', *args], capture_output=True, text=True,
-                                timeout=timeout)
+                                timeout=timeout, env=_plugin_env())
     except subprocess.TimeoutExpired:
         raise SkillError(f"`claude plugin {args[0]}` timed out after {timeout}s") from None
     return result.returncode, _parse_json(result.stdout), (result.stderr or result.stdout).strip()
