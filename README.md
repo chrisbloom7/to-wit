@@ -38,22 +38,26 @@ To Wit keeps what was said and makes it searchable:
 - [Claude Code](https://www.anthropic.com/claude-code) (`brew install claude-code`)
 - Python 3.11+ (`brew install python`), built with SQLite FTS5 (Homebrew's Python is; `towit doctor` checks)
 
-## Installation
+## Get started
 
-### Homebrew
+The shortest path is three commands, ending in your first search:
 
 ```bash
 brew install chrisbloom7/tap/towit
-towit setup --hook
+towit setup --full
+towit search <a word you remember>
 ```
 
-This installs To Wit and a Homebrew Python (Python 3.11+ with SQLite FTS5). Installing by the full name trusts only this formula. Homebrew requires explicit trust for third-party taps, so if you run `brew tap chrisbloom7/tap` first, trust the formula with `brew trust --formula chrisbloom7/tap/towit` before installing. Claude Code is optional (see Requirements).
+`towit setup --full` generates `~/.towit/config.toml`, creates the database, installs the Claude Code hooks, and archives and indexes your existing conversations. **It processes all of your past sessions, and unless `[indexing] enabled = false` is set it calls `claude -p` for every session that is not yet indexed, which costs API tokens** (see [Cost estimates](#cost-estimates)). To archive with no API calls, run `towit setup --config` first, set `enabled = false` under `[indexing]` in the file it generates, then run `towit setup --full`. Archiving itself is free and fast.
+
+Installing by the full formula name trusts only this formula. Homebrew requires explicit trust for third-party taps, so if you run `brew tap chrisbloom7/tap` first, trust the formula with `brew trust --formula chrisbloom7/tap/towit` before installing. The formula brings a Homebrew Python (3.11+ with SQLite FTS5). Claude Code is optional (see [Requirements](#requirements)).
 
 ### From source
 
 ```bash
 git clone https://github.com/chrisbloom7/to-wit.git ~/path/to/to-wit
 ~/path/to/to-wit/install
+towit setup --full
 ```
 
 By default, `install` links into `~/.local/bin` (creating it if needed) and tells you if that directory is not on your `PATH`. Pass a different directory as the first argument if needed (for example `/usr/local/bin`, which is root-owned on Apple Silicon Macs, so it needs `sudo`):
@@ -62,44 +66,18 @@ By default, `install` links into `~/.local/bin` (creating it if needed) and tell
 ~/path/to/to-wit/install /some/other/dir
 ```
 
-## Upgrading
+### Step by step
 
-**Homebrew:** `brew upgrade towit`. The hooks point at Homebrew's version-independent path, so they keep working across upgrades. Your database upgrades itself the first time any `towit` command runs.
-
-**From source:** `install` symlinks into your clone, so updating the code is a `git pull`; there is nothing to reinstall:
+Instead of `--full`, run the pieces yourself:
 
 ```bash
-git -C ~/path/to/to-wit pull
-```
-
-Your database upgrades itself the first time any `towit` command runs, and your config and existing data are kept. Coming from 0.8.x or earlier (either way), also run:
-
-```bash
-towit install-hook   # adds the SessionEnd and SessionStart hooks; keeps your Stop hook
-towit backfill       # archives the transcripts still on disk (Claude Code eventually purges them)
-towit doctor         # confirms hooks, FTS5, and the archive schema
-```
-
-If you installed the Claude Code skill (`towit setup --skill`), run it again after upgrading to repin the plugin to the new version; `towit doctor` tells you when it is out of date.
-
-If you move your clone, re-run `towit install-hook`: it repairs hooks that point at the old location.
-
-New `[ingest]` and `[indexing]` settings use their defaults until you add them; see [Configuration](#configuration). **Switching from a source install to Homebrew:** your data and config are kept. Remove the old symlink (`rm ~/.local/bin/towit`; do not run `./uninstall`, which also deletes the archive), then run `towit install-hook` to point the hooks at the Homebrew install.
-
-If you originally installed into `/usr/local/bin`, the symlink keeps working, but `towit implode --install-dir /usr/local/bin` (or `./uninstall /usr/local/bin`) needs the directory spelled out now that the default is `~/.local/bin`.
-
-## Quick start
-
-```bash
-# Full setup: generate config, initialize database, install hooks, and archive and index existing conversations
-towit setup --full
-
-# Or step by step:
 towit setup --config  # Generate ~/.towit/config.toml (optional but recommended)
 towit setup           # Initialize the database
 towit install-hook    # Add the hooks to Claude Code (archives future sessions automatically)
 towit backfill        # Archive and index existing conversations (LLM indexing takes ~4 sec/session on Apple M4 Pro; archiving alone is far faster)
 ```
+
+Skip `backfill` if you only want sessions from now on.
 
 ## Usage
 
@@ -298,6 +276,35 @@ towit forget --folder /path/to/dir   # every conversation whose working director
 `forget` shows how many conversations it will delete and asks for confirmation unless you pass `--yes`. It removes the messages, search-index entries, topics, and keywords, and keeps only the session id in a tombstone so `backfill`, the hooks, and the catch-up scan never re-archive it from a transcript that is still on disk. `forget <session-id>` also forgets that session's subagent conversations (archived under their own ids), and says how many. The transcript under `~/.claude/projects/` is not touched. To really remove the text from disk, `forget` also zeroes freed pages (`secure_delete`), merges the FTS index, and runs `VACUUM` and a write-ahead-log truncate. `VACUUM` rewrites the whole database file, so a `forget` takes time proportional to the database size. If the physical cleanup could not finish (for example another towit process was busy), `forget` prints a warning on stderr but still exits 0; running `towit forget <session-id>` again on that already-forgotten id re-runs the cleanup. Exit codes: `0` success, `1` unknown id / nothing matched / you declined the prompt, `2` usage error (no selector, or more than one).
 
 `towit prune` removes catalog entries whose transcripts are gone, but by default only those that were never archived (`archived = 0`); archived conversations are kept because their messages are the point. `towit prune --archive` also removes archived conversations with missing transcripts, including those in the purge report below (after a confirmation, or with `--yes`), and `--dry-run` previews. Archived rows are removed physically, the same way `forget` does it (FTS merge, `VACUUM`, WAL truncate), but without a tombstone, so a session whose transcript reappears can be archived again (metadata-only rows hold no message text and are deleted plainly, so a default `prune` stays fast). `prune` also prints a **Likely removed by claude purge** section that lists archived conversations whose whole project folder no longer exists. It is only a report, because a manually deleted folder looks identical; for subagent sessions the "project folder" is the session's `subagents` directory, so a purged session directory shows up there too.
+
+## Upgrading
+
+**Homebrew:** `brew upgrade towit`. The hooks point at Homebrew's version-independent path, so they keep working across upgrades. Your database upgrades itself the first time any `towit` command runs.
+
+**From source:** `install` symlinks into your clone, so updating the code is a `git pull`; there is nothing to reinstall:
+
+```bash
+git -C ~/path/to/to-wit pull
+```
+
+Your database upgrades itself the first time any `towit` command runs, and your config and existing data are kept. If you installed the Claude Code skill (`towit setup --skill`), run it again after upgrading to repin the plugin to the new version; `towit doctor` tells you when it is out of date. If you move your clone, re-run `towit install-hook`: it repairs hooks that point at the old location. New `[ingest]` and `[indexing]` settings use their defaults until you add them; see [Configuration](#configuration).
+
+<details>
+<summary>Coming from an older version or a source install</summary>
+
+**From 0.8.x or earlier (Homebrew or source):** also run:
+
+```bash
+towit install-hook   # adds the SessionEnd and SessionStart hooks; keeps your Stop hook
+towit backfill       # archives the transcripts still on disk (Claude Code eventually purges them)
+towit doctor         # confirms hooks, FTS5, and the archive schema
+```
+
+**Switching from a source install to Homebrew:** your data and config are kept. Remove the old symlink (`rm ~/.local/bin/towit`; do not run `./uninstall`, which also deletes the archive), then run `towit install-hook` to point the hooks at the Homebrew install.
+
+If you originally installed into `/usr/local/bin`, the symlink keeps working, but `towit implode --install-dir /usr/local/bin` (or `./uninstall /usr/local/bin`) needs the directory spelled out now that the default is `~/.local/bin`.
+
+</details>
 
 ## Configuration
 
