@@ -6,26 +6,25 @@ Claude Code deletes old conversation transcripts. To Wit keeps a private, search
 
 **Terms.** A *session* is one Claude Code conversation. The *archive* is the stored message text of your sessions. *Metadata* is the LLM-generated title, summary, keywords, and topics.
 
-```shell
-# find a past session by a word you remember
-towit search hook
-/Users/chrisbloom7
-  ID                                    Title                        Keywords   Msg   Snippet                          Date
-  ------------------------------------  ---------------------------  ---------  ----  -------------------------------  ----------
-  350fa22f-10b7-48ff-ac9d-bd9f1081c23b  Debugging non-firing Stop …  stop-hook  14    …why the Stop [hook] never ran…  2026-03-31
+![A terminal recording: towit search finds a past session by one word, towit show reads the decision in context, and towit resume picks the conversation back up](docs/demo/demo.gif)
 
-# read the hit in context
-towit show 350fa22f-10b7-48ff-ac9d-bd9f1081c23b --around 14 --context 2
-# => message 14 and two messages either side, straight from the archive
+## Table of contents
 
-# pick the session back up where it happened
-towit resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
-# => switch to `/Users/chrisbloom7` and call `claude --resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b`
-```
-
-The path above the table (`/Users/chrisbloom7`) is the working directory the sessions below it were run in; results are grouped by it. **Msg** is the message number to pass to `towit show --around`.
-
-**Contents:** [Why](#why) · [Privacy and cost](#privacy-and-cost) · [Requirements](#requirements) · [Get started](#get-started) · [Core commands](#core-commands) · [Searching and reading the archive](#searching-and-reading-the-archive) · [Usage](#usage) · [How it works](#how-it-works) · [Claude Code skill](#claude-code-skill) · [Retention and removing data](#retention-and-removing-data) · [Upgrading](#upgrading) · [Configuration](#configuration) · [Uninstalling](#uninstalling) · [Development](#development)
+- [Why](#why)
+- [Privacy and cost](#privacy-and-cost)
+- [Requirements](#requirements)
+- [Get started](#get-started)
+- [Core commands](#core-commands)
+- [Searching and reading the archive](#searching-and-reading-the-archive)
+- [Usage](#usage)
+- [How it works](#how-it-works)
+- [Claude Code skill](#claude-code-skill)
+- [Retention and removing data](#retention-and-removing-data)
+- [Upgrading](#upgrading)
+- [Configuration](#configuration)
+- [Uninstalling](#uninstalling)
+- [Development](#development)
+- [License](#license)
 
 ## Why
 
