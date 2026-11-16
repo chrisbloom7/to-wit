@@ -819,22 +819,28 @@ class TestTowitSearchTableWidth(unittest.TestCase):
             self.assertIn('conv-meta', out)
 
 
-def _display_width(s):
-    """Terminal cells, counted independently of towit_table so the test checks the real output."""
-    import unicodedata
-    return sum(0 if unicodedata.category(c) in ('Mn', 'Me', 'Cf')
-               else 2 if unicodedata.east_asian_width(c) in ('W', 'F') else 1 for c in s)
-
-
-def _column_offsets(line, marker):
-    """Display offset at which `marker` starts in `line`."""
-    return _display_width(line[:line.index(marker)])
-
-
 class TestTowitSearchWideCharacters(unittest.TestCase):
-    """CJK and emoji titles take two cells each; columns must still line up and fit the terminal."""
+    """CJK and emoji titles take two cells each; columns must still line up and fit the terminal.
+
+    The expected output is hard-coded rather than measured, so the test does not share the width
+    calculation it checks. The header and the ASCII row are plain ASCII, so their string offsets
+    are their cell offsets. The wide-title row is compared as a whole: each CJK character and 🚀
+    takes two cells and `…` one, so every row below takes as many cells as the header above it.
+    """
     WIDE_ID = '1a1b2c3d-4e5f-6789-abcd-ef0123456789'
     ASCII_ID = '2a1b2c3d-4e5f-6789-abcd-ef0123456789'
+
+    # COLUMNS -> (offset of Date in the header, the wide-title row exactly as printed)
+    EXPECTED = {
+        60: (62, '1a1b2c3d-4e5f-6789-abcd-ef0123456789  支付回…                 2026-03-04'),
+        80: (66, '1a1b2c3d-4e5f-6789-abcd-ef0123456789  支付回调 ji…                2026-03-04'),
+        100: (86, '1a1b2c3d-4e5f-6789-abcd-ef0123456789  支付回调 jitter 退避…   '
+                  'jitter                  2026-03-04'),
+        120: (106, '1a1b2c3d-4e5f-6789-abcd-ef0123456789  支付回调 jitter 退避重试设计 🚀 与抖动策略  '
+                   'jitter                  2026-03-04'),
+        400: (106, '1a1b2c3d-4e5f-6789-abcd-ef0123456789  支付回调 jitter 退避重试设计 🚀 与抖动策略  '
+                   'jitter                  2026-03-04'),
+    }
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
@@ -858,21 +864,31 @@ class TestTowitSearchWideCharacters(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout.splitlines()
 
+    def split_rows(self, lines):
+        """Return (header, ASCII-title row, wide-title row)."""
+        header = next(line for line in lines if 'Date' in line)
+        ascii_row = next(line for line in lines if line.startswith(self.ASCII_ID))
+        wide_row = next(line for line in lines if line.startswith(self.WIDE_ID))
+        return header, ascii_row, wide_row
+
     def test_date_column_lines_up_with_header(self):
-        for columns in (60, 80, 400):
+        for columns, (date_offset, wide_row) in self.EXPECTED.items():
             lines = self.run_at(columns)
-            header = next(line for line in lines if 'Date' in line)
-            rows = [line for line in lines if '2026-03-' in line]
-            self.assertEqual(len(rows), 2, lines)
-            for row in rows:
-                self.assertEqual(_column_offsets(row, '2026-03-'), _column_offsets(header, 'Date'),
-                                 f'{columns} columns:\n' + '\n'.join(lines))
+            msg = f'{columns} columns:\n' + '\n'.join(lines)
+            header, ascii_row, actual_wide_row = self.split_rows(lines)
+            self.assertEqual(header.index('Date'), date_offset, msg)
+            self.assertEqual(ascii_row.index('2026-03-05'), date_offset, msg)
+            self.assertEqual(actual_wide_row, wide_row, msg)
 
     def test_no_line_exceeds_terminal_width_minus_4(self):
         for columns in (80, 100, 120):
             lines = self.run_at(columns)
-            self.assertLessEqual(max(_display_width(line) for line in lines), columns - 4,
-                                 f'{columns} columns:\n' + '\n'.join(lines))
+            msg = f'{columns} columns:\n' + '\n'.join(lines)
+            # Every line but the wide-title row is ASCII, so len() is its width in cells
+            ascii_lines = [line for line in lines if not line.startswith(self.WIDE_ID)]
+            self.assertLessEqual(max(len(line) for line in ascii_lines), columns - 4, msg)
+            # The wide-title row takes as many cells as the header (see the class docstring)
+            self.assertEqual(self.split_rows(lines)[2], self.EXPECTED[columns][1], msg)
 
 
 if __name__ == '__main__':
