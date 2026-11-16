@@ -29,7 +29,7 @@ This file provides guidance to AI coding agents when working with code in this r
 brew install bats-core
 ```
 
-No build step required — it's a bash/Python CLI tool.
+Requires python3 (3.11+, standard library only, built with SQLite FTS5), bats-core and jq (jq and `rg` are used by `.claude/hooks/docs-drift.sh`, not by the CLI or `./run-tests`). No build step required — it's a bash/Python CLI tool.
 
 ## Architecture
 
@@ -111,5 +111,15 @@ Never bypass the skill — it catches README drift and other issues that ad-hoc 
 
 ## Directives
 
+Agents without the Claude skills must still follow these two. Claude Code agents: the `feature-dev-towit` skill has the detailed workflow.
+
 - **Plan first:** Before implementing any non-trivial change, write out your plan and pause for acceptance before touching code.
-- **Test-driven development:** Write failing tests before writing implementation code. Run tests to confirm they fail, implement, then confirm they pass. You do not need to ask permission before moving from failing tests to implementation.
+- **Test-driven development:** Write failing tests before implementation code, confirm they fail, implement, then confirm they pass. No need to ask permission to move on.
+
+## Claude tooling
+
+- `.claude/hooks/docs-drift.sh` (a `Stop` hook in `.claude/settings.json`) runs `tests/helpers/docs_consistency_test.py` when code or docs changed in the working tree.
+- `.claude/agents/security-reviewer.md` is a read-only reviewer; use it after touching db, ingest, index, forget, redact, config or subprocess code.
+- `feature-dev-towit` (`.claude/skills/`) is the skill for any code change; `release-towit` is the release overlay described above.
+- `.claude/settings.json` allows only `./run-tests` and `bin/towit help` without a prompt.
+- **Reviewing outside PRs:** changes to `.claude/`, `CLAUDE.md` and `AGENTS.md` run or steer Claude Code on a reviewer's machine, so `.github/CODEOWNERS` routes them to the maintainer. Read the diff first (`gh pr diff <number> -- .claude CLAUDE.md AGENTS.md`) before checking an outside PR out and starting Claude Code there.
