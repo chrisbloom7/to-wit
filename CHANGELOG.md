@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `towit search` and `towit list` tables no longer overflow the terminal width: Title, Keywords and Snippet shrink to fit, and Keywords is dropped on narrow terminals (the ID is never truncated). Column widths shift slightly where they were already shrunk.
+- `towit backfill` and `towit setup --full` no longer fail with an error when `~/.claude/projects` does not exist yet (a fresh Claude Code install); they print a note and exit 0. An explicit `--folder` that does not exist is still an error.
 
 ## [0.13.1] - 2026-11-15
 
