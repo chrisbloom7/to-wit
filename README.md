@@ -197,6 +197,29 @@ towit show aaaaaaaa-1111-2222-3333-444444444444 --around 1 --context 1
 
 `towit show <session-id>` prints the stored messages (`--around <msg> --context <n>` narrows it to the messages near a search hit, where `<msg>` is the Msg column of `towit search`; `--format json` prints an array of `seq`, `role`, `ts`, and `text`). `--role user|assistant` keeps only messages of that role (on its own, `towit show <id> --role user` is an outline of your prompts with their Msg numbers), and `--match TERM` keeps only messages containing the term as a literal substring, ignoring case and diacritics (so `--match migrat` finds "migration"; unlike `search`, which matches whole words). Repeat it (`--match a --match b`) to require every term in the same message; `%` and `_` are literal. With `--around`, the window is chosen first by message number and `--role`/`--match` then filter it, and the `>> ` marker appears only if that message itself passes. Msg numbers stay the original ones, in text and `--format json` alike. When nothing matches, `show` prints `No messages match the given filters.` to stderr and exits 1. Two quirks: under `--role user`, `[error]` rows (failed tool results are stored as user messages) can still appear, and under `--role assistant`, tool stubs stay because they sit inside assistant messages. It works after Claude Code has deleted the transcript. The text is archive content (including tool output and web content), so `show` strips terminal control sequences before printing it. The table output of `search` and `list` (titles, keywords, snippets, working directories) is sanitized the same way and kept on one line per row; `--format json` escapes non-ASCII characters and `--format csv` is printed as stored, so a cell can start with `=`, `+`, `-` or `@` (a spreadsheet runs it as a formula) or carry terminal escapes; review a CSV before opening it in a spreadsheet or printing it to a terminal. With no results `--format csv` prints nothing on stdout (no header row), while `--format json` prints `[]`.
 
+### More examples
+
+```shell
+# Search one repo (its worktrees too) and print a compact list: date, id, title
+towit search "stop hook" --repo to-wit --format json | jq -r '.[] | "\(.date)  \(.id)  \(.title)"'
+
+# Match any of several terms instead of all of them
+towit search redis timeout connection --or
+
+# An exact phrase, in your own prompts only (skips assistant replies and tool stubs)
+towit search "retry budget" --role user
+
+# Browse by topic or keyword instead of searching
+towit list --topic hooks
+towit list --keyword stop-hook --format json | jq -r '.[].id'
+
+# Every prompt you wrote in one session, with the Msg number to pass to `show --around`
+towit show <id> --role user --format json | jq -r '.[] | "\(.seq)\t\(.text | split("\n")[0])"'
+
+# Titles, summaries and keywords only: quick, and ignores message text
+towit search --only metadata --title stemming
+```
+
 ### Finding a prompt in a long session
 
 `towit search` ranks whole conversations and shows one representative message, which is often an assistant reply or a `[Bash]` stub rather than the prompt you remember. Restrict the match to your own messages, then narrow the session down:
@@ -215,7 +238,7 @@ Msg numbers are used throughout (never line numbers), and `towit show <id> --rol
 
 ## Claude Code skill
 
-The repo is also a Claude Code plugin marketplace with one plugin, `towit`, whose skill teaches Claude how to use the archive: search with `towit search`, read around a hit with `towit show --around`, fall back to `towit show --role user --match` when a search misses, and hand a session back to you with `towit resume`. Ask Claude something like "find the session where we fixed the Redis timeout" and it loads the skill on its own.
+The repo is also a Claude Code plugin marketplace with one plugin, `towit`, whose skill teaches Claude how to use the archive: search with `towit search`, read around a hit with `towit show --around`, fall back to `towit show --role user --match` when a search misses, and hand a session back to you with `towit resume`. Ask Claude something like "find the session where we fixed the Redis timeout" and it loads the skill on its own (see [Example prompts](#example-prompts)).
 
 ```bash
 towit setup --skill     # installs towit@to-wit, pinned to this version of towit
@@ -231,6 +254,20 @@ claude plugin install towit@to-wit
 `towit setup --skill` pins the plugin to the tag matching your installed version, so the skill never mentions a flag your towit lacks. After `brew upgrade towit` or `git pull`, run it again to repin; `towit doctor` warns when the pin and the CLI disagree. Replacing a pin removes and re-adds the `to-wit` marketplace (Claude Code uninstalls a marketplace's plugins when it is removed), and the command then reinstalls the plugin. `towit setup --full` does not install the plugin, and `towit implode` removes it.
 
 The skill is read-only guidance: it treats archived text as untrusted data and never runs `forget`, `prune` or `implode` unless you ask for that exact action. `towit setup --skill` runs `claude plugin ...` with the same scoped environment as indexing (see SECURITY.md) plus your ssh agent socket, proxy settings and CA bundle locations, which the marketplace's `git` clone may need. If the clone fails on your network, run the two `claude plugin` commands above by hand.
+
+### Example prompts
+
+Ask in plain language; Claude picks the commands. What you ask, and roughly what happens:
+
+| You ask | Claude typically runs |
+|---|---|
+| "Find the session where we fixed the Redis timeout" | `towit search redis timeout --format json`, then `towit show <id> --around <msg>` to read the hit in context |
+| "What did I originally ask for when we built the export command?" | `towit search --role user export`, then `towit show <id> --role user --match export` for your own prompts |
+| "Which of my sessions in this repo touched the release process?" | `towit search release --repo <repo> --format json` |
+| "Show me everything filed under the hooks topic" | `towit list --topic hooks --format json` |
+| "Resume the session where we debugged the Stop hook" | finds the id with `towit search`, then gives you `towit resume <id>` to run; it does not resume a session for you |
+
+Claude reports the session id, date, title and the message numbers it read so you can check them, and says so when nothing matched instead of answering from memory.
 
 ## Retention and removing data
 
