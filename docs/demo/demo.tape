@@ -1,7 +1,8 @@
 # README demo: search a past session, read the moment, resume it. Needs `vhs`; it runs this checkout's bin/towit.
 #
 #   python3 docs/demo/seed.py        # builds the throwaway home at /tmp/towit-demo
-#   vhs docs/demo/demo.tape          # run from the repo root; writes docs/demo/demo.gif
+#   vhs docs/demo/demo.tape          # run from the repo root; rewrites docs/demo/demo.gif (committed:
+#                                    re-render it whenever the CLI output it shows changes)
 #
 # Everything runs against synthetic sessions under /tmp/towit-demo; your own ~/.towit and
 # ~/.claude are never read. The session id below is derived by seed.py and stays stable.
