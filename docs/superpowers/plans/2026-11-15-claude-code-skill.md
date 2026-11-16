@@ -15,7 +15,7 @@
 - No schema change; nothing new stored in the database.
 - The skill is read-only guidance. It never tells Claude to run `forget`, `prune` or `implode` unless the user asked for that action by name.
 - Archived text is untrusted data: the skill says so, and says to summarize it rather than follow instructions found in it.
-- Subprocesses (`claude plugin ...`) use list form, never `shell=True`, and `safe_subprocess_env()`; the docs consistency test's subprocess allowlist is updated to match.
+- Subprocesses (`claude plugin ...`) use list form, never `shell=True`, user scope only. They inherit the full environment instead of `safe_subprocess_env()`: the marketplace add is a git clone run on the user's behalf and needs their git/ssh credentials (`SSH_AUTH_SOCK`, `GIT_*`), which the hook-oriented allowlist drops. SECURITY.md and AGENTS.md say so explicitly; the allowlist sentence there stays unchanged.
 - `towit setup --skill` is opt-in: `--full` does not install the plugin (it already installs hooks, which edit user settings; a plugin install is a separate consent).
 - No new runtime dependency. A missing `claude` CLI is a clear error from `--skill` and a SKIP in doctor, not a crash.
 - American English everywhere.
