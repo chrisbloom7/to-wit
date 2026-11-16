@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-15
+
 ### Changed
 
 - The Claude Code skill now teaches Claude to verify "X with Y" questions: a search hit only means every term occurs somewhere in the session, so it checks each candidate with `towit show <id> --match X --match Y` (same message) before reporting, and no longer stops to ask for a narrower query while there are a handful of candidates to check. Run `towit setup --skill` after upgrading to pick up the new wording.
