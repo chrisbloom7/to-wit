@@ -19,6 +19,16 @@ towit resume 350fa22f-10b7-48ff-ac9d-bd9f1081c23b
 ```
 
 
+## Why
+
+Claude Code eventually deletes old transcripts, and its own history has no way to answer "where did I decide that three weeks ago?" To Wit keeps what was said and makes it searchable:
+
+- **It outlives Claude Code's retention.** The archive is yours; `claude purge` and the retention sweep do not touch it (see [Retention and removing data](#retention-and-removing-data)).
+- **It stays local.** One SQLite file under `~/.towit`, no service and no account. The only calls out are to `claude -p` for indexing and `export --summarize` (indexing can be turned off with `[indexing] enabled = false`), plus the GitHub fetch if you install the skill.
+- **Secrets are redacted before storage.** Best effort and pattern based, not a guarantee; see [How it works](#how-it-works).
+- **It keeps itself current.** Hooks archive each session as it ends, so there is nothing to remember to run.
+- **Claude can search it too.** The optional [Claude Code skill](#claude-code-skill) lets Claude look up earlier sessions for you.
+
 ## Requirements
 
 - [Claude Code](https://www.anthropic.com/claude-code) (`brew install claude-code`)
