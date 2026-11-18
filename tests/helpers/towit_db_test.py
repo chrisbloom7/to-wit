@@ -2319,5 +2319,39 @@ class TestPorterStemming(unittest.TestCase):
         self.assertEqual(Database(path).search_archive(['remove'], scope='text'), [])
 
 
+class TestSearchToolStubPath(unittest.TestCase):
+    """A file name searches the paths recorded in tool stubs (who touched this file?)."""
+
+    def _archive(self, cid, repo, texts):
+        conv = {'id': cid, 'folder': '/f', 'cwd': repo, 'started_at': '2026-01-01T00:00:00Z',
+                'last_active': '2026-01-01T00:00:00Z', 'repo_key': repo, 'source_path': None}
+        self.db.archive_session(conv, [
+            {'role': 'user' if i % 2 == 0 else 'assistant', 'ts': None, 'text': t}
+            for i, t in enumerate(texts)])
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.db = Database(os.path.join(self.tmpdir, 't.db'))
+        self.db.create_schema()
+        self._archive('tooling', '/src/tools',
+                      ['tidy the shared rules', 'On it\n[Edit] /src/tools/CLAUDE.md'])
+        self._archive('other', '/src/app', ['fix the bug', 'Done\n[Edit] /src/app/app.py'])
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_file_name_finds_the_session_that_edited_it(self):
+        res = self.db.search_archive(['CLAUDE.md'], scope='text')
+        self.assertEqual([r['id'] for r in res], ['tooling'])
+        self.assertEqual(res[0]['seq'], 1)
+
+    def test_assistant_role_finds_it(self):
+        res = self.db.search_archive(['CLAUDE.md'], scope='text', role='assistant')
+        self.assertEqual([r['id'] for r in res], ['tooling'])
+
+    def test_repo_filter_narrows_to_one_repo(self):
+        self.assertEqual(self.db.search_archive(['CLAUDE.md'], scope='text', repo='app'), [])
+
+
 if __name__ == '__main__':
     unittest.main()
