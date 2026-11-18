@@ -317,7 +317,7 @@ Ask in plain language; Claude picks the commands. What you ask, and roughly what
 | "Does session `<id>` include a decision about switching databases?" | `towit show <id> --match database --match switch` for the messages with both words, then `towit show <id> --around <msg>` to read the surrounding turns. Claude says which messages it read and which it did not |
 | "Which of my sessions in this repo touched the release process?" | `towit search release --repo <repo> --format json` |
 | "Show me everything filed under the hooks topic" | `towit list --topic hooks --format json` |
-| "Which session last edited `CLAUDE.md`, and why?" | `towit search CLAUDE.md --format json` (tool stubs record edited paths, so the file name matches), then `towit show <id> --around <msg>`, then gives you `towit resume <id>` so you can ask that agent directly. A stub shows the file was touched, not what changed |
+| "Which session last edited `CLAUDE.md`, and why?" | `towit search CLAUDE.md --format json`, or `towit search 338 339` with the PR numbers from `git log` (tool stubs record edited paths, so the file name matches), then `towit show <id> --around <msg>`, then gives you `towit resume <id>` so you can ask that agent directly. A stub shows the file was touched, not what changed |
 | "Resume the session where we debugged the Stop hook" | finds the id with `towit search`, then gives you `towit resume <id>` to run; it does not resume a session for you |
 
 Claude reports the session id, date, title and the message numbers it read so you can check them, and says so when nothing matched instead of answering from memory.
