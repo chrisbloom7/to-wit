@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.4] - 2026-11-17
+
 ### Changed
 
-- The README and the Claude Code skill describe finding the session that edited a file (search its name; tool stubs record edited paths) and resuming it to ask the original agent about its reasoning.
+- The README and the Claude Code skill describe finding the session that edited a file (search its name, or the PR numbers from `git log`; tool stubs record edited paths) and resuming it to ask the original agent about its reasoning.
 
 ## [0.13.3] - 2026-11-16
 
