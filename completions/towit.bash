@@ -16,7 +16,7 @@ _towit_completions() {
 
     case "$subcommand" in
         setup) flags='--full --hook --skill --config' ;;
-        search) flags='--or --topic --all --summary --title --only --format --folder --repo --role' ;;
+        search) flags='--or --topic --all --summary --title --only --format --folder --repo --role --file' ;;
         list) flags='--format --folder --topic --keyword' ;;
         resume) flags='--force' ;;
         show) flags='--around --context --role --match --format' ;;

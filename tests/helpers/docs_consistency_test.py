@@ -333,6 +333,17 @@ class TestPlugin(DocTestCase):
         self.assertContains(_read('README.md'), 'review a peer agent',
                             "README Example prompts must cover reviewing a peer agent's work")
 
+    def test_readme_shows_how_to_find_the_session_behind_a_pr(self):
+        # The session that opened a PR reports its URL and title: find it by either, read it,
+        # then confirm with `show --match` and the PR itself
+        readme = _read('README.md')
+        self.assertMatches(readme, r'towit search https://github\.com/\S+/pull/\d+',
+                           "README Example prompts must show searching a PR URL")
+        self.assertMatches(readme, r'--match "pull/\d+"',
+                           "README must confirm a PR hit with `show --match \"pull/N\"`")
+        self.assertMatches(readme, r'gh pr view \d+',
+                           "README must confirm a PR hit against the PR itself with `gh pr view N`")
+
     def test_skill_guardrails(self):
         _, body = self._skill_parts()
         self.assertContains(body.lower(), 'untrusted', "SKILL.md lacks the untrusted-data warning")

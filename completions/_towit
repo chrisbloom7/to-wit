@@ -50,6 +50,7 @@ case "$state" in
                     '--folder[Filter by working directory]:directory:_files -/'
                     '--repo[Filter by repository]:repository:'
                     '--role[Filter messages by role]:role:(user assistant)'
+                    '--file[Find conversations that edited a file]:path:_files'
                 )
                 ;;
             list)

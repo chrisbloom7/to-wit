@@ -22,6 +22,11 @@
 #                                   --only metadata restores the keywords-only scope
 #                                 If all terms find nothing, retries matching any term
 #                                   (not with --or or --only metadata); notice on stderr
+#   search --file <path> [--format json|csv] [--folder <path>] [--repo <path|name>]
+#                                 Instead of terms: conversations where the assistant edited a file
+#                                   whose path contains <path> from a path component on (case-insensitive;
+#                                   matches Edit, Write and
+#                                   MultiEdit tool stubs, not prose that mentions the file); newest first
 #   list [--format json|csv] [--folder <path>] [--topic <name>] [--keyword <name>]
 #   resume <session-id> [--force] Resume a session in its original working directory
 #   show <session-id> [--around <msg>] [--context <n>] [--role user|assistant] [--match <term>]...
