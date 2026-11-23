@@ -649,7 +649,7 @@ class TestTowitSearchFile(unittest.TestCase):
         self.assertEqual([d['id'] for d in self._ids('--file', '/home/me/rules/')], ['agents-7'])
 
     def test_wildcards_are_literal(self):
-        self.assertEqual([d['id'] for d in self._ids('--file', '%')], ['wild-6'])
+        self.assertEqual(self._ids('--file', '%'), [])  # not a wildcard, and not at a component start
         self.assertEqual([d['id'] for d in self._ids('--file', 'Odd%_n')], ['wild-6'])
         self.assertEqual(self._ids('--file', 'Odd__n'), [])
 
