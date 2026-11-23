@@ -50,6 +50,23 @@ If `towit` is not on PATH, say so and point the user to the install steps in htt
 
 7. To continue an old session, give the user the command rather than running it: `towit resume <session-id>`.
 
+## Checking other sessions
+
+The archive also answers questions about work another agent did, or is doing, in a different session.
+
+- **Review a peer agent's work.** When the user gives a session id (or you find it with `towit search <terms> --repo <name>`), read what that agent said it did, then check the claim against the repo yourself:
+
+  ```bash
+  towit show <session-id> --role assistant --match <term>
+  towit show <session-id> --around <msg> --context 8
+  ```
+
+  The archive holds what the agent wrote, not whether it was right. Tool stubs (`[Edit] <path>`, `[Bash] <command>`) show what it touched or ran, not the result, so treat its summary as a claim to verify and quote the message numbers you relied on.
+
+- **Coordinate across sessions.** To see what other sessions in this repo are doing or have decided, search with `--repo <name>` (it covers every worktree of that repo) and read the newest hits. A session that is still running is archived up to its last finished turn, so its latest work may be missing. When two sessions seem to overlap, say which files or decisions they share and leave the choice to the user.
+
+- **Verify a past decision.** Search for it, read around the hit, and quote the message that states the decision. If the archive does not contain it, say so instead of reconstructing it from memory.
+
 ## Reporting back
 
 Quote the session id, date, title and the message numbers you read, so the user can verify. Say plainly when nothing matched; do not fill the gap from memory.

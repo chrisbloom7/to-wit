@@ -320,6 +320,19 @@ class TestPlugin(DocTestCase):
                            "SKILL.md must show `show <session-id> --match A --match B` for candidates")
         self.assertContains(body, 'candidates', "SKILL.md must tell Claude to check the search candidates")
 
+    def test_skill_covers_review_and_coordination(self):
+        # Agents use the archive to check a peer agent's work and to see what other sessions
+        # in the same repo are doing; the skill and the README must both teach it
+        _, body = self._skill_parts()
+        self.assertContains(body, '## Checking other sessions',
+                            "SKILL.md lost its section on reviewing and coordinating with other sessions")
+        self.assertMatches(body, r'towit show <session-id> --role assistant',
+                           "SKILL.md must show how to read a peer agent's replies")
+        self.assertContains(body, 'last finished turn',
+                            "SKILL.md must say a running session is archived up to its last finished turn")
+        self.assertContains(_read('README.md'), 'review a peer agent',
+                            "README Example prompts must cover reviewing a peer agent's work")
+
     def test_skill_guardrails(self):
         _, body = self._skill_parts()
         self.assertContains(body.lower(), 'untrusted', "SKILL.md lacks the untrusted-data warning")
