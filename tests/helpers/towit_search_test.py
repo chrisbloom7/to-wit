@@ -576,6 +576,116 @@ class TestTowitSearchArchive(unittest.TestCase):
         self.assertNotIn(self.NOTICE, r.stderr)
         self.assertIn('No conversations found', r.stderr)
 
+class TestTowitSearchFile(unittest.TestCase):
+    """`search --file PATH` finds sessions with an Edit, Write or MultiEdit stub for the path."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        self.db_path = os.path.join(self.tmpdir, 'test.db')
+        self.config_path = write_config(self.tmpdir, self.db_path)
+        db = Database(self.db_path)
+        db.create_schema()
+
+        def add(conv_id, day, repo, messages):
+            db.archive_session(
+                {'id': conv_id, 'folder': '/f', 'cwd': repo, 'started_at': f'2026-03-0{day}T00:00:00Z',
+                 'last_active': f'2026-03-0{day}T00:00:00Z', 'repo_key': repo, 'source_path': None},
+                [{'role': r, 'ts': None, 'text': t} for r, t in messages])
+
+        add('edit-1', 1, '/src/app', [
+            ('user', 'please update the docs'),
+            ('assistant', 'Updating the config.\n[Edit] /src/app/CLAUDE.md'),
+            ('user', 'and again'),
+            ('assistant', '[Write] /src/app/CLAUDE.md')])
+        add('read-2', 2, '/src/other', [
+            ('user', 'what does it say?'),
+            ('assistant', 'Reading it.\n[Read] /src/other/CLAUDE.md')])
+        add('prose-3', 3, '/src/other', [
+            ('user', 'notes'),
+            ('assistant', 'I mentioned CLAUDE.md in the notes but changed nothing.')])
+        add('multi-4', 4, '/src/app.wt', [
+            ('user', 'rework docs'),
+            ('assistant', '[MultiEdit] /src/app.wt/docs/CLAUDE.md')])
+        add('user-5', 5, '/src/other', [
+            ('user', '[Edit] /src/app/CLAUDE.md pasted by the user'),
+            ('assistant', 'ok')])
+        add('wild-6', 6, '/src/x', [
+            ('user', 'odd name'),
+            ('assistant', '[Edit] /src/x/Odd%_name.md')])
+        add('agents-7', 7, '/src/x', [
+            ('user', 'rules'),
+            ('assistant', '[Edit] /home/me/rules/parallel-agents.md')])
+        add('agents-8', 8, '/src/x', [
+            ('user', 'agents'),
+            ('assistant', '[Edit] /src/x/AGENTS.md')])
+
+    def _ids(self, *args):
+        import json
+        r = run_search(self.config_path, list(args) + ['--format', 'json'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_matches_only_edit_stubs_newest_first(self):
+        data = self._ids('--file', 'CLAUDE.md')
+        self.assertEqual([d['id'] for d in data], ['multi-4', 'edit-1'])
+
+    def test_result_points_at_the_latest_edit_message(self):
+        data = {d['id']: d for d in self._ids('--file', 'CLAUDE.md')}
+        self.assertEqual(data['edit-1']['seq'], 3)
+        self.assertEqual(data['edit-1']['snippet'], '[Write] /src/app/CLAUDE.md')
+        self.assertEqual(set(data['edit-1']), {'id', 'title', 'keywords', 'topics', 'cwd', 'date',
+                                               'seq', 'snippet', 'score'})
+
+    def test_path_is_a_case_insensitive_substring(self):
+        self.assertEqual([d['id'] for d in self._ids('--file', 'docs/claude.md')], ['multi-4'])
+        self.assertEqual([d['id'] for d in self._ids('--file', '/src/app/')], ['edit-1'])
+
+    def test_match_starts_at_a_path_component(self):
+        # `agents.md` must not hit `parallel-agents.md`; a name, a prefix and a directory still do
+        self.assertEqual([d['id'] for d in self._ids('--file', 'agents.md')], ['agents-8'])
+        self.assertEqual([d['id'] for d in self._ids('--file', 'parallel-agents')], ['agents-7'])
+        self.assertEqual([d['id'] for d in self._ids('--file', 'rules/')], ['agents-7'])
+        self.assertEqual([d['id'] for d in self._ids('--file', '/home/me/rules/')], ['agents-7'])
+
+    def test_wildcards_are_literal(self):
+        self.assertEqual([d['id'] for d in self._ids('--file', '%')], ['wild-6'])
+        self.assertEqual([d['id'] for d in self._ids('--file', 'Odd%_n')], ['wild-6'])
+        self.assertEqual(self._ids('--file', 'Odd__n'), [])
+
+    def test_repo_filter_covers_worktrees(self):
+        self.assertEqual([d['id'] for d in self._ids('--file', 'CLAUDE.md', '--repo', 'app')],
+                         ['multi-4', 'edit-1'])
+        self.assertEqual(self._ids('--file', 'CLAUDE.md', '--repo', 'other'), [])
+
+    def test_no_match_prints_nothing_found(self):
+        r = run_search(self.config_path, ['--file', 'nope.md'])
+        self.assertEqual(r.returncode, 0)
+        self.assertIn('No conversations found.', r.stderr)
+
+    def test_text_table_shows_msg_column(self):
+        r = run_search(self.config_path, ['--file', 'CLAUDE.md'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('edit-1', r.stdout)
+        self.assertIn('Msg', r.stdout)
+
+    def test_terms_with_file_is_an_error(self):
+        r = run_search(self.config_path, ['release', '--file', 'CLAUDE.md'])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('--file', r.stderr)
+
+    def test_file_with_role_or_only_is_an_error(self):
+        for extra in (['--role', 'assistant'], ['--only', 'text'], ['--only', 'metadata']):
+            r = run_search(self.config_path, ['--file', 'CLAUDE.md'] + extra)
+            self.assertEqual(r.returncode, 1, extra)
+            self.assertIn('--file', r.stderr)
+
+    def test_search_without_terms_or_file_is_an_error(self):
+        r = run_search(self.config_path, [])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('terms', r.stderr)
+
+
 class TestTowitSearchSanitizesTable(unittest.TestCase):
     """Archived text can carry terminal escapes and newlines; table output must not."""
     EVIL = 'x\x1b[31mred\x1b[0m \x1b]0;pwned\x07 y\rz\x9b2J'

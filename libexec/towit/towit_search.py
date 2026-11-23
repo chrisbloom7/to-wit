@@ -4,6 +4,7 @@ towit_search — Search cataloged Claude conversations.
 
 Usage:
     python3 towit_search.py [--or] [--topic] [--all | --summary | --title] [--only text|metadata] [--format json|csv] [--folder <path>] [--repo <path|name>] [--role user|assistant] <terms...>
+    python3 towit_search.py --file <path> [--format json|csv] [--folder <path>] [--repo <path|name>]
 """
 
 import argparse
@@ -170,8 +171,8 @@ def main():
                '"tests"). The Msg column of the results is the message number; pass it to '
                '`towit show --around` to read the surrounding messages.'
     )
-    parser.add_argument('terms', nargs='+', metavar='TERM',
-                        help='Search terms')
+    parser.add_argument('terms', nargs='*', metavar='TERM',
+                        help='Search terms (required unless --file is given)')
     parser.add_argument('--or', dest='or_', action='store_true',
                         help='Match any term instead of all terms (without it, a search that finds '
                              'nothing for all terms is retried with any term, unless --only metadata)')
@@ -201,7 +202,24 @@ def main():
                              'column and the snippet then come from those messages); `--role user` '
                              'skips assistant replies and the [Bash]-style tool stubs inside them. '
                              'Keyword, title, summary and topic matches are not affected')
+    parser.add_argument('--file', metavar='PATH',
+                        help='Instead of terms: list conversations where the assistant edited a file '
+                             'whose path contains PATH starting at a path component (case-insensitive; '
+                             'a name such as CLAUDE.md, a name prefix, a partial path or a directory). Matches the Edit, Write and '
+                             'MultiEdit tool stubs, not prose that mentions the file; newest first. '
+                             'Not combined with terms, --only or --role')
     args = parser.parse_args()
+
+    if args.file is not None:
+        if args.terms or args.role or args.only:
+            print("Error: --file replaces search terms and cannot be combined with terms, --only "
+                  "or --role.", file=sys.stderr)
+            sys.exit(1)
+        if not args.file.strip():
+            print("Error: --file needs a non-empty path.", file=sys.stderr)
+            sys.exit(1)
+    elif not args.terms:
+        parser.error('provide search terms or --file PATH')
 
     if args.role and args.only == 'metadata':
         print("Error: --role has no effect with --only metadata (it restricts message text only).",
@@ -216,7 +234,7 @@ def main():
     include_title = args.all or args.title
     mode = 'or' if args.or_ else 'and'
     scope = args.only or 'all'
-    show_text = scope != 'metadata'
+    show_text = scope != 'metadata'  # --file results carry text-hit fields too
     if scope == 'all':
         # Default scope: message text plus keywords, titles and summaries.
         include_title = include_summary = True
@@ -227,7 +245,11 @@ def main():
                                  include_summary=include_summary, include_title=include_title,
                                  limit=50 if show_text else None, role=args.role)
 
-    results = run(mode)
+    if args.file is not None:
+        results = db.search_file_edits(args.file, folder=args.folder, repo=args.repo, limit=50)
+        mode = None
+    else:
+        results = run(mode)
     if not results and mode == 'and' and show_text and len(args.terms) >= 2:
         # All-terms search found nothing: retry matching any term. The notice goes to
         # stderr for every format so stdout stays parseable.

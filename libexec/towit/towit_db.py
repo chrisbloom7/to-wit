@@ -191,6 +191,21 @@ class ConversationHit:
 
 
 ROLES = ('user', 'assistant')
+EDIT_STUB_TOOLS = ('Edit', 'Write', 'MultiEdit')  # tool stubs whose value is the edited file
+
+
+def _path_hit(value: str, needle: str) -> bool:
+    """True if lowercase `needle` occurs in the stub's file `value` at the start of a path
+    component (at the start, right after a '/', or because needle itself starts with '/'),
+    so `agents.md` does not match `parallel-agents.md` but `AGENTS.md`, `towit_db` and
+    `libexec/towit/` match as expected."""
+    value = value.lower()
+    at = value.find(needle)
+    while at != -1:
+        if at == 0 or needle[0] == '/' or value[at - 1] == '/':
+            return True
+        at = value.find(needle, at + 1)
+    return False
 
 
 def _check_role(role) -> None:
@@ -825,6 +840,62 @@ class Database:
                     snippet=snippets.get(hit.rowid, '') if hit else '',
                     score=hit.message_score if hit else None,
                 ))
+            self._fill_title_fallback(conn, results)
+            return results
+
+    def search_file_edits(self, path: str, folder: str = None, repo: str = None,
+                          limit: int = 50) -> list:
+        """Conversations where an assistant message holds an edit stub for `path`.
+
+        An edit stub is a line `[Edit] <file>`, `[Write] <file>` or `[MultiEdit] <file>` (the
+        one-line tool stubs the archive keeps, see towit_ingest). `path` is a literal,
+        case-insensitive piece of the stub's file that starts at a path component (so a bare
+        file name, a name prefix, a partial path and a directory work, and `agents.md` does not
+        match `parallel-agents.md`); prose that merely mentions the file never matches, nor do
+        `[Read]` stubs or user messages. NotebookEdit stubs carry no path, and a file changed
+        through Bash leaves no edit stub, so neither is found.
+
+        One result per conversation in the shape of search_archive (seq is the conversation's
+        latest matching message and snippet its stub line, score None), newest conversation
+        first, then id. limit caps the rows; limit=None means unlimited.
+
+        `path` is only ever bound (instr, never LIKE), so '%' and '_' are literal.
+        """
+        self.validate()
+        needle = path.lower()
+        if not needle:
+            return []
+        sql = ("SELECT m.conversation_id AS id, m.seq AS seq, m.text AS text FROM messages m")
+        if folder or repo:
+            sql += " JOIN conversations c ON c.id = m.conversation_id"
+        sql += " WHERE m.role = 'assistant' AND instr(lower(m.text), ?) > 0"
+        params = [needle]
+        if folder:
+            sql += " AND c.cwd = ?"
+            params.append(folder)
+        if repo:
+            frag, rparams = self._repo_filter(repo)
+            sql += " AND " + frag
+            params += rparams
+        sql += " ORDER BY m.conversation_id, m.seq"
+
+        prefixes = tuple(f'[{tool}] ' for tool in EDIT_STUB_TOOLS)
+        latest = {}  # conversation id -> (seq, stub line); rows arrive in seq order
+        with self.connect() as conn:
+            for row in conn.execute(sql, params):
+                for line in row['text'].split('\n'):
+                    if line.startswith(prefixes) and _path_hit(line.split('] ', 1)[1], needle):
+                        latest[row['id']] = (row['seq'], line.strip())
+                        break
+            if not latest:
+                return []
+            summary = self._get_summary_rows(conn, list(latest))
+            ids = sorted(latest)
+            ids.sort(key=lambda i: summary[i]['started_at'] or '', reverse=True)
+            if limit:
+                ids = ids[:limit]
+            results = [dict(summary[i], seq=latest[i][0], snippet=latest[i][1], score=None)
+                       for i in ids]
             self._fill_title_fallback(conn, results)
             return results
 

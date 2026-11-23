@@ -46,7 +46,7 @@ If `towit` is not on PATH, say so and point the user to the install steps in htt
 
 5. To browse instead of search: `towit list --topic <name>`, `towit list --keyword <name>` or `towit list --folder <path>`, each with `--format json`.
 
-6. To find who changed a file, search its name, or the PR numbers `git log` shows for it (`towit search 338 339`; the `#` is optional): tool stubs record edited paths (`[Edit] /path/CLAUDE.md`), so `towit search CLAUDE.md --repo myapp --format json` finds the sessions that touched it. A stub shows the file was touched, not what changed, so read around the hit before saying what a session did. When the user needs the reasoning behind a change, offer `towit resume <session-id>` (below): the original agent still has its context and can answer directly.
+6. To find who changed a file, use `towit search --file CLAUDE.md --repo myapp --format json`. It replaces the search terms and lists only sessions with an edit stub (`[Edit]`, `[Write]` or `[MultiEdit]`) for a path containing the text, newest first, so a session that only mentions or reads the file is not a hit. A file changed through `Bash` leaves no such stub; for those, search the PR numbers `git log` shows for it (`towit search 338 339`; the `#` is optional). A stub shows the file was touched, not what changed, so read around the hit before saying what a session did. When the user needs the reasoning behind a change, offer `towit resume <session-id>` (below): the original agent still has its context and can answer directly.
 
 7. To continue an old session, give the user the command rather than running it: `towit resume <session-id>`.
 
