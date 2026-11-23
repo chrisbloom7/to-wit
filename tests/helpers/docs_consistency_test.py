@@ -333,6 +333,11 @@ class TestPlugin(DocTestCase):
         self.assertContains(_read('README.md'), 'review a peer agent',
                             "README Example prompts must cover reviewing a peer agent's work")
 
+    def test_readme_shows_the_pr_url_search(self):
+        # a PR URL is one search term; the session that opened or reported the PR holds it
+        self.assertMatches(_read('README.md'), r'towit search https://github\.com/\S+/pull/\d+',
+                           "README Example prompts must show searching a PR URL")
+
     def test_skill_guardrails(self):
         _, body = self._skill_parts()
         self.assertContains(body.lower(), 'untrusted', "SKILL.md lacks the untrusted-data warning")
