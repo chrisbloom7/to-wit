@@ -616,6 +616,9 @@ class TestTowitSearchFile(unittest.TestCase):
         add('agents-7', 7, '/src/x', [
             ('user', 'rules'),
             ('assistant', '[Edit] /home/me/rules/parallel-agents.md')])
+        add('umlaut-9', 9, '/src/x', [
+            ('user', 'umlaut'),
+            ('assistant', '[Edit] /src/x/Ärger/Notes.md')])
         add('agents-8', 8, '/src/x', [
             ('user', 'agents'),
             ('assistant', '[Edit] /src/x/AGENTS.md')])
@@ -647,6 +650,24 @@ class TestTowitSearchFile(unittest.TestCase):
         self.assertEqual([d['id'] for d in self._ids('--file', 'parallel-agents')], ['agents-7'])
         self.assertEqual([d['id'] for d in self._ids('--file', 'rules/')], ['agents-7'])
         self.assertEqual([d['id'] for d in self._ids('--file', '/home/me/rules/')], ['agents-7'])
+
+    def test_non_ascii_case_is_folded(self):
+        self.assertEqual([d['id'] for d in self._ids('--file', 'ärger/')], ['umlaut-9'])
+        self.assertEqual([d['id'] for d in self._ids('--file', 'ÄRGER')], ['umlaut-9'])
+
+    def test_surrounding_whitespace_is_ignored(self):
+        self.assertEqual([d['id'] for d in self._ids('--file', '  docs/CLAUDE.md ')], ['multi-4'])
+
+    def test_blank_path_is_an_error(self):
+        r = run_search(self.config_path, ['--file', '   '])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn('--file', r.stderr)
+
+    def test_search_mode_flags_with_file_are_errors(self):
+        for flag in ('--or', '--topic', '--all', '--summary', '--title'):
+            r = run_search(self.config_path, ['--file', 'CLAUDE.md', flag])
+            self.assertEqual(r.returncode, 1, flag)
+            self.assertIn(flag, r.stderr)
 
     def test_wildcards_are_literal(self):
         self.assertEqual(self._ids('--file', '%'), [])  # not a wildcard, and not at a component start

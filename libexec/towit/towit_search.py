@@ -207,13 +207,17 @@ def main():
                              'whose path contains PATH starting at a path component (case-insensitive; '
                              'a name such as CLAUDE.md, a name prefix, a partial path or a directory). Matches the Edit, Write and '
                              'MultiEdit tool stubs, not prose that mentions the file; newest first. '
-                             'Not combined with terms, --only or --role')
+                             'Not combined with terms or other search options')
     args = parser.parse_args()
 
     if args.file is not None:
-        if args.terms or args.role or args.only:
-            print("Error: --file replaces search terms and cannot be combined with terms, --only "
-                  "or --role.", file=sys.stderr)
+        clash = [flag for flag, used in (('--or', args.or_), ('--topic', args.topic),
+                                         ('--all', args.all), ('--summary', args.summary),
+                                         ('--title', args.title), ('--only', args.only),
+                                         ('--role', args.role)) if used]
+        if args.terms or clash:
+            print("Error: --file replaces search terms and cannot be combined with terms"
+                  + (f" or {', '.join(clash)}" if clash else "") + ".", file=sys.stderr)
             sys.exit(1)
         if not args.file.strip():
             print("Error: --file needs a non-empty path.", file=sys.stderr)

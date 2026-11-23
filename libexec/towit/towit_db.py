@@ -852,7 +852,8 @@ class Database:
         case-insensitive piece of the stub's file that starts at a path component (so a bare
         file name, a name prefix, a partial path and a directory work, and `agents.md` does not
         match `parallel-agents.md`); prose that merely mentions the file never matches, nor do
-        `[Read]` stubs or user messages. NotebookEdit stubs carry no path, and a file changed
+        `[Read]` stubs or user messages. A stub is recognized by its line prefix, so assistant text
+        that quotes a line beginning `[Edit] ` would also match. NotebookEdit stubs carry no path, and a file changed
         through Bash leaves no edit stub, so neither is found.
 
         One result per conversation in the shape of search_archive (seq is the conversation's
@@ -862,14 +863,17 @@ class Database:
         `path` is only ever bound (instr, never LIKE), so '%' and '_' are literal.
         """
         self.validate()
-        needle = path.lower()
+        needle = path.strip().lower()
         if not needle:
             return []
         sql = ("SELECT m.conversation_id AS id, m.seq AS seq, m.text AS text FROM messages m")
         if folder or repo:
             sql += " JOIN conversations c ON c.id = m.conversation_id"
-        sql += " WHERE m.role = 'assistant' AND instr(lower(m.text), ?) > 0"
-        params = [needle]
+        # Narrow by stub prefix in SQL (FTS cannot serve this); the path is checked in Python,
+        # because SQLite's lower() folds ASCII only.
+        prefixes = tuple(f'[{tool}] ' for tool in EDIT_STUB_TOOLS)
+        sql += " WHERE m.role = 'assistant' AND (%s)" % ' OR '.join('instr(m.text, ?) > 0' for _ in prefixes)
+        params = list(prefixes)
         if folder:
             sql += " AND c.cwd = ?"
             params.append(folder)
@@ -879,7 +883,6 @@ class Database:
             params += rparams
         sql += " ORDER BY m.conversation_id, m.seq"
 
-        prefixes = tuple(f'[{tool}] ' for tool in EDIT_STUB_TOOLS)
         latest = {}  # conversation id -> (seq, stub line); rows arrive in seq order
         with self.connect() as conn:
             for row in conn.execute(sql, params):
