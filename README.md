@@ -35,6 +35,7 @@ I was constantly losing track of which conversations happened in which project, 
 - **It stays local and private.** No service and no account; see [Privacy and cost](#privacy-and-cost).
 - **It keeps itself current.** Hooks archive each session as it ends, so there is nothing to remember to run.
 - **Claude can search it too.** The optional [Claude Code skill](#claude-code-skill) lets Claude look up earlier sessions for you.
+- **Agents can check each other.** Claude can verify a past decision, review a peer agent's work and see what other sessions in a repo are doing, all from the archive (see [Example prompts](#example-prompts)).
 - **It recovers a past agent's reasoning.** Search a file name to find the session that edited it, then `towit resume` it and ask that agent directly; it still has the context it had then (see [Example prompts](#example-prompts)).
 
 ## Privacy and cost
@@ -318,6 +319,8 @@ Ask in plain language; Claude picks the commands. What you ask, and roughly what
 | "Which of my sessions in this repo touched the release process?" | `towit search release --repo <repo> --format json` |
 | "Show me everything filed under the hooks topic" | `towit list --topic hooks --format json` |
 | "Which session last edited `CLAUDE.md`, and why?" | `towit search CLAUDE.md --format json`, or `towit search 338 339` with the PR numbers from `git log` (tool stubs record edited paths, so the file name matches), then `towit show <id> --around <msg>`, then gives you `towit resume <id>` so you can ask that agent directly. A stub shows the file was touched, not what changed |
+| "Review a peer agent's work: session `<id>` says it finished the migration" | `towit show <id> --role assistant --match migration` for what that agent claimed, then `towit show <id> --around <msg>`; Claude checks the claim against the repo, because the archive shows what the agent wrote and touched, not whether it was right |
+| "Is another session already working on the importer?" | `towit search importer --repo <repo> --format json`, then `towit show <id> --around <msg>` on the newest hits. A running session is archived up to its last finished turn, so its latest work may be missing |
 | "Resume the session where we debugged the Stop hook" | finds the id with `towit search`, then gives you `towit resume <id>` to run; it does not resume a session for you |
 
 Claude reports the session id, date, title and the message numbers it read so you can check them, and says so when nothing matched instead of answering from memory.
