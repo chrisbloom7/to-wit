@@ -344,6 +344,13 @@ class TestPlugin(DocTestCase):
         self.assertMatches(readme, r'gh pr view \d+',
                            "README must confirm a PR hit against the PR itself with `gh pr view N`")
 
+    def test_skill_finds_the_session_behind_a_pr_url(self):
+        _, body = self._skill_parts()
+        self.assertMatches(body, r'towit search https://github\.com/\S+/pull/\d+',
+                           "SKILL.md must show searching a PR URL")
+        self.assertMatches(body, r'--match "pull/\d+"',
+                           "SKILL.md must confirm a PR hit with `show --match \"pull/N\"`")
+
     def test_skill_guardrails(self):
         _, body = self._skill_parts()
         self.assertContains(body.lower(), 'untrusted', "SKILL.md lacks the untrusted-data warning")

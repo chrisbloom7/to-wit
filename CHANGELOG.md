@@ -7,13 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-23
+
 ### Added
 
 - `towit search --file PATH` lists the conversations where the assistant edited a file whose path contains `PATH` (a name, a name prefix, a partial path or a directory, starting at a path component; case-insensitive, newest first). It matches only the `[Edit]`, `[Write]` and `[MultiEdit]` tool stubs, so prose that mentions the file and `[Read]` stubs are not hits. It replaces the search terms and works with `--repo`, `--folder` and `--format`. Closes #102.
 
 ### Changed
 
-- The README and the Claude Code skill describe using the archive to verify past decisions, review a peer agent's work and coordinate across sessions in the same repo.
+- The README and the Claude Code skill describe using the archive to verify past decisions, review a peer agent's work and coordinate across sessions in the same repo, and finding the session that opened a PR from its URL.
 
 ## [0.13.4] - 2026-11-17
 
