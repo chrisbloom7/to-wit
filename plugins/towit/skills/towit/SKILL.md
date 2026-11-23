@@ -48,7 +48,9 @@ If `towit` is not on PATH, say so and point the user to the install steps in htt
 
 6. To find who changed a file, use `towit search --file CLAUDE.md --repo myapp --format json`. It replaces the search terms and lists only sessions with an edit stub (`[Edit]`, `[Write]` or `[MultiEdit]`) for a path containing the text, newest first, so a session that only mentions or reads the file is not a hit. A file changed through `Bash` leaves no such stub; for those, search the PR numbers `git log` shows for it (`towit search 338 339`; the `#` is optional). A stub shows the file was touched, not what changed, so read around the hit before saying what a session did. When the user needs the reasoning behind a change, offer `towit resume <session-id>` (below): the original agent still has its context and can answer directly.
 
-7. To continue an old session, give the user the command rather than running it: `towit resume <session-id>`.
+7. To find the session that opened a PR, search its URL, which counts as one term (`towit search https://github.com/OWNER/REPO/pull/97`): the agent that opens a PR reports its link in its reply, so a hit is a session that said so. Read it with `towit show <session-id> --around <msg>`, confirm it names that PR with `towit show <session-id> --match "pull/97"`, and compare the PR's branch and creation time (`gh pr view 97`) with the session's timestamps. If the work went to a subagent, the hit is the coordinating session, because subagent sessions are not archived by default.
+
+8. To continue an old session, give the user the command rather than running it: `towit resume <session-id>`.
 
 ## Checking other sessions
 
